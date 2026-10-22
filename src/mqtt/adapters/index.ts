@@ -1,5 +1,6 @@
 import type { AdapterId } from '@/types/device';
 import { customJsonAdapter } from './customJson';
+import { haDiscoveryAdapter } from './haDiscovery';
 import { shellyAdapter } from './shelly';
 import { tasmotaAdapter } from './tasmota';
 import type { DeviceAdapter } from './types';
@@ -10,6 +11,7 @@ export const ADAPTERS: Record<AdapterId, DeviceAdapter> = {
   shelly: shellyAdapter,
   tasmota: tasmotaAdapter,
   'custom-json': customJsonAdapter,
+  'ha-discovery': haDiscoveryAdapter,
 };
 
 export function getAdapter(id: AdapterId): DeviceAdapter {

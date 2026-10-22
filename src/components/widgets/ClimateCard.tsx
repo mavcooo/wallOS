@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
-import { ROOM_LABELS } from '@/config/rooms.config';
+import { roomLabel } from '@/config/rooms.config';
 import { clamp, cn, formatTemp } from '@/lib/utils';
+import { useHomeStore } from '@/store/homeStore';
 import type {
   ClimateAction,
   ClimateDevice,
@@ -71,6 +72,7 @@ export function ClimateCard({
   className,
 }: ClimateCardProps) {
   const { state } = device;
+  const rooms = useHomeStore((store) => store.rooms);
   const [draft, setDraft] = useState(state.targetTemp);
   const [dragging, setDragging] = useState(false);
   const draggingRef = useRef(false);
@@ -142,7 +144,7 @@ export function ClimateCard({
             ) : null}
           </p>
           <p className="truncate text-[11px] text-fg-subtle">
-            {ROOM_LABELS[device.room]} · Umidità {state.humidity ?? '—'}%
+            {roomLabel(rooms, device.room)} · Umidità {state.humidity ?? '—'}%
           </p>
         </div>
         <span

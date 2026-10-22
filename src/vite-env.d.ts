@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly MQTT_PROTOCOL?: string;
   readonly MQTT_PATH?: string;
   readonly MQTT_BASE_TOPIC?: string;
+  readonly MQTT_DISCOVERY_PREFIXES?: string;
   readonly MQTT_USERNAME?: string;
   readonly MQTT_PASSWORD?: string;
 }

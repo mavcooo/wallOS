@@ -2,9 +2,11 @@ import {
   Activity,
   Droplets,
   Flame,
+  Gauge,
   Sun,
   Thermometer,
   Wind,
+  Zap,
   DoorOpen,
   type LucideIcon,
 } from 'lucide-react';
@@ -20,6 +22,8 @@ const ICONS: Record<SensorType, LucideIcon> = {
   motion: Activity,
   illuminance: Sun,
   smoke: Flame,
+  power: Zap,
+  energy: Gauge,
 };
 
 interface SensorTileProps {

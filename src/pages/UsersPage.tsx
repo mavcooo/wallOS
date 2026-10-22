@@ -1,7 +1,7 @@
 import { Check, Lock, ShieldCheck, UserRound } from 'lucide-react';
 
 import { ROLE_LABELS, type LocalUser } from '@/config/users.config';
-import { ROOM_LABELS } from '@/config/rooms.config';
+import { roomLabel } from '@/config/rooms.config';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -44,6 +44,7 @@ function RestrictionChips({ user }: { user: LocalUser }) {
 
 export function UsersPage() {
   const users = useHomeStore((state) => state.users);
+  const rooms = useHomeStore((state) => state.rooms);
   const activeUserId = useHomeStore((state) => state.ui.activeUserId);
   const setActiveUser = useHomeStore((state) => state.setActiveUser);
   const updateUser = useHomeStore((state) => state.updateUser);
@@ -106,7 +107,7 @@ export function UsersPage() {
                 key={room}
                 className="rounded-md border border-line bg-panel-2 px-2 py-0.5 text-[10px] text-fg-muted"
               >
-                {ROOM_LABELS[room]}
+                {roomLabel(rooms, room)}
               </span>
             ))}
             {current.allowedRooms === null ? (
@@ -205,7 +206,7 @@ export function UsersPage() {
                   <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
                     {user.allowedRooms === null
                       ? 'Tutte le stanze'
-                      : user.allowedRooms.map((room) => ROOM_LABELS[room]).join(' · ')}
+                      : user.allowedRooms.map((room) => roomLabel(rooms, room)).join(' · ')}
                     {' · '}
                     {user.lastAccess ?? 'mai'}
                   </p>

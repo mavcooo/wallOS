@@ -1,7 +1,6 @@
 import { Lightbulb, Power, RadioTower } from 'lucide-react';
 import type { ReactNode } from 'react';
 
-import { ROOMS, ROOM_LABELS } from '@/config/rooms.config';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { DeviceCard } from '@/components/widgets/DeviceCard';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -53,9 +52,11 @@ export function RoomsPage() {
   const { sendAction } = useMqttApi();
   const user = useCurrentUser();
 
+  // Stanze dinamiche: seed statico + aree scoperte via HA Discovery.
+  const allRooms = useHomeStore((state) => state.rooms);
   const rooms = user.allowedRooms
-    ? ROOMS.filter((candidate) => user.allowedRooms?.includes(candidate.id))
-    : ROOMS;
+    ? allRooms.filter((candidate) => user.allowedRooms?.includes(candidate.id))
+    : allRooms;
   const active = rooms.find((candidate) => candidate.id === room) ?? rooms[0];
 
   if (!active) {
@@ -78,7 +79,7 @@ export function RoomsPage() {
     if (lights.some((light) => light.protected)) {
       requestPin({
         title: 'Spegni luci stanza',
-        description: `Conferma lo spegnimento delle luci in ${ROOM_LABELS[active.id]}.`,
+        description: `Conferma lo spegnimento delle luci in ${active.label}.`,
         onConfirm: turnOffLights,
       });
       return;

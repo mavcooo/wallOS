@@ -15,6 +15,7 @@ const FACTORY_DEFAULTS = {
 } as const;
 
 const MQTT_KEYS = [
+  'MQTT_DISCOVERY_PREFIXES',
   'MQTT_HOST',
   'MQTT_PORT',
   'MQTT_PROTOCOL',
@@ -134,5 +135,31 @@ describe('DEFAULT_BROKER', () => {
     const { DEFAULT_BROKER } = await import('@/config/app.config');
 
     expect(DEFAULT_BROKER).toMatchObject({ host: '192.168.1.10', port: 9001, demoMode: true });
+  });
+
+  it('senza MQTT_DISCOVERY_PREFIXES ascolta il prefisso standard', async () => {
+    vi.resetModules();
+
+    const { DISCOVERY } = await import('@/config/app.config');
+
+    expect(DISCOVERY.prefixes).toEqual(['homeassistant']);
+  });
+
+  it('legge i prefissi di discovery da ambiente, ignorando voci vuote', async () => {
+    vi.resetModules();
+    vi.stubEnv('MQTT_DISCOVERY_PREFIXES', ' homeassistant , zigbee2mqtt ,, ');
+
+    const { DISCOVERY } = await import('@/config/app.config');
+
+    expect(DISCOVERY.prefixes).toEqual(['homeassistant', 'zigbee2mqtt']);
+  });
+
+  it('una variabile vuota ricade sul prefisso standard', async () => {
+    vi.resetModules();
+    vi.stubEnv('MQTT_DISCOVERY_PREFIXES', '');
+
+    const { DISCOVERY } = await import('@/config/app.config');
+
+    expect(DISCOVERY.prefixes).toEqual(['homeassistant']);
   });
 });

@@ -3,6 +3,12 @@ import { persist } from 'zustand/middleware';
 
 import { DEFAULT_BROKER, KIOSK_DEFAULTS, PIN_RULES } from '@/config/app.config';
 import { initialDevices } from '@/config/devices.config';
+import {
+  ROOMS,
+  UNASSIGNED_ROOM_ID,
+  roomIdFromLabel,
+  type RoomConfig,
+} from '@/config/rooms.config';
 import { DEFAULT_USERS, type LocalUser } from '@/config/users.config';
 import { DEFAULT_PIN, hashPin, verifyPinHash } from '@/lib/pin';
 import { normalizeTelemetrySettings } from '@/lib/telemetry';
@@ -41,6 +47,18 @@ export interface HomeState {
   toggleFavorite(deviceId: string): void;
   /** Tick del simulatore locale (solo modalità demo). */
   simulateTelemetry(): void;
+
+  // ── Stanze ───────────────────────────────────────────────────────────────
+  /** Stanze disponibili: seed statico + aree scoperte via HA Discovery. */
+  rooms: RoomConfig[];
+  /** Crea (o riusa, se l'etichetta coincide) la stanza di un'area HA. */
+  ensureRoom(label?: string): RoomId;
+
+  // ── Discovery Home Assistant ─────────────────────────────────────────────
+  /** Inserisce o aggiorna un device annunciato; la discovery vince sul seed. */
+  applyDiscoveryUpsert(device: Device): void;
+  /** Ritira l'entità: il widget sparisce, nessun orfano in UI. */
+  applyDiscoveryRemove(entityId: string): void;
 
   // ── Connessione ──────────────────────────────────────────────────────────
   connection: ConnectionMetrics;
@@ -105,6 +123,19 @@ function seedDevices(): DeviceMap {
   return Object.fromEntries(initialDevices.map((device) => [device.id, device]));
 }
 
+/** Il seed ha la precedenza per le stanze note; quelle scoperte si aggiungono. */
+function mergeRooms(
+  seed: readonly RoomConfig[],
+  saved?: readonly RoomConfig[],
+): RoomConfig[] {
+  const merged = [...seed];
+  for (const room of saved ?? []) {
+    if (!room?.id || !room.label) continue;
+    if (!merged.some((existing) => existing.id === room.id)) merged.push(room);
+  }
+  return merged;
+}
+
 /** Applica una patch solo se il discriminante coincide con il tipo di device. */
 function mergeDecoded(device: Device, decoded: DecodedState): Device {
   if (device.kind !== decoded.kind) return device;
@@ -138,13 +169,83 @@ function jitter(value: number, amplitude: number, min: number): number {
 
 type PersistedHome = Pick<
   HomeState,
-  'broker' | 'ui' | 'pinHash' | 'pinLength' | 'users' | 'telemetry'
->;
+  'broker' | 'ui' | 'pinHash' | 'pinLength' | 'users' | 'telemetry' | 'rooms'
+> & {
+  /** Solo i device scoperti: quelli statici tornano dal seed a ogni avvio. */
+  discovered: Device[];
+};
 
 export const useHomeStore = create<HomeState>()(
   persist(
     (set, get) => ({
       devices: seedDevices(),
+      rooms: [...ROOMS],
+
+      ensureRoom(label) {
+        const clean = label?.trim();
+        if (!clean) return UNASSIGNED_ROOM_ID;
+
+        const { rooms } = get();
+        const byLabel = rooms.find(
+          (room) => room.label.toLowerCase() === clean.toLowerCase(),
+        );
+        if (byLabel) return byLabel.id;
+
+        const id = roomIdFromLabel(clean);
+        if (rooms.some((room) => room.id === id)) return id;
+
+        set({
+          rooms: [
+            ...rooms,
+            {
+              id,
+              label: clean,
+              shortLabel: clean.length > 12 ? `${clean.slice(0, 11)}…` : clean,
+            },
+          ],
+        });
+        return id;
+      },
+
+      applyDiscoveryUpsert(device) {
+        const room = get().ensureRoom(device.discovery?.area);
+        set((state) => {
+          const existing = state.devices[device.id];
+          // Su un re-annuncio (retained all'avvio) i metadati si aggiornano ma
+          // stato, disponibilità e preferito già noti non vengono azzerati.
+          const runtime =
+            existing && existing.kind === device.kind
+              ? {
+                  favorite: existing.favorite,
+                  availability: existing.availability,
+                  lastSeen: existing.lastSeen,
+                  // I default dell'annuncio non devono cancellare lo stato già
+                  // ricevuto dal broker.
+                  state: { ...device.state, ...existing.state },
+                }
+              : { favorite: existing?.favorite ?? device.favorite };
+
+          return {
+            devices: {
+              ...state.devices,
+              [device.id]: { ...device, room, ...runtime } as Device,
+            },
+          };
+        });
+      },
+
+      applyDiscoveryRemove(entityId) {
+        set((state) => {
+          const ids = Object.values(state.devices)
+            .filter((device) => device.discovery?.entityId === entityId)
+            .map((device) => device.id);
+          if (ids.length === 0) return state;
+
+          const devices = { ...state.devices };
+          for (const id of ids) delete devices[id];
+          return { devices };
+        });
+      },
 
       applyDecoded(deviceId, decoded) {
         set((state) => {
@@ -410,7 +511,7 @@ export const useHomeStore = create<HomeState>()(
     }),
     {
       name: 'domus-kiosk-store',
-      version: 1,
+      version: 2,
       partialize: (state): PersistedHome => ({
         broker: state.broker,
         ui: { ...state.ui, screenDimmed: false },
@@ -418,10 +519,23 @@ export const useHomeStore = create<HomeState>()(
         pinLength: state.pinLength,
         users: state.users,
         telemetry: state.telemetry,
+        rooms: state.rooms,
+        // Cache dell'albero scoperto: i widget compaiono prima che il broker
+        // consegni i retained. I device statici tornano dal seed.
+        discovered: Object.values(state.devices).filter(
+          (device) => device.discovery !== undefined,
+        ),
       }),
+      // v1 non aveva stanze dinamiche né cache della discovery: il `merge`
+      // sotto tollera entrambi i campi mancanti, serve solo la nuova versione.
+      migrate: (persisted) => persisted as PersistedHome,
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedHome> | undefined;
         if (!saved) return current;
+        const discovered = (saved.discovered ?? []).filter(
+          (device): device is Device =>
+            typeof device?.id === 'string' && device.discovery !== undefined,
+        );
         return {
           ...current,
           broker: { ...current.broker, ...(saved.broker ?? {}) },
@@ -430,6 +544,18 @@ export const useHomeStore = create<HomeState>()(
           pinLength: saved.pinLength ?? current.pinLength,
           users: saved.users ?? current.users,
           telemetry: normalizeTelemetrySettings(saved.telemetry ?? current.telemetry),
+          rooms: mergeRooms(ROOMS, saved.rooms),
+          devices: {
+            ...current.devices,
+            ...Object.fromEntries(
+              discovered.map((device) => [
+                device.id,
+                // La disponibilità salvata è di una sessione fa: si riparte da
+                // `unknown` finché availability/stat non arrivano dal broker.
+                { ...device, availability: 'unknown' as const },
+              ]),
+            ),
+          },
         };
       },
     },

@@ -2,8 +2,12 @@
 import mqtt, { type IClientOptions, type MqttClient } from 'mqtt';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
-import { OFFLINE_QUEUE } from '@/config/app.config';
+import { DISCOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import { getAdapter } from '@/mqtt/adapters';
+import {
+  createHaDiscoveryBridge,
+  type HaDiscoveryBridge,
+} from '@/mqtt/discovery/haDiscoveryBridge';
 import { captureRollback, optimisticState } from '@/mqtt/optimistic';
 import {
   collapseKeyFor,
@@ -54,8 +58,19 @@ function logRaw(
   if (direction !== 'system') store.countMessage(direction);
 }
 
+/** I device scoperti usano topic assoluti decisi dall'annuncio HA. */
+function findDiscoveryDeviceByTopic(devices: Record<string, Device>, topic: string): Device | null {
+  for (const device of Object.values(devices)) {
+    if (!device.discovery) continue;
+    if (stateTopics(device).includes(topic)) return device;
+  }
+  return null;
+}
+
+/** I device statici vivono sotto l'eventuale `baseTopic`. */
 function findDeviceByTopic(devices: Record<string, Device>, topic: string): Device | null {
   for (const device of Object.values(devices)) {
+    if (device.discovery) continue;
     if (stateTopics(device).includes(topic)) return device;
   }
   return null;
@@ -210,24 +225,90 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       }, wait);
     }
 
+    const subscribedTopics = new Set<string>();
+
+    /** Un device scoperto dichiara topic assoluti; gli statici vivono sotto `baseTopic`. */
+    function wireTopic(device: Device, topic: string): string {
+      return device.discovery ? topic : base(topic);
+    }
+
+    /**
+     * Sottoscrive i topic mancanti: discovery, probe e canali di ogni device.
+     * Gira al connect e dopo ogni entità scoperta, così la sottoscrizione è
+     * immediata senza riaprire il socket.
+     */
     function subscribeAll(instance: MqttClient) {
-      const topics = new Set<string>([base(PROBE_TOPIC)]);
-      for (const device of Object.values(useHomeStore.getState().devices)) {
-        for (const topic of stateTopics(device)) topics.add(base(topic));
+      const desired = new Set<string>([base(PROBE_TOPIC)]);
+      for (const prefix of DISCOVERY.prefixes) {
+        // `<prefix>/<component>/<object_id>/config` e la variante con node_id.
+        desired.add(`${prefix}/+/+/config`);
+        desired.add(`${prefix}/+/+/+/config`);
       }
-      const list = [...topics];
-      instance.subscribe(list, { qos: 0 }, (error) => {
+      for (const device of Object.values(useHomeStore.getState().devices)) {
+        for (const topic of stateTopics(device)) desired.add(wireTopic(device, topic));
+      }
+
+      const missing = [...desired].filter((topic) => !subscribedTopics.has(topic));
+      if (missing.length === 0) return;
+      for (const topic of missing) subscribedTopics.add(topic);
+
+      instance.subscribe(missing, { qos: 0 }, (error) => {
         logRaw(
           'system',
           'subscribe',
-          error ? `Errore: ${error.message}` : `${list.length} topic attivi`,
+          error ? `Errore: ${error.message}` : `${missing.length} topic attivi`,
         );
       });
     }
 
+    /** Stato o availability di un device, decodificato dall'adapter giusto. */
+    function handleDeviceMessage(device: Device, topic: string, payload: string): void {
+      if (device.topics.availability === topic) {
+        setAvailability(device.id, payload.trim() === 'online' ? 'online' : 'offline');
+        return;
+      }
+
+      const availability = device.discovery?.availability.find(
+        (entry) => entry.topic === topic,
+      );
+      if (availability) {
+        const expected = availability.payloadAvailable ?? 'online';
+        setAvailability(device.id, payload.trim() === expected ? 'online' : 'offline');
+        return;
+      }
+
+      const decoded = getAdapter(device.adapter).decode({ device, topic, payload });
+      if (!decoded) return;
+      // Se lo `stat` conferma un comando in coda, il comando è già applicato.
+      reconcileQueuedCommands(device.id, decoded);
+      // Il buffer separa campi critici (flush immediato) da telemetria
+      // (coalescing + finestra configurabile).
+      buffer.push(device.id, decoded);
+    }
+
+    const discoveryBridge: HaDiscoveryBridge = createHaDiscoveryBridge({
+      prefixes: DISCOVERY.prefixes,
+      onUpsert: (device) => {
+        useHomeStore.getState().applyDiscoveryUpsert(device);
+        logRaw(
+          'system',
+          'discovery',
+          `+ ${device.name} · ${device.discovery?.configTopic ?? ''}`,
+        );
+        // I topic dell'entità appena scoperta vanno sottoscritti subito.
+        if (client?.connected) subscribeAll(client);
+      },
+      onRemove: (entityId) => {
+        useHomeStore.getState().applyDiscoveryRemove(entityId);
+        logRaw('system', 'discovery', `− ${entityId}`);
+      },
+    });
+
     function openSocket() {
       if (disposed) return;
       closeClient();
+      // Un socket nuovo riparte da zero con le sottoscrizioni.
+      subscribedTopics.clear();
       setStatus(attempts === 0 ? 'connecting' : 'reconnecting');
       logRaw('system', 'client', `Connessione a ${buildBrokerUrl(settings)}`);
 
@@ -283,6 +364,13 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       instance.on('message', (topic, payload, packet) => {
         if (disposed) return;
         const rawPayload = payload.toString();
+
+        // Annuncio Home Assistant: config nuova, aggiornata o ritirata ("").
+        if (discoveryBridge.matches(topic)) {
+          discoveryBridge.handleMessage(topic, rawPayload);
+          return;
+        }
+
         if (topic === base(PROBE_TOPIC)) {
           const sentAt = Number.parseInt(rawPayload, 10);
           if (Number.isFinite(sentAt)) {
@@ -291,28 +379,21 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
           return;
         }
 
+        const discovered = findDiscoveryDeviceByTopic(
+          useHomeStore.getState().devices,
+          topic,
+        );
+        if (discovered) {
+          logRaw('in', topic, rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
+          handleDeviceMessage(discovered, topic, rawPayload);
+          return;
+        }
+
         const localTopic = stripBaseTopic(settings, topic);
         const device = findDeviceByTopic(useHomeStore.getState().devices, localTopic);
         logRaw('in', localTopic, rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
         if (!device) return;
-
-        if (device.topics.availability === localTopic) {
-          setAvailability(device.id, rawPayload.trim() === 'online' ? 'online' : 'offline');
-          return;
-        }
-
-        const decoded = getAdapter(device.adapter).decode({
-          device,
-          topic: localTopic,
-          payload: rawPayload,
-        });
-        if (decoded) {
-          // Se lo `stat` conferma un comando in coda, il comando è già applicato.
-          reconcileQueuedCommands(device.id, decoded);
-          // Il buffer separa campi critici (flush immediato) da telemetria
-          // (coalescing + finestra configurabile).
-          buffer.push(device.id, decoded);
-        }
+        handleDeviceMessage(device, localTopic, rawPayload);
       });
 
       instance.on('close', () => {
@@ -396,6 +477,7 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
         bufferRef.current = null;
         buffer.dispose();
         detachQueueRuntime();
+        discoveryBridge.dispose();
         window.clearTimeout(startTimer);
         window.clearInterval(demoTimer);
       };
@@ -410,6 +492,7 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       bufferRef.current = null;
       // Flush finale: l'ultimo campione non va perso allo smontaggio.
       buffer.dispose();
+      discoveryBridge.dispose();
       window.clearTimeout(reconnectTimer);
       window.clearInterval(probeTimer);
       closeClient();

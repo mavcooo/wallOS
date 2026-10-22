@@ -1,7 +1,8 @@
 import { Lightbulb, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { ROOM_LABELS } from '@/config/rooms.config';
+import { roomLabel } from '@/config/rooms.config';
+import { useHomeStore } from '@/store/homeStore';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -31,6 +32,7 @@ export function LightCard({
   className,
 }: LightCardProps) {
   const { state, capabilities } = device;
+  const rooms = useHomeStore((store) => store.rooms);
   const [brightness, setBrightness] = useState(state.brightness);
 
   useEffect(() => {
@@ -65,7 +67,7 @@ export function LightCard({
               <SyncIndicator pending={pending} />
             </p>
             <p className="truncate text-[11px] text-fg-subtle">
-              {ROOM_LABELS[device.room]}
+              {roomLabel(rooms, device.room)}
               {active ? ` · ${brightness}%` : ' · spenta'}
             </p>
           </div>

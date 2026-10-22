@@ -6,12 +6,80 @@
  * La traduzione da/verso i topic MQTT vive esclusivamente in `src/mqtt/adapters`.
  */
 
-export type RoomId = 'living' | 'kitchen' | 'bedroom' | 'study' | 'bath' | 'outdoor';
+/**
+ * Le stanze non sono più un'unione chiusa: `devices.config.ts` ne fornisce un
+ * seed e la discovery Home Assistant può crearne di nuove a runtime
+ * (`homeStore.rooms`, con `ensureRoom`).
+ */
+export type RoomId = string;
 
 export type DeviceKind = 'light' | 'climate' | 'power' | 'media' | 'sensor';
 
 /** Identificativo dell'adapter di parsing/encoding associato al device. */
-export type AdapterId = 'zigbee2mqtt' | 'shelly' | 'tasmota' | 'custom-json';
+export type AdapterId = 'zigbee2mqtt' | 'shelly' | 'tasmota' | 'custom-json' | 'ha-discovery';
+
+/** Componenti Home Assistant MQTT Discovery supportati dal bridge. */
+export type HaComponent = 'light' | 'switch' | 'sensor' | 'binary_sensor' | 'climate';
+
+/** Campi dello stato interno indirizzabili da un canale di discovery. */
+export type DiscoveryField =
+  | 'on'
+  | 'brightness'
+  | 'colorTemp'
+  | 'value'
+  | 'mode'
+  | 'targetTemp'
+  | 'currentTemp';
+
+/** Canale di stato: un topic che porta il valore di un campo normalizzato. */
+export interface DiscoveryStateChannel {
+  topic: string;
+  field: DiscoveryField;
+  /** Come interpretare il payload: booleano, numero, stringa, 0-255 → %, mired → K. */
+  kind: 'boolean' | 'number' | 'text' | 'brightness' | 'mired';
+  /** Subset Jinja supportato: `{{ value_json.temperature }}`, `{{ value }}`. */
+  template?: string;
+  payloadOn?: string;
+  payloadOff?: string;
+  /** Fondo scala della luminosità dichiarato dal firmware (default 255). */
+  scale?: number;
+}
+
+/** Canale di comando: topic su cui pubblicare il valore di un campo. */
+export interface DiscoveryCommandChannel {
+  topic: string;
+  field: DiscoveryField;
+  kind: 'raw' | 'brightness' | 'mired';
+  payloadOn?: string;
+  payloadOff?: string;
+  scale?: number;
+}
+
+export interface DiscoveryAvailability {
+  topic: string;
+  payloadAvailable?: string;
+  payloadNotAvailable?: string;
+}
+
+/**
+ * Metadati dell'annuncio Home Assistant che ha generato il device: servono
+ * all'adapter `ha-discovery` per decodificare i singoli topic e alla rimozione
+ * per eliminare l'entità giusta.
+ */
+export interface DeviceDiscovery {
+  /** Identità stabile dell'entità: `ha:<component>:<object_id>`. */
+  entityId: string;
+  /** `unique_id` dichiarato dall'annuncio, quando presente. */
+  uniqueId?: string;
+  component: HaComponent;
+  /** Topic di discovery: base di update e deletion. */
+  configTopic: string;
+  /** `device.suggested_area` grezza: lo store la traduce in una stanza. */
+  area?: string;
+  state: DiscoveryStateChannel[];
+  commands: DiscoveryCommandChannel[];
+  availability: DiscoveryAvailability[];
+}
 
 export type DeviceAvailability = 'online' | 'offline' | 'unknown';
 
@@ -25,7 +93,9 @@ export type SensorType =
   | 'contact'
   | 'motion'
   | 'illuminance'
-  | 'smoke';
+  | 'smoke'
+  | 'power'
+  | 'energy';
 
 /** Topic MQTT dichiarati in `devices.config.ts`. */
 export interface DeviceTopics {
@@ -53,6 +123,8 @@ interface DeviceBase {
   favorite: boolean;
   /** Se true, i comandi richiedono PIN (tapparelle cancello, allarme, ...). */
   protected: boolean;
+  /** Presente solo sui device scoperti via Home Assistant MQTT Discovery. */
+  discovery?: DeviceDiscovery;
 }
 
 export interface LightState {

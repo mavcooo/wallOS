@@ -1,6 +1,6 @@
 import { MoonStar } from 'lucide-react';
 
-import { ROOM_LABELS } from '@/config/rooms.config';
+import { roomLabel } from '@/config/rooms.config';
 import { useHomeStore, type ViewId } from '@/store/homeStore';
 import { Clock } from './Clock';
 import { ConnectionBadge } from './ConnectionBadge';
@@ -16,9 +16,10 @@ const TITLES: Record<ViewId, { title: string; subtitle: string }> = {
 export function Header({ onStandby }: { onStandby: () => void }) {
   const view = useHomeStore((state) => state.ui.view);
   const room = useHomeStore((state) => state.ui.room);
+  const rooms = useHomeStore((state) => state.rooms);
   const setView = useHomeStore((state) => state.setView);
   const meta = TITLES[view];
-  const subtitle = view === 'rooms' ? `Ambiente · ${ROOM_LABELS[room]}` : meta.subtitle;
+  const subtitle = view === 'rooms' ? `Ambiente · ${roomLabel(rooms, room)}` : meta.subtitle;
 
   return (
     <header className="flex h-20 shrink-0 items-center justify-between gap-3 border-b border-line bg-panel/40 px-4 lg:px-6">

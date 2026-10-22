@@ -20,8 +20,15 @@ export function buildBrokerUrl(settings: BrokerSettings): string {
   return `${settings.protocol}://${host}:${settings.port}${normalizedPath}`;
 }
 
+/**
+ * Topic da sottoscrivere per un device: quelli dichiarati nel seed più, per le
+ * entità scoperte, tutti i canali di stato e di availability dell'annuncio.
+ */
 export function stateTopics(device: Device): string[] {
-  return device.topics.availability
-    ? [device.topics.state, device.topics.availability]
-    : [device.topics.state];
+  const topics = new Set<string>();
+  if (device.topics.state) topics.add(device.topics.state);
+  if (device.topics.availability) topics.add(device.topics.availability);
+  for (const channel of device.discovery?.state ?? []) topics.add(channel.topic);
+  for (const entry of device.discovery?.availability ?? []) topics.add(entry.topic);
+  return [...topics];
 }

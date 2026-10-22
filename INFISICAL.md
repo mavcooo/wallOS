@@ -43,6 +43,8 @@ stessi elencati in `.env.example` (valore vuoto o placeholder, nessun segreto):
 - `MQTT_PROTOCOL`
 - `MQTT_PATH`
 - `MQTT_BASE_TOPIC`
+- `MQTT_DISCOVERY_PREFIXES` (prefissi Home Assistant Discovery, separati da
+  virgola; default `homeassistant`)
 - `MQTT_USERNAME`
 - `MQTT_PASSWORD`
 

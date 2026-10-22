@@ -7,7 +7,6 @@ import {
 } from 'lucide-react';
 
 import { SCENARIOS } from '@/config/scenarios.config';
-import { ROOMS } from '@/config/rooms.config';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useHomeStore } from '@/store/homeStore';
 import { cn, formatTemp, formatWatts } from '@/lib/utils';
@@ -30,6 +29,7 @@ function averageTemperature(devices: Device[]): number | null {
 
 export function OverviewPage() {
   const devices = useHomeStore((state) => state.devices);
+  const rooms = useHomeStore((state) => state.rooms);
   const setRoom = useHomeStore((state) => state.setRoom);
   const setView = useHomeStore((state) => state.setView);
   const { sendAction } = useMqttApi();
@@ -122,7 +122,7 @@ export function OverviewPage() {
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-          {ROOMS.map((room) => {
+          {rooms.map((room) => {
             const inRoom = all.filter((device) => device.room === room.id);
             const on = inRoom.filter(
               (device) => device.kind === 'light' && device.state.on,

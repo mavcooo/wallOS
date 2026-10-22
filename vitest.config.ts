@@ -12,6 +12,8 @@ export default mergeConfig(
       // coda/toast e, all'occorrenza, il DOM per i test dei componenti React.
       environment: 'jsdom',
       include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+      // matcher di jest-dom + cleanup automatico di React Testing Library
+      setupFiles: ['src/test/setup.ts'],
     },
   }),
 );

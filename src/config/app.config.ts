@@ -92,6 +92,23 @@ export const KIOSK_DEFAULTS = {
   clock24h: true,
 } as const;
 
+/**
+ * Home Assistant MQTT Discovery: prefissi ascoltati e finestra di debounce.
+ * Il prefisso standard è `homeassistant`; installazioni che annunciano altrove
+ * (es. `zigbee2mqtt`) si configurano con `MQTT_DISCOVERY_PREFIXES=a,b`.
+ */
+const DISCOVERY_PREFIXES = (import.meta.env.MQTT_DISCOVERY_PREFIXES ?? '')
+  .split(',')
+  .map((prefix) => prefix.trim())
+  .filter((prefix) => prefix.length > 0);
+
+export const DISCOVERY = {
+  /** Variabile vuota (come in `.env.example`) = prefisso standard. */
+  prefixes: DISCOVERY_PREFIXES.length > 0 ? DISCOVERY_PREFIXES : ['homeassistant'],
+  /** All'avvio il broker consegna i retained in raffica: si registra una volta. */
+  flushDelayMs: 250,
+} as const;
+
 /** Default del buffer telemetria MQTT (modificabili a runtime dallo store). */
 export const TELEMETRY_DEFAULTS: TelemetrySettings = {
   throttleMs: 1_000,

@@ -32,6 +32,21 @@ In alternativa i valori iniziali del broker arrivano dalle variabili d'ambiente
 `MQTT_*` (elenco e precedenza in `.env.example` / `INFISICAL.md`): se almeno una
 è impostata l'app parte con la modalità demo spenta.
 
+### Discovery Home Assistant (opzionale)
+
+Fuori dalla modalità demo il kiosk si sottoscrive a `homeassistant/+/+/config` e
+`homeassistant/+/+/+/config` (prefissi configurabili con
+`MQTT_DISCOVERY_PREFIXES=homeassistant,zigbee2mqtt`). Ogni annuncio diventa un
+widget: `light`, `switch`, `binary_sensor`, `sensor` e `climate` sono mappati sul
+modello interno, `device.suggested_area` crea la stanza e i topic di stato e di
+availability vengono sottoscritti subito.
+
+- `devices.config.ts` resta il seed statico: le entità scoperte hanno id
+  `ha:<component>:<object_id>` e non sovrascrivono i device del seed.
+- Un annuncio con payload vuoto ritira l'entità: il widget sparisce subito.
+- I device scoperti restano nella cache del persist: al riavvio i widget ci sono
+  già, con disponibilità `unknown` finché il broker non risponde.
+
 ---
 
 ## 2. Struttura del progetto
@@ -64,7 +79,12 @@ domus-kiosk/
 │   │   │   ├── shelly.ts           # Gen2 status/RPC
 │   │   │   ├── tasmota.ts          # POWER/Dimmer/Setpoint + ENERGY
 │   │   │   ├── customJson.ts       # fieldMap a path dot-notation
+│   │   │   ├── haDiscovery.ts      # canali Home Assistant Discovery
 │   │   │   └── index.ts            # registry adapter
+│   │   ├── discovery/
+│   │   │   ├── types.ts            # payload HA + abbreviazioni ufficiali
+│   │   │   ├── normalize.ts        # annuncio → Device interno + stanza
+│   │   │   └── haDiscoveryBridge.ts # debounce, upsert, deletion
 │   │   ├── topics.ts               # baseTopic, URL broker, subscription list
 │   │   ├── optimistic.ts           # patch locale immediata post-publish
 │   │   └── MqttProvider.tsx        # una sola istanza API per l'app
