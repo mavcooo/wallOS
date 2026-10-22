@@ -1,0 +1,93 @@
+import type { Scenario } from '@/types/device';
+
+export const SCENARIOS: readonly Scenario[] = [
+  {
+    id: 'cinema',
+    label: 'Cinema',
+    description: 'Luci soffuse, TV accesa',
+    icon: 'clapperboard',
+    protected: false,
+    steps: [
+      { deviceId: 'light-living-main', action: { type: 'brightness', brightness: 12 } },
+      {
+        deviceId: 'light-living-ambient',
+        action: { type: 'brightness', brightness: 22 },
+        delayMs: 60,
+      },
+      {
+        deviceId: 'light-living-ambient',
+        action: { type: 'colorTemp', kelvin: 2300 },
+        delayMs: 80,
+      },
+      { deviceId: 'media-living-tv', action: { type: 'power', on: true }, delayMs: 120 },
+      { deviceId: 'media-living-tv', action: { type: 'source', source: 'HDMI 1' }, delayMs: 160 },
+      { deviceId: 'media-living-tv', action: { type: 'volume', volume: 35 }, delayMs: 180 },
+      { deviceId: 'climate-living', action: { type: 'targetTemp', targetTemp: 22 }, delayMs: 200 },
+    ],
+  },
+  {
+    id: 'relax',
+    label: 'Relax',
+    description: 'Luce calda al 35%',
+    icon: 'spa',
+    protected: false,
+    steps: [
+      { deviceId: 'light-living-main', action: { type: 'brightness', brightness: 35 } },
+      {
+        deviceId: 'light-living-main',
+        action: { type: 'colorTemp', kelvin: 2700 },
+        delayMs: 60,
+      },
+      {
+        deviceId: 'light-living-ambient',
+        action: { type: 'colorTemp', kelvin: 2200 },
+        delayMs: 80,
+      },
+      { deviceId: 'media-living-tv', action: { type: 'power', on: false }, delayMs: 120 },
+      { deviceId: 'climate-living', action: { type: 'targetTemp', targetTemp: 23 }, delayMs: 160 },
+    ],
+  },
+  {
+    id: 'goodnight',
+    label: 'Buonanotte',
+    description: 'Spegne tutto, camera al minimo',
+    icon: 'moon',
+    protected: false,
+    steps: [
+      { deviceId: 'light-living-main', action: { type: 'power', on: false } },
+      { deviceId: 'light-living-ambient', action: { type: 'power', on: false }, delayMs: 40 },
+      { deviceId: 'light-kitchen-strip', action: { type: 'power', on: false }, delayMs: 80 },
+      { deviceId: 'light-study', action: { type: 'power', on: false }, delayMs: 120 },
+      { deviceId: 'light-outdoor', action: { type: 'power', on: false }, delayMs: 160 },
+      { deviceId: 'light-bath', action: { type: 'power', on: false }, delayMs: 200 },
+      { deviceId: 'media-living-tv', action: { type: 'power', on: false }, delayMs: 240 },
+      { deviceId: 'light-bedroom', action: { type: 'brightness', brightness: 8 }, delayMs: 280 },
+      {
+        deviceId: 'climate-bedroom',
+        action: { type: 'targetTemp', targetTemp: 19 },
+        delayMs: 320,
+      },
+      { deviceId: 'climate-living', action: { type: 'climateMode', mode: 'off' }, delayMs: 360 },
+    ],
+  },
+  {
+    id: 'away',
+    label: 'Esci',
+    description: 'Spegne luci e climatizzazione',
+    icon: 'door-open',
+    protected: true,
+    steps: [
+      { deviceId: 'light-living-main', action: { type: 'power', on: false } },
+      { deviceId: 'light-living-ambient', action: { type: 'power', on: false }, delayMs: 40 },
+      { deviceId: 'light-kitchen-strip', action: { type: 'power', on: false }, delayMs: 80 },
+      { deviceId: 'light-bedroom', action: { type: 'power', on: false }, delayMs: 120 },
+      { deviceId: 'light-study', action: { type: 'power', on: false }, delayMs: 160 },
+      { deviceId: 'light-bath', action: { type: 'power', on: false }, delayMs: 200 },
+      { deviceId: 'light-outdoor', action: { type: 'power', on: false }, delayMs: 240 },
+      { deviceId: 'media-living-tv', action: { type: 'power', on: false }, delayMs: 280 },
+      { deviceId: 'climate-living', action: { type: 'climateMode', mode: 'off' }, delayMs: 320 },
+      { deviceId: 'climate-bedroom', action: { type: 'climateMode', mode: 'off' }, delayMs: 360 },
+      { deviceId: 'power-kitchen-oven', action: { type: 'power', on: false }, delayMs: 400 },
+    ],
+  },
+];
