@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { DEFAULT_BROKER, KIOSK_DEFAULTS, PIN_RULES } from '@/config/app.config';
+import { DEFAULT_BROKER, KIOSK_DEFAULTS } from '@/config/app.config';
 import { initialDevices } from '@/config/devices.config';
 import {
   ROOMS,
@@ -9,9 +9,7 @@ import {
   roomIdFromLabel,
   type RoomConfig,
 } from '@/config/rooms.config';
-import { DEFAULT_USERS, type LocalUser } from '@/config/users.config';
 import { normalizeBurnInSettings } from '@/lib/burnIn';
-import { DEFAULT_PIN, hashPin, verifyPinHash } from '@/lib/pin';
 import type { BurnInSettings } from '@/types/kiosk';
 import { normalizeTelemetrySettings } from '@/lib/telemetry';
 import type { DecodedState, Device, DeviceAvailability, RoomId } from '@/types/device';
@@ -26,8 +24,6 @@ export interface UiState {
   room: RoomId;
   dimmerTimeoutMs: number;
   screenDimmed: boolean;
-  activeUserId: string;
-  kioskProfileId: string;
   lastActionAt: number;
 }
 
@@ -87,21 +83,7 @@ export interface HomeState {
   setRoom(room: RoomId): void;
   setDimmerTimeout(ms: number): void;
   setScreenDimmed(dimmed: boolean): void;
-  setActiveUser(userId: string): void;
   touchActivity(): void;
-
-  // ── PIN / utenti ─────────────────────────────────────────────────────────
-  pinHash: string | null;
-  pinLength: 4 | 6;
-  pinAttempts: number;
-  pinLockedUntil: number;
-  ensurePin(): Promise<void>;
-  verifyPin(pin: string): Promise<boolean>;
-  setPin(pin: string): Promise<void>;
-  registerPinFailure(): { attempts: number; lockedUntil: number };
-  resetPinFailures(): void;
-  users: LocalUser[];
-  updateUser(userId: string, patch: Partial<LocalUser>): void;
 }
 
 const initialConnection: ConnectionMetrics = {
@@ -119,8 +101,6 @@ const initialUi: UiState = {
   room: 'living',
   dimmerTimeoutMs: KIOSK_DEFAULTS.dimmerTimeoutMs,
   screenDimmed: false,
-  activeUserId: 'user-panel',
-  kioskProfileId: 'user-panel',
   lastActionAt: Date.now(),
 };
 
@@ -174,7 +154,7 @@ function jitter(value: number, amplitude: number, min: number): number {
 
 type PersistedHome = Pick<
   HomeState,
-  'broker' | 'ui' | 'pinHash' | 'pinLength' | 'users' | 'telemetry' | 'rooms' | 'burnIn'
+  'broker' | 'ui' | 'telemetry' | 'rooms' | 'burnIn'
 > & {
   /** Solo i device scoperti: quelli statici tornano dal seed a ogni avvio. */
   discovered: Device[];
@@ -471,65 +451,16 @@ export const useHomeStore = create<HomeState>()(
       setScreenDimmed(screenDimmed) {
         set((state) => ({ ui: { ...state.ui, screenDimmed } }));
       },
-      setActiveUser(activeUserId) {
-        set((state) => ({ ui: { ...state.ui, activeUserId } }));
-      },
       touchActivity() {
         set((state) => ({ ui: { ...state.ui, lastActionAt: Date.now() } }));
-      },
-
-      pinHash: null,
-      pinLength: 4,
-      pinAttempts: 0,
-      pinLockedUntil: 0,
-      async ensurePin() {
-        if (get().pinHash) return;
-        set({ pinHash: await hashPin(DEFAULT_PIN), pinLength: DEFAULT_PIN.length === 6 ? 6 : 4 });
-      },
-      async verifyPin(pin) {
-        if (!get().pinHash) await get().ensurePin();
-        const hash = get().pinHash;
-        return hash ? verifyPinHash(pin, hash) : false;
-      },
-      async setPin(pin) {
-        set({
-          pinHash: await hashPin(pin),
-          pinLength: pin.length === 6 ? 6 : 4,
-          pinAttempts: 0,
-          pinLockedUntil: 0,
-        });
-      },
-      registerPinFailure() {
-        const attempts = get().pinAttempts + 1;
-        const lockedUntil =
-          attempts >= PIN_RULES.maxAttempts
-            ? Date.now() + PIN_RULES.lockoutMs
-            : get().pinLockedUntil;
-        set({ pinAttempts: attempts, pinLockedUntil: lockedUntil });
-        return { attempts, lockedUntil };
-      },
-      resetPinFailures() {
-        set({ pinAttempts: 0, pinLockedUntil: 0 });
-      },
-
-      users: [...DEFAULT_USERS],
-      updateUser(userId, patch) {
-        set((state) => ({
-          users: state.users.map((user) =>
-            user.id === userId ? { ...user, ...patch } : user,
-          ),
-        }));
       },
     }),
     {
       name: 'domus-kiosk-store',
-      version: 2,
+      version: 3,
       partialize: (state): PersistedHome => ({
         broker: state.broker,
         ui: { ...state.ui, screenDimmed: false },
-        pinHash: state.pinHash,
-        pinLength: state.pinLength,
-        users: state.users,
         telemetry: state.telemetry,
         burnIn: state.burnIn,
         rooms: state.rooms,
@@ -539,8 +470,8 @@ export const useHomeStore = create<HomeState>()(
           (device) => device.discovery !== undefined,
         ),
       }),
-      // v1 non aveva stanze dinamiche né cache della discovery: il `merge`
-      // sotto tollera entrambi i campi mancanti, serve solo la nuova versione.
+      // v3 rimuove PIN e profili statici dal persist: eventuali chiavi vecchie
+      // vengono semplicemente ignorate dal `merge`.
       migrate: (persisted) => persisted as PersistedHome,
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedHome> | undefined;
@@ -553,9 +484,6 @@ export const useHomeStore = create<HomeState>()(
           ...current,
           broker: { ...current.broker, ...(saved.broker ?? {}) },
           ui: { ...current.ui, ...(saved.ui ?? {}), screenDimmed: false },
-          pinHash: saved.pinHash ?? current.pinHash,
-          pinLength: saved.pinLength ?? current.pinLength,
-          users: saved.users ?? current.users,
           telemetry: normalizeTelemetrySettings(saved.telemetry ?? current.telemetry),
           burnIn: normalizeBurnInSettings(saved.burnIn ?? current.burnIn),
           rooms: mergeRooms(ROOMS, saved.rooms),

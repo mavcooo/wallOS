@@ -156,9 +156,3 @@ export const OFFLINE_QUEUE = {
   standardTtlMs: 10 * 60_000,
 } as const;
 
-export const PIN_RULES = {
-  minLength: 4,
-  maxLength: 6,
-  maxAttempts: 3,
-  lockoutMs: 60_000,
-} as const;

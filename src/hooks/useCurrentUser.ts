@@ -1,27 +1,28 @@
-import { useHomeStore } from '@/store/homeStore';
-import type { LocalUser } from '@/config/users.config';
+import { restrictionsFor, type Restrictions } from '@/lib/permissions';
+import { useAuthStore } from '@/store/authStore';
+import type { SessionUser } from '@/types/user';
 
-export function useCurrentUser(): LocalUser {
-  return useHomeStore((state) => {
-    const found = state.users.find((user) => user.id === state.ui.activeUserId);
-    return (
-      found ??
-      state.users.find((user) => user.role === 'panel') ??
-      state.users[0] ?? {
-        id: 'fallback',
-        name: 'Pannello',
-        initials: 'PN',
-        role: 'panel',
-        allowedRooms: null,
-        restrictions: {
-          settings: false,
-          energy: false,
-          users: true,
-          sensitiveActions: true,
-        },
-        lastAccess: null,
-        active: true,
-      }
-    );
-  });
+export interface CurrentUser extends SessionUser {
+  elevated: boolean;
+  restrictions: Restrictions;
+}
+
+/**
+ * Profilo della sessione corrente. Va usato solo sotto <AuthGate>: qui non
+ * esiste più alcun fallback hardcoded, perché un utente senza sessione non
+ * deve vedere né dati né viste.
+ */
+export function useCurrentUser(): CurrentUser {
+  const user = useAuthStore((state) => state.user);
+  const elevated = useAuthStore((state) => state.elevated);
+
+  if (!user) {
+    throw new Error('useCurrentUser richiede una sessione autenticata (AuthGate)');
+  }
+
+  return {
+    ...user,
+    elevated,
+    restrictions: restrictionsFor(user.role, elevated),
+  };
 }

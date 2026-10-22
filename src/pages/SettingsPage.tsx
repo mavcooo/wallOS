@@ -24,9 +24,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input, Label } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { useAuthStore } from '@/store/authStore';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
-import { isPinLengthValid } from '@/lib/pin';
 import type { BrokerSettings } from '@/types/mqtt';
 
 const TIMEOUT_OPTIONS = [
@@ -69,7 +69,7 @@ export function SettingsPage() {
   const setDimmerTimeout = useHomeStore((state) => state.setDimmerTimeout);
   const burnIn = useHomeStore((state) => state.burnIn);
   const setBurnInSettings = useHomeStore((state) => state.setBurnInSettings);
-  const setPin = useHomeStore((state) => state.setPin);
+  const changePin = useAuthStore((state) => state.changePin);
   const { publishRaw, reconnect } = useMqttApi();
   const requestPin = usePinGuard();
   const pushToast = useToastStore((state) => state.push);
@@ -106,8 +106,8 @@ export function SettingsPage() {
     patch({ clientId });
   };
 
-  const changePin = () => {
-    if (!isPinLengthValid(newPin)) {
+  const submitPinChange = () => {
+    if (!/^\d{4,6}$/.test(newPin)) {
       setPinError('Il PIN deve contenere da 4 a 6 cifre.');
       return;
     }
@@ -118,13 +118,17 @@ export function SettingsPage() {
     setPinError(null);
     requestPin({
       title: 'Conferma PIN attuale',
-      description: 'Verifica il codice corrente prima di impostarne uno nuovo.',
+      description: 'La verifica avviene sul gateway; il nuovo PIN non lascia mai il server.',
       onConfirm: () => {
-        void setPin(newPin).then(() => {
-          setNewPin('');
-          setConfirmPin('');
-          pushToast({ title: 'PIN aggiornato', tone: 'success' });
-        });
+        void changePin(newPin)
+          .then(() => {
+            setNewPin('');
+            setConfirmPin('');
+            pushToast({ title: 'PIN aggiornato', tone: 'success' });
+          })
+          .catch((error: unknown) => {
+            setPinError(error instanceof Error ? error.message : 'Aggiornamento PIN non riuscito.');
+          });
       },
     });
   };
@@ -466,12 +470,12 @@ export function SettingsPage() {
                 />
               </Field>
               {pinError ? <p className="text-[10px] text-danger">{pinError}</p> : null}
-              <Button variant="primary" onClick={changePin} className="w-full">
+              <Button variant="primary" onClick={submitPinChange} className="w-full">
                 Aggiorna PIN
               </Button>
               <p className="text-[10px] leading-relaxed text-fg-subtle">
-                Il PIN è memorizzato solo come hash SHA-256 nel dispositivo. In produzione la
-                verifica va comunque replicata lato gateway.
+                Il PIN è memorizzato come hash bcrypt nel database del gateway. Verifica,
+                rate-limiting e lockout sono interamente server-side.
               </p>
             </CardContent>
           </Card>

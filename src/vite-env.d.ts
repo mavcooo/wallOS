@@ -13,4 +13,8 @@ interface ImportMetaEnv {
   readonly MQTT_DISCOVERY_PREFIXES?: string;
   readonly MQTT_USERNAME?: string;
   readonly MQTT_PASSWORD?: string;
+  /** Base delle API auth (default `/api`, proxata dal dev server). */
+  readonly VITE_AUTH_API_BASE?: string;
+  /** Identificativo del tablet a parete usato da /api/auth/kiosk-session. */
+  readonly VITE_KIOSK_DEVICE_ID?: string;
 }

@@ -2,7 +2,9 @@
 
 Dashboard mission-critical per pannelli a parete e tablet, pensata per funzionare
 **interamente in rete locale**: React 19 + Vite, TypeScript strict, Tailwind CSS v4,
-Zustand, MQTT over WebSocket, Radix/shadcn pattern e Lucide.
+Zustand, MQTT over WebSocket, Radix/shadcn pattern e Lucide. Utenti, PIN e
+sessioni vivono in un micro-servizio auth Node/Fastify + SQLite: nel bundle
+client non c'è più alcun hash o profilo hardcoded.
 
 Nessun cloud, nessun font remoto, nessuna dipendenza runtime esterna alla LAN.
 
@@ -12,17 +14,35 @@ Nessun cloud, nessun font remoto, nessuna dipendenza runtime esterna alla LAN.
 
 ```bash
 npm install
-npm run dev        # http://localhost:3000
+
+# Terminale 1: auth micro-service (Fastify + SQLite) su :8787
+npm run dev:auth
+
+# Terminale 2: UI su :3000, con proxy /api -> :8787
+npm run dev
+
 npm run typecheck  # tsc -b (strict, noUncheckedIndexedAccess)
 npm run build      # typecheck + bundle di produzione
 npm run preview    # serve dist/ su :3000
 ```
 
+Al primo avvio il servizio auth crea `data/auth.sqlite` (ignorato da git) e fa il
+seed di due profili:
+
+| Profilo | Accesso | PIN azioni |
+| --- | --- | --- |
+| `admin` | username `admin` · password `admin-demo-1234` | `2468` |
+| kiosk | device `wall-panel-1` (`VITE_KIOSK_DEVICE_ID`) | `1234` |
+
+Queste credenziali valgono **solo in sviluppo** quando `ADMIN_PASSWORD` /
+`ADMIN_PIN` / `KIOSK_PIN` non sono impostate. In produzione il server rifiuta di
+partire senza segreti espliciti. Imposta `JWT_SECRET` (>= 32 caratteri) e le
+altre variabili di `.env.example` prima di esporre il servizio.
+
 Al primo avvio l'app parte in **modalità demo** (`broker.demoMode = true`): il
 simulatore locale aggiorna potenze, temperature e sensori ogni 3 s, così l'intera
-UI è verificabile senza hardware.
-
-**PIN demo: `1234`** (modificabile da Impostazioni → PIN pannello; 4 o 6 cifre).
+UI è verificabile senza hardware. Il PIN si cambia da Impostazioni → PIN pannello
+(4 o 6 cifre): la verifica avviene sempre sul gateway, mai nel browser.
 
 Per il campo reale: Impostazioni → disattiva *Modalità demo*, inserisci IP/porta
 WebSocket del broker (es. `192.168.1.10:9001`, path `/mqtt`) → *Salva e applica*.
@@ -54,23 +74,33 @@ availability vengono sottoscritti subito.
 ```
 domus-kiosk/
 ├── index.html
-├── vite.config.ts
-├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
+├── vite.config.ts                  # proxy /api -> auth service
+├── vitest.config.ts / vitest.config.server.ts
+├── tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.server.json
+├── server/                         # micro-servizio auth (Node + TypeScript)
+│   ├── index.ts                    # bootstrap, .env, graceful shutdown
+│   ├── app.ts                      # Fastify, cookie, CORS, helmet, CSRF origin
+│   ├── config.ts                   # env + validazione produzione
+│   ├── db.ts / schema.sql          # better-sqlite3, users/refresh/attempts
+│   ├── seed.ts                     # admin + kiosk idempotenti
+│   ├── security.ts                 # bcrypt, JWT, cookie HttpOnly, serializer
+│   ├── session.ts                  # autenticazione richiesta + elevation
+│   └── routes/auth.ts              # login, kiosk, refresh, PIN, profili
 ├── src/
 │   ├── main.tsx                    # bootstrap React 19 + StrictMode
-│   ├── App.tsx                     # provider, view router, guard profilo
+│   ├── App.tsx                     # AuthGate, view router, RequireRole
 │   ├── index.css                   # design token Tailwind v4 + base kiosk
 │   │
 │   ├── types/
 │   │   ├── device.ts               # modello normalizzato (Device, stati, azioni)
-│   │   └── mqtt.ts                 # broker, connection metrics, raw log
+│   │   ├── mqtt.ts                 # broker, connection metrics, raw log
+│   │   └── user.ts                 # ruoli, SessionUser sanitizzato, PIN policy
 │   │
 │   ├── config/
-│   │   ├── app.config.ts           # default broker, timeout kiosk, regole PIN
+│   │   ├── app.config.ts           # default broker, timeout kiosk, burn-in
 │   │   ├── devices.config.ts       # mapping hardware → entità + adapter + topic
 │   │   ├── rooms.config.ts         # metadati stanze
-│   │   ├── scenarios.config.ts     # scene one-touch (step + delay + protezione)
-│   │   └── users.config.ts         # profili locali, ruoli, restrizioni
+│   │   └── scenarios.config.ts     # scene one-touch (step + delay + protezione)
 │   │
 │   ├── mqtt/
 │   │   ├── adapters/
@@ -93,19 +123,22 @@ domus-kiosk/
 │   │   ├── useMqtt.ts              # connessione, subscribe, decode, retry, probe
 │   │   ├── useKioskDimmer.ts       # inattività + wake-guard anti-tocco
 │   │   ├── useClock.ts             # orologio senza drift
-│   │   └── useCurrentUser.ts       # profilo kiosk attivo
+│   │   └── useCurrentUser.ts       # sessione server + restrizioni UI
 │   │
 │   ├── store/
-│   │   ├── homeStore.ts            # Zustand: entità, connessione, UI, PIN, utenti
+│   │   ├── authStore.ts            # sessione, elevazione PIN, profili (no persist)
+│   │   ├── homeStore.ts            # Zustand: entità, connessione, UI, preferenze
 │   │   └── toastStore.ts           # feedback comandi
 │   │
 │   ├── lib/
 │   │   ├── utils.ts                # cn, formatter it-IT (W, kWh, °C, orologio)
-│   │   └── pin.ts                  # SHA-256 + confronto a tempo costante
+│   │   ├── authApi.ts              # fetch credentialed, refresh single-flight
+│   │   └── permissions.ts          # ruoli → restrizioni UI, canView
 │   │
 │   ├── components/
 │   │   ├── ui/                     # shadcn pattern su Radix (button, card, badge,
 │   │   │                           # input/label, slider, switch, dialog, tabs)
+│   │   ├── auth/                   # AuthGate, LockScreen, RequireRole
 │   │   ├── layout/                 # AppShell, Sidebar, Header, Clock, ConnectionBadge
 │   │   ├── kiosk/                  # PinProtectionDialog, PinProvider,
 │   │   │                           # KioskDimmerOverlay, Toaster
@@ -124,11 +157,91 @@ domus-kiosk/
 ```
 
 ### Perché Vite e non Next.js
-L'app è un pannello sempre acceso, senza SEO, senza RSC e senza server: una SPA
-statica servita dal gateway/tablet è più semplice da aggiornare e funziona
-offline. Se in futuro servisse autenticazione con sessione o API server, il
-livello `mqtt/` e lo store sono indipendenti dal framework e si possono
-trasferire in un App Router senza riscrivere i widget.
+L'app è un pannello sempre acceso, senza SEO e senza RSC: una SPA statica
+servita dal gateway/tablet è più semplice da aggiornare e funziona offline. Il
+auth è un processo separato (Fastify) che parla solo HTTP e SQLite: non c'è
+accoppiamento con il framework UI, e il livello `mqtt/` + store restano
+trasferibili senza riscrivere i widget.
+
+## 2.1 Autenticazione locale (client-server)
+
+```
+Tablet / browser
+  │  fetch same-origin  /api/*  (proxy Vite o reverse proxy di produzione)
+  ▼
+Fastify auth :8787 ── better-sqlite3 ── data/auth.sqlite
+  │  Set-Cookie: domus_access (JWT, 15 min)
+  │             domus_refresh (opaco, 30 gg · kiosk 90 gg)
+  │             domus_elevation (JWT, 5 min, solo dopo verify-pin)
+  ▼
+AuthGate → GET /api/auth/me → render app oppure LockScreen
+```
+
+### Flusso kiosk (tablet a parete)
+1. Al boot `AuthGate` chiama `/api/auth/me`. Se il cookie di access è scaduto,
+   tenta un solo `/api/auth/refresh` (single-flight) e riprende la sessione.
+2. Senza sessione appare la `LockScreen`: il device invia
+   `POST /api/auth/kiosk-session` con `deviceId` + PIN. Il server confronta il
+   PIN bcrypt del device, applica il lockout e risponde con i cookie HttpOnly.
+3. Dopo un riavvio non serve reinserire il PIN: il refresh kiosk resta valido
+   90 giorni e viene ruotato a ogni uso. Il browser non vede mai il token.
+4. Un'azione sensibile chiama `usePinGuard()` → `POST /api/auth/verify-pin`.
+   Il server verifica e imposta `domus_elevation` (5 min): `/me` espone
+   `elevated: true` e le viste Impostazioni/Utenti del kiosk si sbloccano.
+
+### Flusso admin / family
+1. `POST /api/auth/login` con username + password bcrypt. Il server emette
+   access JWT (15 min) e refresh opaco (30 gg) in cookie HttpOnly.
+2. Ogni refresh ruota il token; il riuso di un token già ruotato revoca l'intera
+   famiglia di sessioni (rilevamento di token theft).
+3. Il PIN è per-utente (4-6 cifre): serve per carichi protetti, cambio PIN e
+   cambio profilo. Dopo 3 errori il profilo è bloccato 60 s **lato server**.
+4. `POST /api/auth/switch-profile` verifica il PIN dell'attore e crea una
+   sessione di 10 minuti per il profilo scelto, **senza** toccare il refresh
+   originale: alla scadenza il dispositivo torna al profilo di partenza.
+5. `POST /api/auth/logout` revoca la famiglia e cancella i cookie.
+
+### API
+
+| Metodo | Endpoint | Accesso |
+| --- | --- | --- |
+| `POST` | `/api/auth/login` | pubblico (rate-limited) |
+| `POST` | `/api/auth/kiosk-session` | device + PIN (rate-limited) |
+| `POST` | `/api/auth/refresh` | cookie refresh, rotazione |
+| `GET` | `/api/auth/me` | sessione |
+| `POST` | `/api/auth/verify-pin` | sessione, lockout 3/60 s |
+| `POST` | `/api/auth/pin` | sessione + elevazione o PIN corrente |
+| `POST` | `/api/auth/switch-profile` | admin o kiosk, PIN richiesto |
+| `GET` | `/api/auth/users` | admin/family, kiosk elevato |
+| `PATCH` | `/api/auth/users/:id` | solo admin |
+| `POST` | `/api/auth/logout` | cookie refresh |
+
+### Ruoli e visibilità
+
+| Ruolo | Consumi | Impostazioni | Utenti | Azioni sensibili |
+| --- | --- | --- | --- | --- |
+| `admin` | sì | sì | sì | no PIN |
+| `family` | sì | no | no | PIN |
+| `guest` | no | no | no | PIN |
+| `kiosk` | sì | solo elevato | solo elevato | PIN |
+
+`RequireRole` è il guard dichiarativo usato in `App.tsx`:
+
+```tsx
+<RequireRole roles={['admin', 'family']} allowElevated fallback={<AccessDenied />}>
+  <SettingsPage />
+</RequireRole>
+```
+
+Le restrizioni sono solo UI: ogni endpoint riapplica il ruolo lato server. Il
+client accetta anche `Authorization: Bearer <access>` per script di automazione,
+ma il pannello usa esclusivamente i cookie HttpOnly (`SameSite=Strict`, `Secure`
+attivabile con `COOKIE_SECURE=true`). Le richieste mutanti con un `Origin`
+non in `CORS_ORIGINS` vengono rifiutate prima di arrivare alle route.
+
+Il PIN viaggia in JSON solo sul canale TLS: un hash calcolato nel browser non
+sarebbe un controllo di sicurezza (il client può essere manomesso) e non
+sostituisce né bcrypt a riposo né il lockout server-side.
 
 ---
 
@@ -260,38 +373,60 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
 
 ### `PinProtectionDialog` + `PinProvider`
 - tastierino 3×4, target 56 px, auto-submit a 4 o 6 cifre;
-- hash SHA-256 con salt, confronto a tempo costante, nessun PIN in chiaro;
-- feedback errore, vibrazione, **3 tentativi → blocco 60 s**;
-- tentativi e lockout vivono nello store: chiudere/riaprire il dialog non li
-  azzera (sopravvivono anche al cambio vista);
+- il PIN **non viene mai confrontato nel browser**: `verify()` chiama
+  `POST /api/auth/verify-pin` e mostra solo l'esito (`ok`, tentativi residui,
+  `lockedUntil`) restituito dal gateway;
+- lockout server-side: **3 tentativi → 60 s**, per profilo/dispositivo; chiudere
+  e riaprire il dialog non azzera il blocco;
+- un esito positivo imposta il cookie di elevazione (5 min) e sblocca le viste
+  riservate al kiosk;
 - qualunque azione sensibile si protegge con una riga:
   ```ts
-  requestPin({ title: 'Azione protetta', description: '…', onConfirm: () => sendAction(… ) });
+  requestPin({
+    title: 'Azione protetta',
+    description: '…',
+    onConfirm: (pin) => confirmSensitiveAction(pin),
+  });
   ```
   Usato da scenario *Esci*, prese protette, spegnimento luci e cambio profilo.
-- la lunghezza del PIN (4/6) viene ereditàta dallo store dopo il cambio.
+- la lunghezza del PIN (4/6) e la policy arrivano da `/api/auth/me`.
 
 ### Profili e restrizioni
-`activeUserId` decide viste, stanze visibili e azioni protette. La vista
-*Utenti* è raggiungibile dal chip profilo anche per i ruoli ristretti (con PIN),
-così un pannello non può restare bloccato fuori dal cambio profilo. La guardia
-in `App.tsx` blocca comunque le viste `energy`/`settings` non consentite.
+La sessione (id, ruolo, stanze, lunghezza PIN) arriva da `/api/auth/me`; non
+esiste più `activeUserId` nel persist locale. `AuthGate` non monta nessuna vista
+senza sessione confermata, `LockScreen` gestisce kiosk (device + PIN) e account
+(username + password), `RequireRole` protegge le viste riservate. Il kiosk non
+elevato vede un pulsante *Sblocca* nell'header: il PIN imposta l'elevazione di 5
+minuti e abilita Impostazioni/Utenti. Admin e family vedono l'elenco profili dal
+gateway; solo admin può attivare/disattivare utenti, e solo admin o kiosk elevato
+possono cambiare profilo (con PIN e sessione temporanea di 10 minuti).
 
 ---
 
-## 6. Sicurezza: cosa è reale e cosa va messo sul gateway
+## 6. Sicurezza
 
-Il client browser **non è un confine di sicurezza**. In produzione:
+Il perimetro è stato spostato sul gateway: il bundle client non contiene più
+password, PIN, hash o ruoli statici. Restano comunque necessari questi passi per
+un impianto reale:
 
-- applicare ACL MQTT per topic (il pannello deve poter scrivere solo sui propri
-  `cmnd`), con utenza dedicata e `wss://`/rete isolata;
-- replicare la verifica del PIN lato gateway per le azioni critiche (allarme,
-  varchi, distacco carichi);
-- non salvare le credenziali del broker in chiaro nel browser: in questa demo
-  stanno nel persist locale per comodità di setup. In produzione usare un
-  provisioning server-side o un token efimero;
-- il PIN locale è hashato ma resta un controllo di *interfaccia*: un attaccante
-  con accesso fisico al dispositivo può comunque manomettere il client.
+- **HTTPS** davanti al pannello e `COOKIE_SECURE=true`: senza TLS i cookie
+  `Secure` non vengono inviati. In alternativa, solo su LAN fisicamente isolata,
+  `COOKIE_SECURE=false` è un compromesso esplicito;
+- `JWT_SECRET` robusto e ruotato, `ADMIN_PASSWORD`/`ADMIN_PIN`/`KIOSK_PIN`
+  forniti dall'ambiente (il server rifiuta i default in produzione);
+- `CORS_ORIGINS` limitato all'origine reale del pannello (il controllo
+  `Origin` blocca le richieste mutanti da origini sconosciute);
+- permessi filesystem ristretti su `data/auth.sqlite` (contiene hash bcrypt,
+  refresh token e contatori di lockout) e backup coerenti;
+- ACL MQTT per topic: l'autenticazione UI non autorizza i comandi sul broker, il
+  pannello deve poter scrivere solo sui propri `cmnd`, con utenza dedicata e
+  `wss://` in rete isolata;
+- replicare la verifica PIN lato gateway per azioni fisiche critiche (allarme,
+  varchi, distacco carichi): un attaccante con accesso fisico può manomettere il
+  client, anche se non può più leggere le credenziali dal bundle;
+- le credenziali del broker MQTT restano nel client (il socket gira nel browser):
+  usare un'utenza con ACL minime e, se possibile, un token efimero provisionato
+  dal gateway.
 
 ---
 
@@ -299,23 +434,20 @@ Il client browser **non è un confine di sicurezza**. In produzione:
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- E2E Playwright (Chromium, 1366×900 e 1024×768):
-  - navigazione nelle 5 viste, tab stanze, scenario protetto;
-  - PIN errato → feedback, PIN corretto → scenario eseguito (11 comandi);
-  - cambio PIN a 6 cifre → tastierino a 6 cifre;
-  - 3 errori → lockout 60 s persistente alla riapertura del dialog;
-  - standby → overlay nero, tap di risveglio senza comandi accidentali;
-  - anteprima screensaver dalle impostazioni;
-  - nessun errore console.
-- E2E MQTT reale con broker `aedes` in WebSocket:
-  - connessione WebSocket → `MQTT · Online`;
-  - latenza probe misurata ~4 ms;
-  - telemetria Z2M `brightness: 127` decodificata in `50%` in UI;
-  - toggle UI → payload `{"state":"OFF"}` su `zigbee2mqtt/living/main/set`;
-  - kill broker → `Riconnessione` con retry counter, restart → recovery
-    automatico senza reload.
+- `npm test` → 19 file, 145 test frontend (jsdom).
+- `npm run test:server` → 12 test Fastify/SQLite su DB in memoria:
+  - cookie access/refresh `HttpOnly` + `SameSite=Strict` e payload senza hash;
+  - lockout login e PIN dopo la soglia, anche con PIN corretto durante il lock;
+  - sessione kiosk device+PIN e refresh della stessa famiglia;
+  - riuso del refresh → revoca dell'intera famiglia;
+  - RBAC su elenco/modifica profili, self-disable vietato, switch kiosk→family
+    con refresh che riporta al kiosk;
+  - `Origin` non consentita → 403.
+- Smoke test HTTP con `dev:auth` + `npm run dev`: `/api/health` attraverso il
+  proxy Vite, login admin con Set-Cookie verificato, `/me`, lockout PIN al terzo
+  errore, sessione kiosk, elevazione PIN e rotazione refresh.
 
-Gli script di verifica sono in `tools/` e richiedono dipendenze opzionali
+Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 (`playwright`, `aedes`, `websocket-stream`): vedi `tools/README.md`.
 
 ---
@@ -329,6 +461,11 @@ Gli script di verifica sono in `tools/` e richiedono dipendenze opzionali
   `retain: true` sui topic di stato o un cache layer locale.
 - Storico consumi e grafici 24h non sono inclusi: il modello `PowerDevice` è
   pronto per un adapter di serie storica (Influx/SQLite sul gateway).
-- Autenticazione utenti solo locale/demo: per ruoli reali serve un backend con
-  sessioni e audit log.
+- Il PIN è di 4-6 cifre: l'entropia è bassa per natura. Il lockout server-side
+  (3 tentativi/60 s) è la difesa principale; per ambienti più esposti valutare
+  PIN a 6 cifre e passaggio ad argon2id.
+- `data/auth.sqlite` non ha ancora un audit log delle azioni né backup
+  automatici: aggiungerli prima di un impianto multi-utente.
+- La sessione kiosk dipende dal cookie di refresh (90 giorni): se il browser
+  cancella i cookie serve reinserire il PIN del device.
 - Nessun service worker: aggiungerlo per il boot offline del pannello.

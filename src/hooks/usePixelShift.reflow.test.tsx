@@ -2,8 +2,10 @@ import { act, render, screen } from '@testing-library/react';
 import { useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { PinProvider } from '@/components/kiosk/PinProvider';
 import { AppShell } from '@/components/layout/AppShell';
 import { usePixelShift } from '@/hooks/usePixelShift';
+import { useAuthStore } from '@/store/authStore';
 import { useHomeStore } from '@/store/homeStore';
 import type { BurnInMode } from '@/types/kiosk';
 
@@ -178,10 +180,30 @@ describe('usePixelShift · assenza di reflow', () => {
 
   it('l’AppShell sposta il contenuto solo con transform', async () => {
     useHomeStore.getState().setBurnInSettings({ shiftIntervalMs: 1_000 });
+    // L'AppShell vive sotto AuthGate in produzione: qui la sessione è simulata
+    // per isolare il comportamento di pixel-shift.
+    useAuthStore.setState({
+      status: 'authenticated',
+      user: {
+        id: 'user-test',
+        username: 'test',
+        name: 'Test Kiosk',
+        initials: 'TK',
+        role: 'admin',
+        allowedRooms: null,
+        active: true,
+        isKioskDevice: false,
+        lastAccess: null,
+        pinLength: 4,
+      },
+      elevated: false,
+    });
     render(
-      <AppShell>
-        <div>contenuto</div>
-      </AppShell>,
+      <PinProvider>
+        <AppShell>
+          <div>contenuto</div>
+        </AppShell>
+      </PinProvider>,
     );
 
     const shifted = document.querySelector<HTMLElement>('[style*="translate3d"]');

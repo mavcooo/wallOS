@@ -1,10 +1,11 @@
 import { Lock } from 'lucide-react';
-import { useEffect } from 'react';
 
+import { AuthGate } from '@/components/auth/AuthGate';
+import { RequireRole } from '@/components/auth/RequireRole';
 import { AppShell } from '@/components/layout/AppShell';
-import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { PinProvider } from '@/components/kiosk/PinProvider';
 import { Toaster } from '@/components/kiosk/Toaster';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { MqttProvider } from '@/mqtt/MqttProvider';
 import { EnergyPage } from '@/pages/EnergyPage';
 import { OverviewPage } from '@/pages/OverviewPage';
@@ -22,8 +23,8 @@ function AccessDenied({ view }: { view: string }) {
       </span>
       <p className="text-sm font-medium text-fg">Vista “{view}” non consentita</p>
       <p className="max-w-sm text-xs text-fg-subtle">
-        Il profilo attivo non ha i permessi per questa schermata. Cambia profilo dalla voce
-        Utenti (richiede PIN).
+        Il ruolo del profilo attivo non ha i permessi per questa schermata. Le impostazioni e
+        i profili del kiosk si sbloccano con il PIN del dispositivo.
       </p>
       <button
         type="button"
@@ -39,12 +40,11 @@ function AccessDenied({ view }: { view: string }) {
 function CurrentView() {
   const view = useHomeStore((state) => state.ui.view);
   const user = useCurrentUser();
-  // La vista Utenti resta raggiungibile dal chip profilo: senza di essa un
-  // profilo ristretto non potrebbe più cambiare (il cambio è protetto da PIN).
-  const denied =
-    (view === 'settings' && user.restrictions.settings) ||
-    (view === 'energy' && user.restrictions.energy);
-  if (denied) return <AccessDenied view={view} />;
+
+  if (view === 'energy' && user.restrictions.energy) {
+    return <AccessDenied view="Consumi" />;
+  }
+
   switch (view) {
     case 'overview':
       return <OverviewPage />;
@@ -53,30 +53,43 @@ function CurrentView() {
     case 'energy':
       return <EnergyPage />;
     case 'settings':
-      return <SettingsPage />;
+      return (
+        <RequireRole
+          roles={['admin', 'family']}
+          allowElevated
+          fallback={<AccessDenied view="Impostazioni" />}
+        >
+          <SettingsPage />
+        </RequireRole>
+      );
     case 'users':
-      return <UsersPage />;
+      return (
+        <RequireRole
+          roles={['admin', 'family']}
+          allowElevated
+          fallback={<AccessDenied view="Utenti e profili" />}
+        >
+          <UsersPage />
+        </RequireRole>
+      );
   }
 }
 
 export default function App() {
   const view = useHomeStore((state) => state.ui.view);
 
-  useEffect(() => {
-    // Genera l'hash del PIN di fabbrica al primo avvio (mai in chiaro nello store).
-    void useHomeStore.getState().ensurePin();
-  }, []);
-
   return (
-    <PinProvider>
-      <MqttProvider>
-        <AppShell>
-          <div key={view} className="animate-rise">
-            <CurrentView />
-          </div>
-        </AppShell>
-        <Toaster />
-      </MqttProvider>
-    </PinProvider>
+    <AuthGate>
+      <PinProvider>
+        <MqttProvider>
+          <AppShell>
+            <div key={view} className="animate-rise">
+              <CurrentView />
+            </div>
+          </AppShell>
+          <Toaster />
+        </MqttProvider>
+      </PinProvider>
+    </AuthGate>
   );
 }

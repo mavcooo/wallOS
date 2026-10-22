@@ -5,6 +5,9 @@ dist-ssr/
 # Screenshot generate dai test di verifica (non versionate)
 artifacts/
 
+# Database locale del servizio auth (credenziali hashate, refresh token)
+data/
+
 # Env / segreti locali
 .env
 .env.*

@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
-import { useHomeStore } from '@/store/homeStore';
+import { useAuthStore } from '@/store/authStore';
 import { PinProtectionDialog } from './PinProtectionDialog';
 
 export interface PinRequest {
@@ -8,8 +8,12 @@ export interface PinRequest {
   description: string;
   /** Etichetta dell'azione mostrata nella descrizione. */
   action?: string;
-  length?: 4 | 6;
-  onConfirm: () => void;
+  length?: 4 | 5 | 6;
+  /**
+   * Eseguita solo dopo la verifica server. Riceve il PIN appena validato,
+   * necessario alle API che richiedono una conferma esplicita (cambio profilo).
+   */
+  onConfirm(pin?: string): void;
 }
 
 type RequestPin = (request: PinRequest) => void;
@@ -22,18 +26,22 @@ const PinGuardContext = createContext<RequestPin | null>(null);
  */
 export function PinProvider({ children }: { children: ReactNode }) {
   const [request, setRequest] = useState<PinRequest | null>(null);
-  const verifyPin = useHomeStore((state) => state.verifyPin);
-  const pinLength = useHomeStore((state) => state.pinLength);
+  const verifyPin = useAuthStore((state) => state.verifyPin);
+  const pinPolicy = useAuthStore((state) => state.pinPolicy);
+  const pinLength = useAuthStore((state) => state.user?.pinLength ?? 4);
 
   const requestPin = useCallback<RequestPin>((next) => setRequest(next), []);
 
   const verify = useCallback((pin: string) => verifyPin(pin), [verifyPin]);
 
-  const handleSuccess = useCallback(() => {
-    const pending = request;
-    setRequest(null);
-    pending?.onConfirm();
-  }, [request]);
+  const handleSuccess = useCallback(
+    (pin: string) => {
+      const pending = request;
+      setRequest(null);
+      pending?.onConfirm(pin);
+    },
+    [request],
+  );
 
   const value = useMemo(() => requestPin, [requestPin]);
 
@@ -52,6 +60,8 @@ export function PinProvider({ children }: { children: ReactNode }) {
             : 'Azione protetta'
         }
         length={request?.length ?? pinLength}
+        maxAttempts={pinPolicy.maxAttempts}
+        lockoutMs={pinPolicy.lockoutMs}
         verify={verify}
         onSuccess={handleSuccess}
       />

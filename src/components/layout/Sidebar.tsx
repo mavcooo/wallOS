@@ -2,7 +2,7 @@ import { ChartNoAxesColumn, House, LayoutGrid, Settings, Users } from 'lucide-re
 import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { ROLE_LABELS } from '@/config/users.config';
+import { ROLE_LABELS, canView } from '@/lib/permissions';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHomeStore, type ViewId } from '@/store/homeStore';
 
@@ -10,15 +10,14 @@ interface NavItem {
   id: ViewId;
   label: string;
   icon: LucideIcon;
-  restricted?: 'settings' | 'energy' | 'users';
 }
 
 const NAV: readonly NavItem[] = [
   { id: 'overview', label: 'Overview', icon: LayoutGrid },
   { id: 'rooms', label: 'Stanze', icon: House },
-  { id: 'energy', label: 'Consumi', icon: ChartNoAxesColumn, restricted: 'energy' },
-  { id: 'settings', label: 'Impostazioni', icon: Settings, restricted: 'settings' },
-  { id: 'users', label: 'Utenti', icon: Users, restricted: 'users' },
+  { id: 'energy', label: 'Consumi', icon: ChartNoAxesColumn },
+  { id: 'settings', label: 'Impostazioni', icon: Settings },
+  { id: 'users', label: 'Utenti', icon: Users },
 ];
 
 export function Sidebar() {
@@ -40,7 +39,7 @@ export function Sidebar() {
 
       <nav className="flex flex-1 flex-col gap-1.5 px-2.5 py-4 xl:px-3" aria-label="Navigazione">
         {NAV.map((item) => {
-          const disabled = item.restricted ? user.restrictions[item.restricted] : false;
+          const disabled = !canView(user, user.elevated, item.id);
           const active = view === item.id;
           const Icon = item.icon;
           return (

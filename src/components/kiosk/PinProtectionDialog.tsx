@@ -1,8 +1,6 @@
 import { Delete, Lock, ShieldAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { PIN_RULES } from '@/config/app.config';
-import { useHomeStore } from '@/store/homeStore';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -12,15 +10,26 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 
+/** Esito restituito da /api/auth/verify-pin: il client non decide mai il PIN. */
+export interface PinVerification {
+  ok: boolean;
+  locked: boolean;
+  retryAfterMs: number;
+  remainingAttempts: number;
+  lockedUntil: number | null;
+}
+
 export interface PinProtectionDialogProps {
   open: boolean;
   onOpenChange(open: boolean): void;
   title: string;
   description: string;
-  /** 4 o 6 cifre (ereditato dal PIN configurato). */
-  length?: 4 | 6;
-  verify(pin: string): Promise<boolean>;
-  onSuccess(): void;
+  /** 4, 5 o 6 cifre, dalla policy del profilo autenticato. */
+  length?: 4 | 5 | 6;
+  maxAttempts?: number;
+  lockoutMs?: number;
+  verify(pin: string): Promise<PinVerification>;
+  onSuccess(pin: string): void;
 }
 
 const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
@@ -37,43 +46,46 @@ export function PinProtectionDialog({
   title,
   description,
   length = 4,
+  maxAttempts = 3,
+  lockoutMs = 60_000,
   verify,
   onSuccess,
 }: PinProtectionDialogProps) {
   const [digits, setDigits] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [remaining, setRemaining] = useState<number | null>(null);
   const [checking, setChecking] = useState(false);
+  const [lockedUntil, setLockedUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
   const verifyingRef = useRef(false);
-
-  const attempts = useHomeStore((state) => state.pinAttempts);
-  const lockedUntil = useHomeStore((state) => state.pinLockedUntil);
-  const registerPinFailure = useHomeStore((state) => state.registerPinFailure);
-  const resetPinFailures = useHomeStore((state) => state.resetPinFailures);
 
   const isLocked = lockedUntil > now;
   const remainingMs = Math.max(0, lockedUntil - now);
 
-  // Countdown + sblocco automatico: i tentativi restano nello store, quindi
-  // chiudere e riaprire il dialog non azzera il blocco.
+  // Il lockout è autorevole sul server; qui si mostra solo il countdown
+  // ricevuto, così chiudere e riaprire il dialog non lo azzera.
   useEffect(() => {
     if (lockedUntil === 0) return;
     const timer = window.setInterval(() => {
       const current = Date.now();
       setNow(current);
       if (current >= lockedUntil) {
-        resetPinFailures();
+        setLockedUntil(0);
         setError(null);
+        setRemaining(null);
       }
     }, 250);
     return () => window.clearInterval(timer);
-  }, [lockedUntil, resetPinFailures]);
+  }, [lockedUntil]);
 
   useEffect(() => {
     if (!open) {
       setDigits('');
       setError(null);
+      setRemaining(null);
       setChecking(false);
+      // `lockedUntil` resta: il lockout server-side non svanisce chiudendo il
+      // dialog, e il countdown deve riprendere da dove era rimasto.
       verifyingRef.current = false;
     }
   }, [open]);
@@ -83,29 +95,44 @@ export function PinProtectionDialog({
       if (verifyingRef.current) return;
       verifyingRef.current = true;
       setChecking(true);
-      const valid = await verify(pin);
-      setChecking(false);
-      verifyingRef.current = false;
-      if (valid) {
-        vibrate(30);
+      try {
+        const result = await verify(pin);
+        if (result.ok) {
+          vibrate(30);
+          setDigits('');
+          setError(null);
+          setRemaining(null);
+          setLockedUntil(0);
+          onSuccess(pin);
+          onOpenChange(false);
+          return;
+        }
+
         setDigits('');
-        setError(null);
-        resetPinFailures();
-        onSuccess();
-        onOpenChange(false);
-        return;
-      }
-      const result = registerPinFailure();
-      setDigits('');
-      vibrate([40, 60, 40]);
-      if (result.attempts >= PIN_RULES.maxAttempts) {
-        setError(`Troppi tentativi. Riprova tra ${Math.ceil(PIN_RULES.lockoutMs / 1000)}s.`);
-      } else {
-        const remaining = PIN_RULES.maxAttempts - result.attempts;
-        setError(`PIN errato · ${remaining} ${remaining === 1 ? 'tentativo' : 'tentativi'} rimasti`);
+        vibrate([40, 60, 40]);
+        if (result.lockedUntil && result.lockedUntil > Date.now()) {
+          setLockedUntil(result.lockedUntil);
+          setNow(Date.now());
+          setError('Troppi tentativi.');
+          setRemaining(0);
+        } else {
+          setRemaining(result.remainingAttempts);
+          setError(
+            result.remainingAttempts === 1
+              ? 'PIN errato · 1 tentativo rimasto'
+              : `PIN errato · ${result.remainingAttempts} tentativi rimasti`,
+          );
+        }
+      } catch {
+        // Errori di rete/HTTP: non incrementano i tentativi locali.
+        setDigits('');
+        setError('Verifica non disponibile. Riprova.');
+      } finally {
+        setChecking(false);
+        verifyingRef.current = false;
       }
     },
-    [onOpenChange, onSuccess, registerPinFailure, resetPinFailures, verify],
+    [onOpenChange, onSuccess, verify],
   );
 
   useEffect(() => {
@@ -118,6 +145,7 @@ export function PinProtectionDialog({
     if (isLocked || checking) return;
     if (digits.length >= length) return;
     setError(null);
+    setRemaining(null);
     vibrate(8);
     setDigits((current) => `${current}${digit}`);
   };
@@ -179,7 +207,7 @@ export function PinProtectionDialog({
           >
             {isLocked
               ? `Bloccato · ${Math.ceil(remainingMs / 1000)}s`
-              : (error ?? (checking ? 'Verifica…' : `Inserisci il PIN di ${length} cifre`))}
+              : (error ?? (checking ? 'Verifica sul gateway…' : `Inserisci il PIN di ${length} cifre`))}
           </p>
         </div>
 
@@ -232,9 +260,11 @@ export function PinProtectionDialog({
         </div>
 
         <p className="mt-4 text-center text-[10px] leading-relaxed text-fg-subtle">
-          Azione protetta · {PIN_RULES.maxAttempts} tentativi, blocco temporaneo di{' '}
-          {PIN_RULES.lockoutMs / 1000}s
-          {attempts > 0 && !isLocked ? ` · ${attempts} falliti` : ''}
+          Verifica sul gateway · {maxAttempts} tentativi, blocco temporaneo di{' '}
+          {Math.round(lockoutMs / 1000)}s
+          {remaining !== null && remaining > 0 && !isLocked
+            ? ` · ${remaining} rimasti`
+            : ''}
         </p>
       </DialogContent>
     </Dialog>
