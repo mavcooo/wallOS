@@ -110,6 +110,35 @@ describe('broker: ambiente e persist', () => {
     });
   });
 
+  it('espone i default della protezione burn-in', async () => {
+    const store = await loadStore();
+
+    expect(store.getState().burnIn).toEqual({
+      mode: 'screensaver-float',
+      shiftIntervalMs: 60_000,
+      dimClockOpacity: 0.3,
+    });
+  });
+
+  it('normalizza e persiste le impostazioni burn-in', async () => {
+    const store = await loadStore();
+
+    store.getState().setBurnInSettings({ mode: 'subtle-shift', shiftIntervalMs: 1, dimClockOpacity: 0.9 });
+
+    expect(store.getState().burnIn).toEqual({
+      mode: 'subtle-shift',
+      shiftIntervalMs: 5_000,
+      dimClockOpacity: 0.6,
+    });
+
+    const reloaded = await loadStore();
+    expect(reloaded.getState().burnIn).toEqual({
+      mode: 'subtle-shift',
+      shiftIntervalMs: 5_000,
+      dimClockOpacity: 0.6,
+    });
+  });
+
   it('quello che le Impostazioni salvano è quello che il kiosk rilegge', async () => {
     const store = await loadStore({ MQTT_HOST: 'env.casa.lan' });
 

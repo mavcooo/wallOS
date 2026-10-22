@@ -13,6 +13,7 @@ import {
 import { useMemo, useState, type ReactNode } from 'react';
 
 import { KIOSK_DEFAULTS } from '@/config/app.config';
+import { BURN_IN_INTERVAL_OPTIONS, BURN_IN_LIMITS } from '@/lib/burnIn';
 import { ADAPTERS } from '@/mqtt/adapters';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useMqttApi } from '@/mqtt/MqttProvider';
@@ -21,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input, Label } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
@@ -32,6 +34,11 @@ const TIMEOUT_OPTIONS = [
   { value: 120_000, label: '2 min' },
   { value: 300_000, label: '5 min' },
   { value: 600_000, label: '10 min' },
+] as const;
+
+const BURN_IN_MODE_OPTIONS = [
+  { value: 'screensaver-float', label: 'Orologio flottante', hint: 'Salti in punti casuali' },
+  { value: 'subtle-shift', label: 'Micro-shift', hint: 'Oscilla di 1-4 px' },
 ] as const;
 
 function Field({
@@ -60,6 +67,8 @@ export function SettingsPage() {
   const clearRaw = useHomeStore((state) => state.clearRaw);
   const dimmerTimeoutMs = useHomeStore((state) => state.ui.dimmerTimeoutMs);
   const setDimmerTimeout = useHomeStore((state) => state.setDimmerTimeout);
+  const burnIn = useHomeStore((state) => state.burnIn);
+  const setBurnInSettings = useHomeStore((state) => state.setBurnInSettings);
   const setPin = useHomeStore((state) => state.setPin);
   const { publishRaw, reconnect } = useMqttApi();
   const requestPin = usePinGuard();
@@ -337,9 +346,77 @@ export function SettingsPage() {
                   ))}
                 </div>
               </div>
+              <div>
+                <Label>Movimento anti burn-in</Label>
+                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+                  {BURN_IN_MODE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={burnIn.mode === option.value}
+                      onClick={() => setBurnInSettings({ mode: option.value })}
+                      className={cn(
+                        'flex h-12 flex-col items-center justify-center gap-0.5 rounded-xl border text-[11px] font-medium transition-colors',
+                        burnIn.mode === option.value
+                          ? 'border-accent/40 bg-accent-soft text-accent'
+                          : 'border-line bg-panel-2 text-fg-muted hover:text-fg',
+                      )}
+                    >
+                      {option.label}
+                      <span className="text-[9px] font-normal text-fg-subtle">{option.hint}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Intervallo di spostamento</Label>
+                <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                  {BURN_IN_INTERVAL_OPTIONS.map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      aria-pressed={burnIn.shiftIntervalMs === value}
+                      onClick={() => setBurnInSettings({ shiftIntervalMs: value })}
+                      className={cn(
+                        'h-10 rounded-xl border text-[11px] font-medium transition-colors',
+                        burnIn.shiftIntervalMs === value
+                          ? 'border-accent/40 bg-accent-soft text-accent'
+                          : 'border-line bg-panel-2 text-fg-muted hover:text-fg',
+                      )}
+                    >
+                      {Math.round(value / 1000)} s
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <Label>Opacità orologio in standby</Label>
+                <div className="mt-1.5 flex items-center gap-3">
+                  <Slider
+                    value={[Math.round(burnIn.dimClockOpacity * 100)]}
+                    min={Math.round(BURN_IN_LIMITS.minClockOpacity * 100)}
+                    max={Math.round(BURN_IN_LIMITS.maxClockOpacity * 100)}
+                    step={5}
+                    onValueChange={(values) =>
+                      setBurnInSettings({ dimClockOpacity: (values[0] ?? 30) / 100 })
+                    }
+                    aria-label="Opacità orologio in standby"
+                  />
+                  <span className="tabular w-10 shrink-0 text-right text-[11px] text-fg-muted">
+                    {Math.round(burnIn.dimClockOpacity * 100)}%
+                  </span>
+                </div>
+              </div>
+
               <div className="rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">
                 Fade {KIOSK_DEFAULTS.dimmerFadeMs} ms · orologio in sleep al{' '}
-                {Math.round(KIOSK_DEFAULTS.sleepClockOpacity * 100)}% · scudo anti-tocco{' '}
+                {Math.round(burnIn.dimClockOpacity * 100)}% ·{' '}
+                {burnIn.mode === 'screensaver-float'
+                  ? 'orologio flottante'
+                  : 'micro-shift della dashboard'}{' '}
+                ogni {Math.round(burnIn.shiftIntervalMs / 1000)} s · scudo anti-tocco{' '}
                 {KIOSK_DEFAULTS.wakeGuardMs} ms.
               </div>
               <button

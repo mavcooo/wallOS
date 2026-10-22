@@ -10,7 +10,9 @@ import {
   type RoomConfig,
 } from '@/config/rooms.config';
 import { DEFAULT_USERS, type LocalUser } from '@/config/users.config';
+import { normalizeBurnInSettings } from '@/lib/burnIn';
 import { DEFAULT_PIN, hashPin, verifyPinHash } from '@/lib/pin';
+import type { BurnInSettings } from '@/types/kiosk';
 import { normalizeTelemetrySettings } from '@/lib/telemetry';
 import type { DecodedState, Device, DeviceAvailability, RoomId } from '@/types/device';
 import type { BrokerSettings, ConnectionMetrics, ConnectionStatus } from '@/types/mqtt';
@@ -77,6 +79,9 @@ export interface HomeState {
   /** Finestra di throttle e soglia di variazione significativa. */
   telemetry: TelemetrySettings;
   setTelemetrySettings(patch: Partial<TelemetrySettings>): void;
+  /** Protezione burn-in: strategia, intervallo e opacità dell'orologio. */
+  burnIn: BurnInSettings;
+  setBurnInSettings(patch: Partial<BurnInSettings>): void;
   ui: UiState;
   setView(view: ViewId): void;
   setRoom(room: RoomId): void;
@@ -169,7 +174,7 @@ function jitter(value: number, amplitude: number, min: number): number {
 
 type PersistedHome = Pick<
   HomeState,
-  'broker' | 'ui' | 'pinHash' | 'pinLength' | 'users' | 'telemetry' | 'rooms'
+  'broker' | 'ui' | 'pinHash' | 'pinLength' | 'users' | 'telemetry' | 'rooms' | 'burnIn'
 > & {
   /** Solo i device scoperti: quelli statici tornano dal seed a ogni avvio. */
   discovered: Device[];
@@ -446,6 +451,13 @@ export const useHomeStore = create<HomeState>()(
         }));
       },
 
+      burnIn: normalizeBurnInSettings(),
+      setBurnInSettings(patch) {
+        set((state) => ({
+          burnIn: normalizeBurnInSettings({ ...state.burnIn, ...patch }),
+        }));
+      },
+
       ui: initialUi,
       setView(view) {
         set((state) => ({ ui: { ...state.ui, view, lastActionAt: Date.now() } }));
@@ -519,6 +531,7 @@ export const useHomeStore = create<HomeState>()(
         pinLength: state.pinLength,
         users: state.users,
         telemetry: state.telemetry,
+        burnIn: state.burnIn,
         rooms: state.rooms,
         // Cache dell'albero scoperto: i widget compaiono prima che il broker
         // consegni i retained. I device statici tornano dal seed.
@@ -544,6 +557,7 @@ export const useHomeStore = create<HomeState>()(
           pinLength: saved.pinLength ?? current.pinLength,
           users: saved.users ?? current.users,
           telemetry: normalizeTelemetrySettings(saved.telemetry ?? current.telemetry),
+          burnIn: normalizeBurnInSettings(saved.burnIn ?? current.burnIn),
           rooms: mergeRooms(ROOMS, saved.rooms),
           devices: {
             ...current.devices,

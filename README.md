@@ -241,11 +241,22 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
 ### `useKioskDimmer`
 - timeout configurabile (default **2 min**) con countdown interno;
 - attività reale: `pointerdown`, `touchstart`, `keydown`, `wheel`, tab visibile;
-- overlay nero con orologio a luminosità ~14% (anti burn-in);
+- overlay nero con orologio a luminosità bassa (default 30%, regolabile);
 - al tocco il listener in **capture phase** chiama `preventDefault` +
   `stopPropagation` e risveglia: il tap **non** attiva il widget sottostante;
 - per 350 ms dopo il risveglio vengono assorbiti `pointerup`/`click` residui;
 - il tasto standby in header e l'anteprima in Impostazioni usano lo stesso flusso.
+
+### `usePixelShift` (protezione burn-in)
+- dashboard attiva: micro-spostamenti di 1-4 px attorno all'origine, ogni 60 s;
+- standby: l'orologio vaga su coordinate bounds-safe (viewport meno bounding box e
+  32 px di margine) oppure oscilla di pochi px con `mode: 'subtle-shift'`;
+- solo `transform: translate3d(...)` con transizione lenta: niente `top`/`left`,
+  niente repaint di layout, nessun layer promosso quando è spento;
+- impostazioni in `homeStore.burnIn` (`mode`, `shiftIntervalMs`,
+  `dimClockOpacity`) e persistite insieme al resto;
+- il movimento non emette eventi: non risveglia il dimmer; il primo tocco azzera
+  la traslazione e rimuove l'overlay.
 
 ### `PinProtectionDialog` + `PinProvider`
 - tastierino 3×4, target 56 px, auto-submit a 4 o 6 cifre;

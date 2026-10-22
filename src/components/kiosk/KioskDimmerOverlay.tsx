@@ -1,39 +1,79 @@
-import { KIOSK_DEFAULTS } from '@/config/app.config';
+import { useRef } from 'react';
+
+import { BURN_IN_DEFAULTS, KIOSK_DEFAULTS } from '@/config/app.config';
 import { useClock } from '@/hooks/useClock';
+import { usePixelShift } from '@/hooks/usePixelShift';
 import { cn, formatDate, formatTime } from '@/lib/utils';
+import type { BurnInMode } from '@/types/kiosk';
 
 interface KioskDimmerOverlayProps {
   visible: boolean;
   fadeMs?: number;
+  /** Opacità dell'orologio in standby (0.25-0.4 consigliata su OLED). */
   clockOpacity?: number;
+  /** Strategia anti burn-in mentre l'overlay è attivo. */
+  mode?: BurnInMode;
+  /** Ogni quanto spostare l'orologio. */
+  shiftIntervalMs?: number;
+  /** Durata della transizione fra due posizioni. */
+  transitionMs?: number;
 }
 
 /**
- * Overlay di standby: nero pieno, orologio a luminosità minima.
+ * Overlay di standby: nero pieno, orologio a luminosità minima e in movimento.
+ *
+ * L'orologio è ancorato all'origine e si sposta **solo** con
+ * `transform: translate3d(...)`: coordinate sicure (viewport meno bounding box
+ * e margine) calcolate da `usePixelShift`, nessun reflow e nessuna animazione
+ * di `top`/`left`. Il movimento non genera eventi: non risveglia il dimmer.
+ *
  * Il tocco viene intercettato da useKioskDimmer in fase di capture, prima che
  * React riceva l'evento: nessun comando parte dal tap di risveglio.
  */
 export function KioskDimmerOverlay({
   visible,
   fadeMs = KIOSK_DEFAULTS.dimmerFadeMs,
-  clockOpacity = KIOSK_DEFAULTS.sleepClockOpacity,
+  clockOpacity = BURN_IN_DEFAULTS.dimClockOpacity,
+  mode = BURN_IN_DEFAULTS.mode,
+  shiftIntervalMs = BURN_IN_DEFAULTS.shiftIntervalMs,
+  transitionMs = BURN_IN_DEFAULTS.transitionMs,
 }: KioskDimmerOverlayProps) {
   const now = useClock(1000);
+  const clockRef = useRef<HTMLDivElement>(null);
+  const shift = usePixelShift({
+    mode,
+    intervalMs: shiftIntervalMs,
+    enabled: visible,
+    targetRef: clockRef,
+    transitionMs,
+  });
+
+  // `none` non può convivere con altre transizioni nella stessa dichiarazione.
+  const transition =
+    shift.style.transition === 'none'
+      ? `opacity ${fadeMs}ms ease-out`
+      : `${shift.style.transition}, opacity ${fadeMs}ms ease-out`;
 
   return (
     <div
       aria-hidden={!visible}
       data-testid="kiosk-dimmer-overlay"
       className={cn(
-        'fixed inset-0 z-[80] flex flex-col items-center justify-center bg-black',
+        'fixed inset-0 z-[80] overflow-hidden bg-black',
         'pointer-events-auto transition-opacity ease-out',
         visible ? 'opacity-100' : 'pointer-events-none opacity-0',
       )}
       style={{ transitionDuration: `${fadeMs}ms` }}
     >
       <div
-        className="flex flex-col items-center gap-2 tabular transition-opacity"
-        style={{ opacity: clockOpacity, transitionDuration: `${fadeMs}ms` }}
+        ref={clockRef}
+        data-testid="kiosk-dimmer-clock"
+        className="absolute left-0 top-0 flex flex-col items-center gap-2 tabular"
+        style={{
+          ...shift.style,
+          opacity: clockOpacity,
+          transition,
+        }}
       >
         <span className="text-[13vw] font-extralight leading-none tracking-tight text-white">
           {formatTime(now).slice(0, 5)}

@@ -79,6 +79,24 @@ export const DEFAULT_BROKER: BrokerSettings = {
   cleanSession: true,
 };
 
+/**
+ * Protezione burn-in per pannelli OLED/AMOLED/LCD accesi 24/7.
+ * Il movimento usa solo `transform` (composited), mai `top`/`left`.
+ */
+export const BURN_IN_DEFAULTS = {
+  mode: 'screensaver-float' as const,
+  /** Ogni quanto si sposta l'orologio/la UI: lento, per non distrarre. */
+  shiftIntervalMs: 60_000,
+  /** Ampiezza massima dei micro-spostamenti della dashboard (1-4 px). */
+  subtleShiftPx: 3,
+  /** Durata della transizione fra due posizioni. */
+  transitionMs: 1_500,
+  /** Opacità dell'orologio in standby: bassa, ma leggibile. */
+  dimClockOpacity: 0.3,
+  /** Margine di sicurezza dai bordi dello schermo. */
+  safeMarginPx: 32,
+} as const;
+
 export const KIOSK_DEFAULTS = {
   /** 2 minuti di inattività prima del dim. */
   dimmerTimeoutMs: 120_000,
