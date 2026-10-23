@@ -1,5 +1,6 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, type ComponentProps, type ReactNode } from 'react';
 
+import { cn } from '@/lib/utils';
 import { KioskDimmerOverlay } from '@/components/kiosk/KioskDimmerOverlay';
 import { useKioskDimmer } from '@/hooks/useKioskDimmer';
 import { usePixelShift } from '@/hooks/usePixelShift';
@@ -9,9 +10,11 @@ import { Sidebar } from './Sidebar';
 
 interface AppShellProps {
   children: ReactNode;
+  /** Attributi extra del contenitore scrollabile: usato per le gesture di swipe. */
+  mainProps?: ComponentProps<'main'>;
 }
 
-export function AppShell({ children }: AppShellProps) {
+export function AppShell({ children, mainProps }: AppShellProps) {
   const timeoutMs = useHomeStore((state) => state.ui.dimmerTimeoutMs);
   const burnIn = useHomeStore((state) => state.burnIn);
   const { isDimmed, sleep } = useKioskDimmer({ timeoutMs });
@@ -39,7 +42,15 @@ export function AppShell({ children }: AppShellProps) {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <Header onStandby={sleep} />
-          <main className="kiosk-scroll min-h-0 flex-1 px-4 pb-8 pt-4 lg:px-6">{children}</main>
+          <main
+            {...mainProps}
+            className={cn(
+              'kiosk-scroll min-h-0 flex-1 px-4 pb-8 pt-4 lg:px-6',
+              mainProps?.className,
+            )}
+          >
+            {children}
+          </main>
         </div>
       </div>
       <KioskDimmerOverlay

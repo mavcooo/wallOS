@@ -179,7 +179,7 @@ export function ClimateCard({
             aria-valuenow={draft}
             aria-valuetext={`${formatTemp(draft)}`}
             className={cn(
-              'relative size-[172px] touch-none select-none rounded-full outline-none transition-shadow',
+              'ignore-swipe relative size-[172px] touch-none select-none rounded-full outline-none transition-shadow',
               'focus-visible:ring-2 focus-visible:ring-accent/40',
               dragging && 'cursor-grabbing',
             )}

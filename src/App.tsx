@@ -1,4 +1,5 @@
 import { Lock } from 'lucide-react';
+import { useMemo, useState } from 'react';
 
 import { AuthGate } from '@/components/auth/AuthGate';
 import { RequireRole } from '@/components/auth/RequireRole';
@@ -7,7 +8,11 @@ import { AppShell } from '@/components/layout/AppShell';
 import { DatabaseHealthMonitor } from '@/components/layout/DatabaseHealthMonitor';
 import { PinProvider } from '@/components/kiosk/PinProvider';
 import { Toaster } from '@/components/kiosk/Toaster';
+import { CarouselDots } from '@/components/ui/carousel-dots';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
+import { canView } from '@/lib/permissions';
+import { cn } from '@/lib/utils';
 import { MqttProvider } from '@/mqtt/MqttProvider';
 import { AdminPage } from '@/pages/AdminPage';
 import { EnergyPage } from '@/pages/EnergyPage';
@@ -15,7 +20,18 @@ import { OverviewPage } from '@/pages/OverviewPage';
 import { RoomsPage } from '@/pages/RoomsPage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { UsersPage } from '@/pages/UsersPage';
-import { useHomeStore } from '@/store/homeStore';
+import { useHomeStore, type ViewId } from '@/store/homeStore';
+
+/**
+ * Ordine naturale del carosello orizzontale. Le schermate non consentite al
+ * profilo attivo vengono filtrate: lo swipe non porta mai a un AccessDenied.
+ */
+const SWIPE_PAGES: readonly { id: ViewId; label: string }[] = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'rooms', label: 'Stanze' },
+  { id: 'energy', label: 'Consumi' },
+  { id: 'settings', label: 'Impostazioni' },
+];
 
 function AccessDenied({ view }: { view: string }) {
   const setView = useHomeStore((state) => state.setView);
@@ -84,9 +100,67 @@ function CurrentView() {
   }
 }
 
-export default function App() {
+/**
+ * Shell autenticata: qui la sessione esiste, quindi `useCurrentUser` è lecito.
+ * Lo swipe cambia pagina tramite lo store, mantenendo Sidebar e header in sync.
+ */
+function AppNavigation() {
   const view = useHomeStore((state) => state.ui.view);
+  const setView = useHomeStore((state) => state.setView);
+  const user = useCurrentUser();
+  const [enterFrom, setEnterFrom] = useState<'left' | 'right' | null>(null);
 
+  const pages = useMemo(
+    () => SWIPE_PAGES.filter((page) => canView(user, user.elevated, page.id)),
+    [user],
+  );
+  const pageIds = useMemo(() => pages.map((page) => page.id), [pages]);
+
+  const swipe = useSwipeNavigation<ViewId>({
+    items: pageIds,
+    current: view,
+    // In RoomsPage lo swipe appartiene al carosello delle stanze: qui è spento.
+    enabled: view !== 'rooms',
+    onChange: setView,
+    onSwipe: (direction) => setEnterFrom(direction === 'left' ? 'right' : 'left'),
+  });
+
+  const viewAnimation =
+    enterFrom === 'right'
+      ? 'animate-slide-in-right'
+      : enterFrom === 'left'
+        ? 'animate-slide-in-left'
+        : 'animate-rise';
+
+  return (
+    <>
+      <AppShell
+        mainProps={{
+          ...swipe.handlers,
+          // Il browser gestisce solo il pan verticale: i gesti orizzontali
+          // arrivano al hook senza scroll laterale della pagina.
+          style: { touchAction: 'pan-y' },
+        }}
+      >
+        <div key={view} className={cn(viewAnimation, 'motion-reduce:animate-none')}>
+          <CurrentView />
+        </div>
+      </AppShell>
+      {pages.length > 1 && swipe.currentIndex >= 0 ? (
+        <div
+          className="pointer-events-none fixed inset-x-0 bottom-2 z-20 flex justify-center"
+          data-testid="page-swipe-dots"
+        >
+          <div className="rounded-full border border-line/70 bg-panel/85 px-2 py-1 shadow-lg shadow-black/20">
+            <CarouselDots count={pages.length} activeIndex={swipe.currentIndex} label="Pagina" />
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+export default function App() {
   return (
     <>
       {/* Health del database a livello applicazione: notifiche e badge anche
@@ -96,11 +170,7 @@ export default function App() {
         <TopologyGate>
           <PinProvider>
             <MqttProvider>
-              <AppShell>
-                <div key={view} className="animate-rise">
-                  <CurrentView />
-                </div>
-              </AppShell>
+              <AppNavigation />
             </MqttProvider>
           </PinProvider>
         </TopologyGate>

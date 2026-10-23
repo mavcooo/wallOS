@@ -1,9 +1,11 @@
 import { Lightbulb, Power, RadioTower } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { DeviceCard } from '@/components/widgets/DeviceCard';
+import { CarouselDots } from '@/components/ui/carousel-dots';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
@@ -58,6 +60,34 @@ export function RoomsPage() {
     ? allRooms.filter((candidate) => user.allowedRooms?.includes(candidate.id))
     : allRooms;
   const active = rooms.find((candidate) => candidate.id === room) ?? rooms[0];
+  const roomIds = rooms.map((candidate) => candidate.id);
+  const activeIndex = active ? rooms.findIndex((candidate) => candidate.id === active.id) : -1;
+
+  // Direzione dell'ultimo swipe: decide da quale lato entra il contenuto.
+  const [roomDirection, setRoomDirection] = useState<'left' | 'right' | null>(null);
+  // Fine corsa: piccola traslazione elastica invece di cambiare pagina.
+  const [edgeNudge, setEdgeNudge] = useState<'start' | 'end' | null>(null);
+  const nudgeTimer = useRef<number | null>(null);
+
+  const swipe = useSwipeNavigation<RoomId>({
+    items: roomIds,
+    current: active?.id ?? roomIds[0] ?? ('' as RoomId),
+    onChange: setRoom,
+    enabled: rooms.length > 1,
+    onSwipe: (direction) => setRoomDirection(direction === 'left' ? 'right' : 'left'),
+    onEdge: (edge) => {
+      setEdgeNudge(edge);
+      if (nudgeTimer.current !== null) window.clearTimeout(nudgeTimer.current);
+      nudgeTimer.current = window.setTimeout(() => setEdgeNudge(null), 220);
+    },
+  });
+
+  useEffect(
+    () => () => {
+      if (nudgeTimer.current !== null) window.clearTimeout(nudgeTimer.current);
+    },
+    [],
+  );
 
   if (!active) {
     return (
@@ -90,11 +120,23 @@ export function RoomsPage() {
   const lightsOn = lights.filter((light) => light.kind === 'light' && light.state.on).length;
 
   return (
-    <div className="flex flex-col gap-5">
+    <div
+      {...swipe.handlers}
+      style={{ touchAction: 'pan-y' }}
+      className={cn(
+        'flex flex-col gap-5 transition-transform duration-200 ease-out motion-reduce:transition-none',
+        edgeNudge === 'start' && 'translate-x-1',
+        edgeNudge === 'end' && '-translate-x-1',
+      )}
+      data-testid="rooms-swipe-surface"
+    >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <Tabs
           value={active.id}
-          onValueChange={(value) => setRoom(value as RoomId)}
+          onValueChange={(value) => {
+            setRoomDirection(null);
+            setRoom(value as RoomId);
+          }}
           className="min-w-0"
         >
           <TabsList className="flex w-full flex-wrap justify-start gap-1 lg:w-auto">
@@ -124,7 +166,27 @@ export function RoomsPage() {
         </div>
       </div>
 
-      <div className="flex flex-col gap-6">
+      <CarouselDots
+        count={rooms.length}
+        activeIndex={activeIndex}
+        label="Stanza"
+        onSelect={(index) => {
+          const next = rooms[index];
+          if (!next) return;
+          setRoomDirection(null);
+          setRoom(next.id);
+        }}
+        className="-mt-1"
+      />
+
+      <div
+        key={active.id}
+        className={cn(
+          'flex flex-col gap-6 motion-reduce:animate-none',
+          roomDirection === 'right' && 'animate-slide-in-right',
+          roomDirection === 'left' && 'animate-slide-in-left',
+        )}
+      >
         {roomDevices.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-fg-muted">
             Nessun dispositivo configurato in {active.label}.

@@ -9,7 +9,11 @@ export function Slider({
 }: ComponentProps<typeof SliderPrimitive.Root>) {
   return (
     <SliderPrimitive.Root
-      className={cn('relative flex h-11 w-full touch-none select-none items-center', className)}
+      className={cn(
+        // `ignore-swipe`: trascinare lo slider non deve cambiare pagina/stanza.
+        'ignore-swipe relative flex h-11 w-full touch-none select-none items-center',
+        className,
+      )}
       {...props}
     >
       <SliderPrimitive.Track className="relative h-2.5 w-full grow overflow-hidden rounded-full bg-elevated">

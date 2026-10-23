@@ -1,4 +1,5 @@
 import { Database, Loader2, Info } from 'lucide-react';
+import { useState } from 'react';
 
 import { cn } from '@/lib/utils';
 import { useDatabaseHealthStore } from '@/store/databaseHealthStore';
@@ -28,6 +29,10 @@ function timeLabel(checkedAt: number | null): string | null {
  * Cliccabile → pannello diagnostico con storico e dettagli.
  */
 export function DatabaseBadge() {
+  // Il pannello diagnostico si apre solo dal trigger: prima era legato a
+  // `!isChecking`, quindi dopo il primo poll riuscito restava aperto come modale
+  // e bloccava touch/swipe sull'intera dashboard.
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const status = useDatabaseHealthStore((state) => state.status);
   const version = useDatabaseHealthStore((state) => state.version);
   const latencyMs = useDatabaseHealthStore((state) => state.latencyMs);
@@ -81,7 +86,6 @@ export function DatabaseBadge() {
           status === 'down' && 'border-danger/30 bg-danger/10 text-danger',
           status === 'checking' && 'border-line bg-panel-2 text-fg-subtle',
         )}
-        onClick={() => {}}
       >
         {isChecking ? (
           <Loader2 className="size-3 animate-spin" aria-hidden />
@@ -97,21 +101,7 @@ export function DatabaseBadge() {
         {isChecking ? null : <Database className="size-3" aria-hidden />}
         <span className="max-w-28 truncate">{label}</span>
       </div>
-      <Dialog
-        open={!isChecking}
-        onOpenChange={(open) => {
-          if (!open) {
-            useDatabaseHealthStore.setState({ status: 'checking' });
-            useDatabaseHealthStore.getState().setHealth({
-              status: 'checking',
-              version: null,
-              latencyMs: null,
-              error: null,
-              checkedAt: null,
-            });
-          }
-        }}
-      >
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogTrigger asChild>
           <button
             className="hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 text-[10px] font-medium transition-colors hover:bg-panel-2"

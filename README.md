@@ -218,6 +218,7 @@ domus-kiosk/
 │   │   ├── useMqtt.ts              # connessione, subscribe, decode, retry, probe
 │   │   ├── useKioskDimmer.ts       # inattività + wake-guard anti-tocco
 │   │   ├── useClock.ts             # orologio senza drift
+│   │   ├── useSwipeNavigation.ts   # gesture orizzontali pagine/stanze
 │   │   └── useCurrentUser.ts       # sessione server + restrizioni UI
 │   │
 │   ├── store/
@@ -496,6 +497,43 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
   Usato da scenario *Esci*, prese protette, spegnimento luci e cambio profilo.
 - la lunghezza del PIN (4/6) e la policy arrivano da `/api/auth/me`.
 
+### Navigazione touch (swipe)
+`useSwipeNavigation` (`src/hooks/useSwipeNavigation.ts`, basato su
+`react-swipeable`) collega il gesto orizzontale allo store: Sidebar, header e
+dots si aggiornano subito perché la navigazione passa da `setView`/`setRoom`.
+
+- Pagine: Overview → Stanze → Consumi → Impostazioni, filtrate con `canView`;
+  lo swipe non porta mai a una schermata non consentita.
+- Stanze: dentro `RoomsPage` il carosello locale ha priorità (lo swipe pagina è
+  spento). Agli estremi scatta un bounce di 200 ms, senza cambiare pagina.
+- Esclusioni: slider Radix, manopola clima, input, pulsanti, link, tab e ogni
+  elemento `.ignore-swipe` / `[data-swipe-ignore]` non innescano la navigazione.
+  Slider e manopola clima hanno già la classe `ignore-swipe`.
+- Transizioni: `animate-slide-in-right/left`, solo `transform`/`opacity`
+  (`translate3d` 26 px, 260 ms), disattivate con `prefers-reduced-motion`.
+- Indicatori: dots pagine fissi in basso (`pointer-events-none`), dots stanze
+  sotto le tab e cliccabili.
+
+Calibrazione consigliata su tablet a parete:
+
+| Parametro | Valore | Note |
+| --- | --- | --- |
+| `delta` | 60 px | 50–75 px: sotto resta un tap |
+| `trackMouse` | `false` | `true` solo per test manuali desktop |
+| `preventScrollOnSwipe` | `true` | blocca il pan orizzontale del browser |
+| `swipeDurationMs` | 800 | gesti più lenti non navigano |
+| CSS `touch-action` | `pan-y` | lo scroll verticale resta nativo |
+
+```tsx
+const swipe = useSwipeNavigation<RoomId>({
+  items: rooms.map((room) => room.id),
+  current: active.id,
+  onChange: setRoom,
+  onEdge: () => bounce(),
+});
+return <div {...swipe.handlers} style={{ touchAction: 'pan-y' }}>…</div>;
+```
+
 ### Profili e restrizioni
 La sessione (id, ruolo, stanze, lunghezza PIN) arriva da `/api/auth/me`; non
 esiste più `activeUserId` nel persist locale. `AuthGate` non monta nessuna vista
@@ -542,7 +580,12 @@ un impianto reale:
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- `npm test` → 25 file, 175 test frontend (jsdom).
+- `npm test` → 28 file, 189 test frontend (jsdom).
+- Swipe: 9 test sul hook (soglia 60 px, esclusioni slider/pulsanti, fine
+  corsa, gesti verticali, `preventScrollOnSwipe`, `trackMouse`), 3 su
+  `RoomsPage` (cambio stanza, bounce alla prima, nessun cambio partendo da uno
+  slider) e 2 su `App` (lock screen senza shell; swipe Overview → Stanze con
+  header e Sidebar sincronizzati).
 - Rate limiting PIN: 13 test sul modulo (soglia 3–5, backoff 30→60→120→tetto,
   persistenza per profilo, reset al PIN corretto, lockout server più lungo) e 4
   test sul dialog (shake, tastierino e tastiera bloccati, riapertura, countdown).
