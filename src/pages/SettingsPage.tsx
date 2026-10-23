@@ -474,8 +474,9 @@ export function SettingsPage() {
                 Aggiorna PIN
               </Button>
               <p className="text-[10px] leading-relaxed text-fg-subtle">
-                Il PIN è memorizzato come hash bcrypt nel database del gateway. Verifica,
-                rate-limiting e lockout sono interamente server-side.
+                Il PIN è memorizzato come hash bcrypt nel database del gateway. Verifica e
+                lockout autorevole sono server-side; il pannello aggiunge un blocco locale
+                persistente come difesa in profondità.
               </p>
             </CardContent>
           </Card>

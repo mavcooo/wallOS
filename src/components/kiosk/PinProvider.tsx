@@ -29,6 +29,9 @@ export function PinProvider({ children }: { children: ReactNode }) {
   const verifyPin = useAuthStore((state) => state.verifyPin);
   const pinPolicy = useAuthStore((state) => state.pinPolicy);
   const pinLength = useAuthStore((state) => state.user?.pinLength ?? 4);
+  // Contatori/persistenza del lockout separati per profilo: il blocco di un
+  // utente non colpisce gli altri profili del tablet.
+  const pinScope = useAuthStore((state) => state.user?.id ?? 'anonymous');
 
   const requestPin = useCallback<RequestPin>((next) => setRequest(next), []);
 
@@ -60,8 +63,8 @@ export function PinProvider({ children }: { children: ReactNode }) {
             : 'Azione protetta'
         }
         length={request?.length ?? pinLength}
+        scope={pinScope}
         maxAttempts={pinPolicy.maxAttempts}
-        lockoutMs={pinPolicy.lockoutMs}
         verify={verify}
         onSuccess={handleSuccess}
       />

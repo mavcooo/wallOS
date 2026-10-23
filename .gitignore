@@ -21,3 +21,4 @@ data/
 *.local
 *.log
 /freebuff-sites-build/
+.freebuff/

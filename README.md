@@ -228,6 +228,7 @@ domus-kiosk/
 │   ├── lib/
 │   │   ├── utils.ts                # cn, formatter it-IT (W, kWh, °C, orologio)
 │   │   ├── authApi.ts              # fetch credentialed, refresh single-flight
+│   │   ├── pin.ts                  # rate limit PIN persistente + backoff
 │   │   └── permissions.ts          # ruoli → restrizioni UI, canView
 │   │
 │   ├── components/
@@ -475,8 +476,15 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
   `lockedUntil`) restituito dal gateway;
 - lockout server-side: **3 tentativi → 60 s**, per profilo/dispositivo; chiudere
   e riaprire il dialog non azzera il blocco;
-- un esito positivo imposta il cookie di elevazione (5 min) e sblocca le viste
-  riservate al kiosk;
+- rate limiting locale persistente (`src/lib/pin.ts`): contatore e scadenza in
+  `localStorage` per profilo, blocco iniziale di 30 s che raddoppia a ogni nuovo
+  blocco (tetto 5 min). Tastierino ed eventuale tastiera fisica restano
+  disabilitati durante il blocco, con countdown e riabilitazione automatica;
+  il lockout del gateway resta il limite autorevole (si usa sempre la scadenza
+  più lunga tra client e server);
+- feedback di errore con tentativi rimasti e animazione *shake* sul display;
+- un esito positivo azzera contatore e moltiplicatore e imposta il cookie di
+  elevazione (5 min), sbloccando le viste riservate al kiosk;
 - qualunque azione sensibile si protegge con una riga:
   ```ts
   requestPin({
@@ -534,7 +542,10 @@ un impianto reale:
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- `npm test` → 23 file, 158 test frontend (jsdom).
+- `npm test` → 25 file, 175 test frontend (jsdom).
+- Rate limiting PIN: 13 test sul modulo (soglia 3–5, backoff 30→60→120→tetto,
+  persistenza per profilo, reset al PIN corretto, lockout server più lungo) e 4
+  test sul dialog (shake, tastierino e tastiera bloccati, riapertura, countdown).
 - `npm run test:server` → 35 test Fastify/PostgreSQL (PGlite, PostgreSQL WASM
   con lo schema reale):
   - configurazione `.env`: `DATABASE_URL` o `DB_*`, URL/porta/database/utente/
