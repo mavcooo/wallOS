@@ -3,8 +3,9 @@
 Dashboard mission-critical per pannelli a parete e tablet, pensata per funzionare
 **interamente in rete locale**: React 19 + Vite, TypeScript strict, Tailwind CSS v4,
 Zustand, MQTT over WebSocket, Radix/shadcn pattern e Lucide. Utenti, PIN e
-sessioni vivono in un micro-servizio auth Node/Fastify + SQLite: nel bundle
-client non c'è più alcun hash o profilo hardcoded.
+sessioni e **topologia della casa** vivono in un micro-servizio Node/Fastify +
+**PostgreSQL**: nel bundle client non ci sono hash, profili né stanze/dispositivi
+hardcoded.
 
 Nessun cloud, nessun font remoto, nessuna dipendenza runtime esterna alla LAN.
 
@@ -12,10 +13,69 @@ Nessun cloud, nessun font remoto, nessuna dipendenza runtime esterna alla LAN.
 
 ## 1. Avvio rapido
 
+Prerequisito: un PostgreSQL raggiungibile sulla LAN che ospiti il database
+`wallos` (negli esempi `192.168.0.59:5432`). La connessione arriva **solo** dal
+`.env`: `DATABASE_URL` (fonte principale) oppure le variabili granulari
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Nessun parametro o
+credenziale è hardcoded nel codice: se una variabile manca o è malformata
+l'avvio si interrompe elencando tutti i problemi. Parti da `.env.example`.
+Il database deve esistere; schema e seed vengono applicati dal servizio
+all'avvio.
+
+Verifica la raggiungibilità prima di avviare l'applicazione (stesso `.env`,
+nessuna modifica a schema o dati):
+
+```bash
+npm run db:check
+```
+
+Allo startup il servizio esegue una query di identità (`version()`,
+`current_database()`, `current_user`) e logga:
+
+```
+[db] connesso · 192.168.0.59:5432/wallos · PostgreSQL 17.4 · utente wallos_user · 3 ms
+```
+
+Se la connessione non riesce, il processo termina con un messaggio operativo
+(password rifiutata, database inesistente, host irraggiungibile o DNS) senza
+stampare la password contenuta nella URL.
+
+`GET /api/health` ripete la verifica a ogni chiamata ed è pensato per il
+monitoraggio (non richiede sessione):
+
+```json
+{
+  "status": "ok",
+  "database": { "status": "up", "version": "PostgreSQL 17.4", "latencyMs": 2 }
+}
+```
+
+Se il database non risponde: HTTP **503** con
+`{"status":"degraded","database":{"status":"down","error":"ECONNREFUSED"}}`.
+Non vengono esposti host, database, utente o credenziali.
+
+### Monitoraggio periodico e notifiche
+
+`useDatabaseHealthMonitor` (montato in `App`) interroga `/api/health` ogni
+**30 s** con timeout di 8 s (`HEALTH_MONITOR` in `src/config/app.config.ts`).
+
+- Notifica **solo le transizioni**: un toast di errore quando il database cade,
+  uno di successo quando torna disponibile. Durante un'interruzione prolungata
+  non vengono mostrate raffiche di notifiche: il polling continua e rileva il
+  recupero al primo controllo riuscito.
+- L'header mostra un badge persistente accanto allo stato MQTT: verde con la
+  versione (`PG 17.4`), rosso `DB offline` con il codice errore nel tooltip,
+  neutro durante il primo controllo. Badge e monitor leggono lo stesso snapshot
+  (`databaseHealthStore`): un solo loop di fetch per tutta l'app.
+- Il `Toaster` è montato a livello applicazione, quindi gli avvisi compaiono
+  anche sul lock screen, prima che la topologia sia caricata.
+- Il polling si ferma allo smontaggio dell'app e ogni richiesta viene annullata
+  con `AbortController`, senza promesse orfane.
+
 ```bash
 npm install
 
-# Terminale 1: auth micro-service (Fastify + SQLite) su :8787
+# Terminale 1: API auth + topologia (Fastify + PostgreSQL) su :8787
 npm run dev:auth
 
 # Terminale 2: UI su :3000, con proxy /api -> :8787
@@ -26,8 +86,8 @@ npm run build      # typecheck + bundle di produzione
 npm run preview    # serve dist/ su :3000
 ```
 
-Al primo avvio il servizio auth crea `data/auth.sqlite` (ignorato da git) e fa il
-seed di due profili:
+Al primo avvio il servizio applica `server/schema.sql` (idempotente) e fa il seed
+del database con stanze, dispositivi, scenari e due profili:
 
 | Profilo | Accesso | PIN azioni |
 | --- | --- | --- |
@@ -61,11 +121,42 @@ widget: `light`, `switch`, `binary_sensor`, `sensor` e `climate` sono mappati su
 modello interno, `device.suggested_area` crea la stanza e i topic di stato e di
 availability vengono sottoscritti subito.
 
-- `devices.config.ts` resta il seed statico: le entità scoperte hanno id
-  `ha:<component>:<object_id>` e non sovrascrivono i device del seed.
+- Il seed dei dispositivi vive in PostgreSQL (`server/seed-data/*` solo per il
+  primo inserimento): le entità scoperte hanno id `ha:<component>:<object_id>` e
+  non sovrascrivono i device del database.
 - Un annuncio con payload vuoto ritira l'entità: il widget sparisce subito.
 - I device scoperti restano nella cache del persist: al riavvio i widget ci sono
   già, con disponibilità `unknown` finché il broker non risponde.
+
+### Amministrazione della topologia (solo admin)
+
+La voce **Amministrazione** nella sidebar apre un pannello con tre schede —
+stanze, dispositivi, scenari — che legge e scrive direttamente su PostgreSQL.
+
+- Il ruolo `admin` è l'unico autorizzato: le route usano `requireRole`, non basta
+  nascondere il link. Un kiosk elevato non può modificare la topologia.
+- Ogni salvataggio aggiorna la topologia nello store senza riavviare il kiosk
+  (`reloadTopology`, nessuno splash di caricamento).
+- Validazione server-side: slug per gli id (`^[a-z0-9][a-z0-9:_-]{0,63}$`),
+  stanza esistente per un device, topic obbligatorio di stato, enum per tipo e
+  adapter, passi di scenario tipizzati (power, brightness, targetTemp, …).
+- Una stanza non si elimina se contiene dispositivi (`409 ROOM_NOT_EMPTY`);
+  eliminare un device non ripulisce eventuali passi di scenario che lo citano.
+- Gli scenari si compongono con un editor visuale dei passi: dispositivo,
+  tipo di azione, valore tipizzato (on/off, 0-100, kelvin, °C, modalità, …),
+  ritardo e riordino su/giù. Nessun JSON da scrivere a mano.
+- I campi `metadata`/`fieldMap` restano JSONB: la UI espone `fieldMap` per
+  l'adapter `custom-json`, mentre `metadata` (stato runtime, discovery) non
+  viene sovrascritto da una modifica fatta dal pannello.
+
+Endpoint (tutti con sessione valida, mutazioni solo admin):
+
+| Metodo | Path | Uso |
+| --- | --- | --- |
+| GET | `/api/topology` | stanze + device + scenari in una risposta |
+| POST/PATCH/DELETE | `/api/rooms[/:id]` | CRUD stanze |
+| POST/PATCH/DELETE | `/api/devices[/:id]` | CRUD dispositivi |
+| POST/PATCH/DELETE | `/api/scenarios[/:id]` | CRUD scenari |
 
 ---
 
@@ -77,15 +168,18 @@ domus-kiosk/
 ├── vite.config.ts                  # proxy /api -> auth service
 ├── vitest.config.ts / vitest.config.server.ts
 ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.server.json
-├── server/                         # micro-servizio auth (Node + TypeScript)
+├── server/                         # API auth + topologia (Node + TypeScript)
 │   ├── index.ts                    # bootstrap, .env, graceful shutdown
 │   ├── app.ts                      # Fastify, cookie, CORS, helmet, CSRF origin
-│   ├── config.ts                   # env + validazione produzione
-│   ├── db.ts / schema.sql          # better-sqlite3, users/refresh/attempts
-│   ├── seed.ts                     # admin + kiosk idempotenti
+│   ├── config.ts                   # env + validazione DB/auth
+│   ├── db.ts / schema.sql          # pool PostgreSQL, UUID/JSONB, repository SQL
+│   ├── db-check.ts                 # npm run db:check (solo connettività)
+│   ├── seed.ts / seed-data/        # stanze, device, scenari, admin + kiosk
 │   ├── security.ts                 # bcrypt, JWT, cookie HttpOnly, serializer
 │   ├── session.ts                  # autenticazione richiesta + elevation
-│   └── routes/auth.ts              # login, kiosk, refresh, PIN, profili
+│   └── routes/
+│       ├── auth.ts                 # login, kiosk, refresh, PIN, profili
+│       └── topology.ts             # GET topologia + CRUD admin con validazione
 ├── src/
 │   ├── main.tsx                    # bootstrap React 19 + StrictMode
 │   ├── App.tsx                     # AuthGate, view router, RequireRole
@@ -97,10 +191,11 @@ domus-kiosk/
 │   │   └── user.ts                 # ruoli, SessionUser sanitizzato, PIN policy
 │   │
 │   ├── config/
-│   │   ├── app.config.ts           # default broker, timeout kiosk, burn-in
-│   │   ├── devices.config.ts       # mapping hardware → entità + adapter + topic
-│   │   ├── rooms.config.ts         # metadati stanze
-│   │   └── scenarios.config.ts     # scene one-touch (step + delay + protezione)
+│   │   └── app.config.ts           # default broker, timeout kiosk, burn-in
+│   ├── lib/
+│   │   ├── adminApi.ts             # CRUD stanze/device/scenari (ruolo admin)
+│   │   ├── rooms.ts                # helper puri (slug, etichette), nessun seed
+│   │   └── topologyApi.ts          # GET /api/topology + refresh su 401
 │   │
 │   ├── mqtt/
 │   │   ├── adapters/
@@ -159,7 +254,7 @@ domus-kiosk/
 ### Perché Vite e non Next.js
 L'app è un pannello sempre acceso, senza SEO e senza RSC: una SPA statica
 servita dal gateway/tablet è più semplice da aggiornare e funziona offline. Il
-auth è un processo separato (Fastify) che parla solo HTTP e SQLite: non c'è
+auth è un processo separato (Fastify) che parla solo HTTP e PostgreSQL: non c'è
 accoppiamento con il framework UI, e il livello `mqtt/` + store restano
 trasferibili senza riscrivere i widget.
 
@@ -169,7 +264,7 @@ trasferibili senza riscrivere i widget.
 Tablet / browser
   │  fetch same-origin  /api/*  (proxy Vite o reverse proxy di produzione)
   ▼
-Fastify auth :8787 ── better-sqlite3 ── data/auth.sqlite
+Fastify :8787 ── pg Pool ── PostgreSQL 192.168.0.59:5432/wallos
   │  Set-Cookie: domus_access (JWT, 15 min)
   │             domus_refresh (opaco, 30 gg · kiosk 90 gg)
   │             domus_elevation (JWT, 5 min, solo dopo verify-pin)
@@ -342,10 +437,12 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
 
 ### Come si collega un nuovo dispositivo
 
-1. aggiungi l'entry in `src/config/devices.config.ts` (id, stanza, adapter,
-   topic, `fieldMap` se custom);
-2. se il firmware è nuovo, implementa il suo adapter;
-3. ricarica: subscribe, widget e scenari funzionano senza altre modifiche.
+1. aggiungi la riga in `devices` (id, `room_id`, tipo, adapter, topic,
+   `metadata` JSONB con stato iniziale e `fieldMap` se custom) oppure nel seed
+   `server/seed-data/devices.ts` per un impianto nuovo;
+2. se il firmware è nuovo, implementa il suo adapter lato client;
+3. ricarica: `GET /api/topology` restituisce il device, subscribe e widget
+   funzionano senza altre modifiche.
 
 ---
 
@@ -416,8 +513,11 @@ un impianto reale:
   forniti dall'ambiente (il server rifiuta i default in produzione);
 - `CORS_ORIGINS` limitato all'origine reale del pannello (il controllo
   `Origin` blocca le richieste mutanti da origini sconosciute);
-- permessi filesystem ristretti su `data/auth.sqlite` (contiene hash bcrypt,
-  refresh token e contatori di lockout) e backup coerenti;
+- credenziali PostgreSQL dedicate (solo `SELECT/INSERT/UPDATE/DELETE` sulle
+  tabelle applicative, schema di proprietà del deploy): il DB contiene hash
+  bcrypt, refresh token, contatori di lockout e la topologia della casa;
+- backup coerenti del database (`pg_dump`) e connessione cifrata/TLS se il DB
+  non è sulla stessa LAN fidata;
 - ACL MQTT per topic: l'autenticazione UI non autorizza i comandi sul broker, il
   pannello deve poter scrivere solo sui propri `cmnd`, con utenza dedicata e
   `wss://` in rete isolata;
@@ -434,18 +534,35 @@ un impianto reale:
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- `npm test` → 19 file, 145 test frontend (jsdom).
-- `npm run test:server` → 12 test Fastify/SQLite su DB in memoria:
+- `npm test` → 23 file, 158 test frontend (jsdom).
+- `npm run test:server` → 35 test Fastify/PostgreSQL (PGlite, PostgreSQL WASM
+  con lo schema reale):
+  - configurazione `.env`: `DATABASE_URL` o `DB_*`, URL/porta/database/utente/
+    password mancanti o incoerenti, pool e timeout malformati → avvio bloccato;
+  - check di connessione all'avvio e con `npm run db:check`: log compatto senza
+    credenziali ed errore rilanciato per il messaggio operativo;
   - cookie access/refresh `HttpOnly` + `SameSite=Strict` e payload senza hash;
   - lockout login e PIN dopo la soglia, anche con PIN corretto durante il lock;
   - sessione kiosk device+PIN e refresh della stessa famiglia;
   - riuso del refresh → revoca dell'intera famiglia;
   - RBAC su elenco/modifica profili, self-disable vietato, switch kiosk→family
     con refresh che riporta al kiosk;
-  - `Origin` non consentita → 403.
+  - `Origin` non consentita → 403;
+  - `GET /api/topology` protetta, con stanze/device/scenari ricostruiti dal DB;
+  - CRUD admin con validazione (slug, stanza inesistente, stanza popolata, passi
+    scenario), 403 per kiosk/family su rooms/devices/scenarios, 404 su PATCH e
+    DELETE di entità inesistenti e 409 sui duplicati.
 - Smoke test HTTP con `dev:auth` + `npm run dev`: `/api/health` attraverso il
   proxy Vite, login admin con Set-Cookie verificato, `/me`, lockout PIN al terzo
   errore, sessione kiosk, elevazione PIN e rotazione refresh.
+- `npm run db:check` verso `192.168.0.59:5432`: con le credenziali placeholder
+  del `.env` il server risponde `28P01` (password rifiutata), il comando esce
+  con codice 1 e suggerisce la correzione senza stampare la password.
+- Verifica sul PostgreSQL reale `192.168.0.59:5432`: `dev:auth` avviato, log di
+  startup `PostgreSQL connesso · … · PostgreSQL 17.4`, schema e seed applicati,
+  login admin, `GET /api/topology` con 7 stanze / 19 device / 4 scenari, CRUD di
+  stanza+device+scenario creati e poi eliminati (204), stanza popolata protetta
+  con 409.
 
 Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 (`playwright`, `aedes`, `websocket-stream`): vedi `tools/README.md`.
@@ -456,16 +573,21 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 
 - Bundle unico ~786 kB (mqtt.js pesa ~300 kB): valutare `manualChunks` o import
   dinamico di mqtt per ridurre il first paint su tablet datati.
-- Lo stato dei device non è persistito su disco: al reload si riparte dal
-  config finché il broker non ripubblica. Per impianti reali conviene un
-  `retain: true` sui topic di stato o un cache layer locale.
+- Lo stato runtime dei device non è persistito nel database: al reload si
+  riparte dallo stato del seed finché il broker non ripubblica. Per impianti
+  reali conviene `retain: true` sui topic di stato o un cache layer locale.
+- La UI di amministrazione non gestisce ancora `metadata` (discovery e stato
+  iniziale): per adapter complessi si interviene con SQL o col seed.
+- L'editor dei passi non blocca l'eliminazione di un device citato da uno
+  scenario: il passo resta ma viene ignorato a runtime finché non lo si corregge
+  (manca una foreign key su JSONB).
 - Storico consumi e grafici 24h non sono inclusi: il modello `PowerDevice` è
   pronto per un adapter di serie storica (Influx/SQLite sul gateway).
 - Il PIN è di 4-6 cifre: l'entropia è bassa per natura. Il lockout server-side
   (3 tentativi/60 s) è la difesa principale; per ambienti più esposti valutare
   PIN a 6 cifre e passaggio ad argon2id.
-- `data/auth.sqlite` non ha ancora un audit log delle azioni né backup
-  automatici: aggiungerli prima di un impianto multi-utente.
+- PostgreSQL non ha ancora un audit log applicativo né backup automatici:
+  aggiungerli prima di un impianto multi-utente.
 - La sessione kiosk dipende dal cookie di refresh (90 giorni): se il browser
   cancella i cookie serve reinserire il PIN del device.
 - Nessun service worker: aggiungerlo per il boot offline del pannello.

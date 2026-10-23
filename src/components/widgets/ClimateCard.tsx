@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
-import { roomLabel } from '@/config/rooms.config';
+import { roomLabel } from '@/lib/rooms';
 import { clamp, cn, formatTemp } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
 import type {

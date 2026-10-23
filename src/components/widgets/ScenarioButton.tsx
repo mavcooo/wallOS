@@ -1,4 +1,13 @@
-import { Clapperboard, DoorOpen, Loader2, Lock, MoonStar, Waves } from 'lucide-react';
+import {
+  Clapperboard,
+  DoorOpen,
+  Loader2,
+  Lock,
+  MoonStar,
+  Sparkles,
+  Waves,
+  type LucideIcon,
+} from 'lucide-react';
 import { useState } from 'react';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
@@ -6,18 +15,19 @@ import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn } from '@/lib/utils';
 import type { Scenario } from '@/types/device';
 
-const ICONS = {
+const ICONS: Record<string, LucideIcon> = {
   clapperboard: Clapperboard,
   moon: MoonStar,
   'door-open': DoorOpen,
   spa: Waves,
-} as const;
+};
 
 export function ScenarioButton({ scenario }: { scenario: Scenario }) {
   const { runScenario } = useMqttApi();
   const requestPin = usePinGuard();
   const [running, setRunning] = useState(false);
-  const Icon = ICONS[scenario.icon];
+  // L'icona è un dato del DB: uno slug sconosciuto non deve rompere il widget.
+  const Icon = ICONS[scenario.icon] ?? Sparkles;
 
   const execute = async () => {
     setRunning(true);

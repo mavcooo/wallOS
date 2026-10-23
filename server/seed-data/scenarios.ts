@@ -1,4 +1,4 @@
-import type { Scenario } from '@/types/device';
+import type { Scenario } from '../../src/types/device.js';
 
 export const SCENARIOS: readonly Scenario[] = [
   {

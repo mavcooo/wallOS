@@ -1,6 +1,6 @@
 import { KeyRound, LogOut, MoonStar } from 'lucide-react';
 
-import { roomLabel } from '@/config/rooms.config';
+import { roomLabel } from '@/lib/rooms';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthStore } from '@/store/authStore';
@@ -8,6 +8,7 @@ import { useHomeStore, type ViewId } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
 import { Clock } from './Clock';
 import { ConnectionBadge } from './ConnectionBadge';
+import { DatabaseBadge } from './DatabaseBadge';
 
 const TITLES: Record<ViewId, { title: string; subtitle: string }> = {
   overview: { title: 'Overview', subtitle: 'Stato della casa in tempo reale' },
@@ -15,6 +16,7 @@ const TITLES: Record<ViewId, { title: string; subtitle: string }> = {
   energy: { title: 'Consumi', subtitle: 'Monitoraggio carichi e prelievo' },
   settings: { title: 'Impostazioni', subtitle: 'Broker, diagnostica e profilo kiosk' },
   users: { title: 'Utenti e profili', subtitle: 'Ruoli, stanze e azioni protette' },
+  admin: { title: 'Amministrazione', subtitle: 'Stanze, dispositivi e scenari su PostgreSQL' },
 };
 
 export function Header({ onStandby }: { onStandby: () => void }) {
@@ -75,6 +77,9 @@ export function Header({ onStandby }: { onStandby: () => void }) {
         >
           <MoonStar className="size-4" />
         </button>
+        <div className="hidden sm:block">
+          <DatabaseBadge />
+        </div>
         <div className="hidden sm:block">
           <ConnectionBadge onOpenSettings={() => setView('settings')} />
         </div>

@@ -7,8 +7,8 @@
  */
 
 /**
- * Le stanze non sono più un'unione chiusa: `devices.config.ts` ne fornisce un
- * seed e la discovery Home Assistant può crearne di nuove a runtime
+ * Le stanze non sono un'unione chiusa: arrivano dal database (`/api/topology`)
+ * e la discovery Home Assistant può crearne di nuove a runtime
  * (`homeStore.rooms`, con `ensureRoom`).
  */
 export type RoomId = string;
@@ -97,7 +97,7 @@ export type SensorType =
   | 'power'
   | 'energy';
 
-/** Topic MQTT dichiarati in `devices.config.ts`. */
+/** Topic MQTT dichiarati nella tabella `devices`. */
 export interface DeviceTopics {
   /** Topic di stato sottoscritto in lettura. */
   state: string;
@@ -123,6 +123,8 @@ interface DeviceBase {
   favorite: boolean;
   /** Se true, i comandi richiedono PIN (tapparelle cancello, allarme, ...). */
   protected: boolean;
+  /** Ordinamento nella UI, gestito dall'amministrazione. */
+  displayOrder?: number;
   /** Presente solo sui device scoperti via Home Assistant MQTT Discovery. */
   discovery?: DeviceDiscovery;
 }
@@ -241,7 +243,8 @@ export interface EncodedCommand {
   retain?: boolean;
 }
 
-export type ScenarioId = 'cinema' | 'goodnight' | 'away' | 'relax';
+/** Slug dello scenario: arriva dal database, non da un'unione compilata. */
+export type ScenarioId = string;
 
 export interface ScenarioStep {
   deviceId: string;
@@ -254,8 +257,11 @@ export interface Scenario {
   id: ScenarioId;
   label: string;
   description: string;
-  icon: 'clapperboard' | 'moon' | 'door-open' | 'spa';
+  /** Nome icona Lucide (stringa: il catalogo scenari vive nel DB). */
+  icon: string;
   /** Richiede PIN prima dell'esecuzione (es. "Esci"). */
   protected: boolean;
   steps: readonly ScenarioStep[];
+  /** Ordinamento nella overview, gestito dall'amministrazione. */
+  displayOrder?: number;
 }

@@ -56,7 +56,7 @@ export function canAccess(
 export function canView(
   user: Pick<SessionUser, 'role'>,
   elevated: boolean,
-  view: 'overview' | 'rooms' | 'energy' | 'settings' | 'users',
+  view: 'overview' | 'rooms' | 'energy' | 'settings' | 'users' | 'admin',
 ): boolean {
   switch (view) {
     case 'overview':
@@ -68,5 +68,9 @@ export function canView(
       return canAccess(user, elevated, 'settings');
     case 'users':
       return canAccess(user, elevated, 'users');
+    case 'admin':
+      // La topologia si amministra solo da un profilo admin, mai da un kiosk
+      // elevato: la scrittura sul DB è più delicata delle singole azioni.
+      return user.role === 'admin';
   }
 }

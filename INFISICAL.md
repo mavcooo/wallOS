@@ -13,13 +13,13 @@ server auth dentro `infisical run --env=dev`, senza `.env` nel repository.
 | Comando | Cosa fa |
 | --- | --- |
 | `npm run dev` | sviluppo UI: `vite` → http://localhost:3000 (proxa `/api` su :8787) |
-| `npm run dev:auth` | micro-servizio auth Node/Fastify su :8787 |
+| `npm run dev:auth` | API auth + topologia Node/Fastify su :8787 |
 | `npm run dev:infisical` | Vite con i segreti iniettati: `infisical run --env=dev -- vite` |
 | `npm run dev:auth:infisical` | auth con i segreti iniettati: `infisical run --env=dev -- tsx watch server/index.ts` |
 | `npm run build` | `tsc -b && vite build` (verifica + bundle di produzione) |
 | `npm run typecheck` | `tsc -b --pretty false` |
 | `npm run test` | test frontend (`vitest run`) · `npm run test:watch` in sviluppo |
-| `npm run test:server` | test del servizio auth (Node + SQLite in memoria) |
+| `npm run test:server` | test delle API (Node + PostgreSQL WASM via PGlite) |
 | `npm run preview` | serve `dist/` su :3000 |
 
 `build`, `typecheck` e `preview` restano comandi di verifica/produzione e **non**
@@ -59,7 +59,11 @@ Auth (solo server, mai nel bundle):
 
 - `JWT_SECRET` (>= 32 caratteri, obbligatorio in produzione)
 - `ADMIN_PASSWORD`, `ADMIN_PIN`, `KIOSK_PIN` (seed del primo avvio)
-- `AUTH_HOST`, `AUTH_PORT`, `AUTH_DB_PATH`, `AUTH_TRUST_PROXY`
+- PostgreSQL: `DATABASE_URL` (fonte principale) oppure `DB_HOST`, `DB_PORT`,
+  `DB_NAME`, `DB_USER`, `DB_PASSWORD` (alternative obbligatorie quando la URL
+  manca). Aggiungere `DATABASE_POOL_MAX`, `DATABASE_IDLE_TIMEOUT_MS`,
+  `DATABASE_CONNECT_TIMEOUT_MS`, `DATABASE_SSL`. Verifica con `npm run db:check`.
+- `AUTH_HOST`, `AUTH_PORT`, `AUTH_TRUST_PROXY`
 - `AUTH_PROXY_TARGET` (letto da `vite.config.ts`, non dal browser)
 - `CORS_ORIGINS`, `COOKIE_SECURE`, `BCRYPT_ROUNDS`
 - `ACCESS_TOKEN_TTL`, `REFRESH_TOKEN_TTL`, `KIOSK_REFRESH_TOKEN_TTL`,

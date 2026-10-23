@@ -194,8 +194,13 @@ export function clearElevationCookie(reply: FastifyReply): void {
   reply.clearCookie(ELEVATION_COOKIE, { path: '/' });
 }
 
-export function parseAllowedRooms(raw: string | null): string[] | null {
+export function parseAllowedRooms(raw: unknown): string[] | null {
   if (!raw) return null;
+  // `pg` restituisce già l'array per una colonna JSONB; un driver testuale no.
+  if (Array.isArray(raw)) {
+    return raw.filter((room): room is string => typeof room === 'string');
+  }
+  if (typeof raw !== 'string') return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return null;
@@ -229,8 +234,8 @@ export function toPublicUser(user: UserRow): PublicUser {
     initials: initialsOf(user.display_name),
     role: user.role,
     allowedRooms: parseAllowedRooms(user.allowed_rooms),
-    active: user.active === 1,
-    isKioskDevice: user.is_kiosk_device === 1,
+    active: Boolean(user.active),
+    isKioskDevice: Boolean(user.is_kiosk_device),
     lastAccess: user.last_access,
     pinLength: user.pin_length === 6 ? 6 : user.pin_length === 5 ? 5 : 4,
   };

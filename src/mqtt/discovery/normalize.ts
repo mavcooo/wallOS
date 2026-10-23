@@ -1,4 +1,4 @@
-import { UNASSIGNED_ROOM_ID, roomIdFromLabel } from '@/config/rooms.config';
+import { UNASSIGNED_ROOM_ID, roomIdFromLabel } from '@/lib/rooms';
 import type {
   ClimateDevice,
   Device,

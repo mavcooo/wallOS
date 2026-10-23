@@ -1,4 +1,4 @@
-import { ChartNoAxesColumn, House, LayoutGrid, Settings, Users } from 'lucide-react';
+import { ChartNoAxesColumn, House, LayoutGrid, Settings, Users, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -18,6 +18,7 @@ const NAV: readonly NavItem[] = [
   { id: 'energy', label: 'Consumi', icon: ChartNoAxesColumn },
   { id: 'settings', label: 'Impostazioni', icon: Settings },
   { id: 'users', label: 'Utenti', icon: Users },
+  { id: 'admin', label: 'Amministrazione', icon: Wrench },
 ];
 
 export function Sidebar() {

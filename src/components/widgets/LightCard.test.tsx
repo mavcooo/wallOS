@@ -1,11 +1,17 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { LightCard } from '@/components/widgets/LightCard';
-import { deviceOf } from '@/test/fixtures';
+import { useHomeStore } from '@/store/homeStore';
+import { deviceOf, SEED_TOPOLOGY } from '@/test/fixtures';
 
 const device = deviceOf('light-living-main', 'light');
+
+beforeEach(() => {
+  // L'etichetta della stanza arriva dallo store idratato dal server.
+  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
+});
 
 describe('LightCard', () => {
   it('mostra stanza e intensità corrente', () => {

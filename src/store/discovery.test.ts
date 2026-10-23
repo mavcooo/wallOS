@@ -47,6 +47,9 @@ const presaGarage = () =>
 async function loadStore() {
   vi.resetModules();
   const { useHomeStore } = await import('@/store/homeStore');
+  // Bootstrap come in produzione: la topologia arriva dal server, non da un file.
+  const { SEED_TOPOLOGY } = await import('@/test/fixtures');
+  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
   return useHomeStore;
 }
 

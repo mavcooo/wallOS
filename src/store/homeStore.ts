@@ -2,22 +2,25 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import { DEFAULT_BROKER, KIOSK_DEFAULTS } from '@/config/app.config';
-import { initialDevices } from '@/config/devices.config';
-import {
-  ROOMS,
-  UNASSIGNED_ROOM_ID,
-  roomIdFromLabel,
-  type RoomConfig,
-} from '@/config/rooms.config';
 import { normalizeBurnInSettings } from '@/lib/burnIn';
-import type { BurnInSettings } from '@/types/kiosk';
+import { UNASSIGNED_ROOM_ID, roomIdFromLabel, type RoomConfig } from '@/lib/rooms';
 import { normalizeTelemetrySettings } from '@/lib/telemetry';
-import type { DecodedState, Device, DeviceAvailability, RoomId } from '@/types/device';
+import { fetchTopology, type Topology } from '@/lib/topologyApi';
+import type { BurnInSettings } from '@/types/kiosk';
+import type {
+  DecodedState,
+  Device,
+  DeviceAvailability,
+  RoomId,
+  Scenario,
+} from '@/types/device';
 import type { BrokerSettings, ConnectionMetrics, ConnectionStatus } from '@/types/mqtt';
 import type { RawMqttMessage } from '@/types/mqtt';
 import type { TelemetrySettings, TelemetryUpdate } from '@/types/telemetry';
 
-export type ViewId = 'overview' | 'rooms' | 'energy' | 'settings' | 'users';
+export type ViewId = 'overview' | 'rooms' | 'energy' | 'settings' | 'users' | 'admin';
+
+export type TopologyStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface UiState {
   view: ViewId;
@@ -46,9 +49,19 @@ export interface HomeState {
   /** Tick del simulatore locale (solo modalità demo). */
   simulateTelemetry(): void;
 
-  // ── Stanze ───────────────────────────────────────────────────────────────
-  /** Stanze disponibili: seed statico + aree scoperte via HA Discovery. */
+  // ── Topologia (dal database) ─────────────────────────────────────────────
+  /** Stanze da `GET /api/topology` + aree scoperte via HA Discovery. */
   rooms: RoomConfig[];
+  /** Scenari rapidi, anch'essi serviti dal database. */
+  scenarios: Scenario[];
+  topologyStatus: TopologyStatus;
+  topologyError: string | null;
+  /** Bootstrap autenticato: stanze, dispositivi e scenari dal server. */
+  loadTopology(): Promise<void>;
+  /** Ricarica dopo una mutazione admin senza smontare la UI (nessuno splash). */
+  reloadTopology(): Promise<void>;
+  /** Applica un payload già pronto (refresh, retry, test). */
+  hydrateTopology(topology: Topology): void;
   /** Crea (o riusa, se l'etichetta coincide) la stanza di un'area HA. */
   ensureRoom(label?: string): RoomId;
 
@@ -104,11 +117,7 @@ const initialUi: UiState = {
   lastActionAt: Date.now(),
 };
 
-function seedDevices(): DeviceMap {
-  return Object.fromEntries(initialDevices.map((device) => [device.id, device]));
-}
-
-/** Il seed ha la precedenza per le stanze note; quelle scoperte si aggiungono. */
+/** Le stanze del server hanno la precedenza; quelle scoperte si aggiungono. */
 function mergeRooms(
   seed: readonly RoomConfig[],
   saved?: readonly RoomConfig[],
@@ -163,8 +172,60 @@ type PersistedHome = Pick<
 export const useHomeStore = create<HomeState>()(
   persist(
     (set, get) => ({
-      devices: seedDevices(),
-      rooms: [...ROOMS],
+      devices: {},
+      rooms: [],
+      scenarios: [],
+      topologyStatus: 'idle',
+      topologyError: null,
+
+      async loadTopology() {
+        set({ topologyStatus: 'loading', topologyError: null });
+        try {
+          const topology = await fetchTopology();
+          get().hydrateTopology(topology);
+        } catch (error) {
+          set({
+            topologyStatus: 'error',
+            topologyError:
+              error instanceof Error ? error.message : 'Topologia non disponibile',
+          });
+        }
+      },
+
+      async reloadTopology() {
+        try {
+          get().hydrateTopology(await fetchTopology());
+        } catch {
+          // La mutazione è già andata a buon fine: se il reload fallisce la UI
+          // resta coerente con l'ultima topologia nota, senza splash d'errore.
+        }
+      },
+
+      hydrateTopology(topology) {
+        set((state) => {
+          // Solo i device scoperti restano dalla cache: i seed arrivano dal DB.
+          const discovered = Object.values(state.devices).filter(
+            (device) => device.discovery !== undefined,
+          );
+          const rooms = mergeRooms(topology.rooms, state.rooms);
+          return {
+            rooms,
+            devices: {
+              ...Object.fromEntries(topology.devices.map((device) => [device.id, device])),
+              ...Object.fromEntries(discovered.map((device) => [device.id, device])),
+            },
+            scenarios: topology.scenarios,
+            topologyStatus: 'ready',
+            topologyError: null,
+            ui: {
+              ...state.ui,
+              room: rooms.some((room) => room.id === state.ui.room)
+                ? state.ui.room
+                : (topology.rooms[0]?.id ?? UNASSIGNED_ROOM_ID),
+            },
+          };
+        });
+      },
 
       ensureRoom(label) {
         const clean = label?.trim();
@@ -457,7 +518,7 @@ export const useHomeStore = create<HomeState>()(
     }),
     {
       name: 'domus-kiosk-store',
-      version: 3,
+      version: 4,
       partialize: (state): PersistedHome => ({
         broker: state.broker,
         ui: { ...state.ui, screenDimmed: false },
@@ -470,8 +531,8 @@ export const useHomeStore = create<HomeState>()(
           (device) => device.discovery !== undefined,
         ),
       }),
-      // v3 rimuove PIN e profili statici dal persist: eventuali chiavi vecchie
-      // vengono semplicemente ignorate dal `merge`.
+      // v4 toglie la topologia seed dal bundle: stanze e device arrivano dal
+      // server, il persist conserva solo preferenze e aree scoperte.
       migrate: (persisted) => persisted as PersistedHome,
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedHome> | undefined;
@@ -486,7 +547,9 @@ export const useHomeStore = create<HomeState>()(
           ui: { ...current.ui, ...(saved.ui ?? {}), screenDimmed: false },
           telemetry: normalizeTelemetrySettings(saved.telemetry ?? current.telemetry),
           burnIn: normalizeBurnInSettings(saved.burnIn ?? current.burnIn),
-          rooms: mergeRooms(ROOMS, saved.rooms),
+          // Le stanze del server arrivano dopo il bootstrap; qui si conservano
+          // solo quelle scoperte nella sessione precedente.
+          rooms: mergeRooms([], saved.rooms),
           devices: {
             ...current.devices,
             ...Object.fromEntries(

@@ -1,7 +1,7 @@
 import { Lightbulb, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { roomLabel } from '@/config/rooms.config';
+import { roomLabel } from '@/lib/rooms';
 import { useHomeStore } from '@/store/homeStore';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';

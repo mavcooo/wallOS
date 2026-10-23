@@ -6,6 +6,10 @@ import { cn } from '@/lib/utils';
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
+export const DialogClose = DialogPrimitive.Close;
+export const DialogPortal = DialogPrimitive.Portal;
+export const DialogOverlay = DialogPrimitive.Overlay;
+export const DialogContentPrimitive = DialogPrimitive.Content;
 
 export function DialogContent({
   className,

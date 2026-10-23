@@ -97,6 +97,12 @@ export const BURN_IN_DEFAULTS = {
   safeMarginPx: 32,
 } as const;
 
+/** Polling del gateway/DB: la UI avvisa quando il database smette di rispondere. */
+export const HEALTH_MONITOR = {
+  intervalMs: 30_000,
+  timeoutMs: 8_000,
+} as const;
+
 export const KIOSK_DEFAULTS = {
   /** 2 minuti di inattività prima del dim. */
   dimmerTimeoutMs: 120_000,

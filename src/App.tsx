@@ -2,11 +2,14 @@ import { Lock } from 'lucide-react';
 
 import { AuthGate } from '@/components/auth/AuthGate';
 import { RequireRole } from '@/components/auth/RequireRole';
+import { TopologyGate } from '@/components/auth/TopologyGate';
 import { AppShell } from '@/components/layout/AppShell';
+import { DatabaseHealthMonitor } from '@/components/layout/DatabaseHealthMonitor';
 import { PinProvider } from '@/components/kiosk/PinProvider';
 import { Toaster } from '@/components/kiosk/Toaster';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { MqttProvider } from '@/mqtt/MqttProvider';
+import { AdminPage } from '@/pages/AdminPage';
 import { EnergyPage } from '@/pages/EnergyPage';
 import { OverviewPage } from '@/pages/OverviewPage';
 import { RoomsPage } from '@/pages/RoomsPage';
@@ -72,6 +75,12 @@ function CurrentView() {
           <UsersPage />
         </RequireRole>
       );
+    case 'admin':
+      return (
+        <RequireRole roles={['admin']} fallback={<AccessDenied view="Amministrazione" />}>
+          <AdminPage />
+        </RequireRole>
+      );
   }
 }
 
@@ -79,17 +88,24 @@ export default function App() {
   const view = useHomeStore((state) => state.ui.view);
 
   return (
-    <AuthGate>
-      <PinProvider>
-        <MqttProvider>
-          <AppShell>
-            <div key={view} className="animate-rise">
-              <CurrentView />
-            </div>
-          </AppShell>
-          <Toaster />
-        </MqttProvider>
-      </PinProvider>
-    </AuthGate>
+    <>
+      {/* Health del database a livello applicazione: notifiche e badge anche
+          sul lock screen, prima che la topologia sia caricata. */}
+      <DatabaseHealthMonitor />
+      <AuthGate>
+        <TopologyGate>
+          <PinProvider>
+            <MqttProvider>
+              <AppShell>
+                <div key={view} className="animate-rise">
+                  <CurrentView />
+                </div>
+              </AppShell>
+            </MqttProvider>
+          </PinProvider>
+        </TopologyGate>
+      </AuthGate>
+      <Toaster />
+    </>
   );
 }

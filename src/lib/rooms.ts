@@ -4,25 +4,19 @@ export interface RoomConfig {
   id: RoomId;
   label: string;
   shortLabel: string;
+  /** Metadati gestiti dall'amministrazione (non usati dai widget). */
+  icon?: string;
+  displayOrder?: number;
 }
 
 /** Stanza di fallback per le entità scoperte senza `suggested_area`. */
 export const UNASSIGNED_ROOM_ID = 'unassigned';
 
 /**
- * Seed delle stanze. Restano la base della dashboard, ma non sono più l'unica
- * fonte: Home Assistant MQTT Discovery può aggiungerne altre a runtime
- * (`ensureRoom` nello store).
+ * Le stanze arrivano da PostgreSQL (`GET /api/topology`). Discovery HA può
+ * aggiungerne altre a runtime (`ensureRoom` nello store): qui restano solo le
+ * funzioni pure condivise da store, header e widget.
  */
-export const ROOMS: readonly RoomConfig[] = [
-  { id: 'living', label: 'Soggiorno', shortLabel: 'Soggiorno' },
-  { id: 'kitchen', label: 'Cucina', shortLabel: 'Cucina' },
-  { id: 'bedroom', label: 'Camera', shortLabel: 'Camera' },
-  { id: 'study', label: 'Studio', shortLabel: 'Studio' },
-  { id: 'bath', label: 'Bagno', shortLabel: 'Bagno' },
-  { id: 'outdoor', label: 'Esterno', shortLabel: 'Esterno' },
-  { id: UNASSIGNED_ROOM_ID, label: 'Non assegnati', shortLabel: 'Altro' },
-];
 
 /** `Soggiorno` → `soggiorno`, `Bagno 2° piano` → `bagno-2-piano`. */
 export function roomIdFromLabel(label: string): RoomId {

@@ -102,7 +102,7 @@ export interface MqttApi {
 /**
  * Unica connessione MQTT dell'app.
  *
- * - sottoscrive i topic `stat` + `availability` di `devices.config.ts`
+ * - sottoscrive i topic `stat` + `availability` dei device caricati dal server
  * - decodifica con l'adapter associato al device e applica il patch allo store
  * - riconnessione manuale con backoff esponenziale + jitter (no reconnectPeriod)
  * - latenza reale via topic di echo (fallback: PINGREQ/PINGRESP)

@@ -10,13 +10,13 @@ export interface UserRow {
   role: UserRole;
   pin_hash: string;
   pin_length: number;
-  is_kiosk_device: number;
+  is_kiosk_device: boolean;
   kiosk_device_id: string | null;
-  allowed_rooms: string | null;
-  active: number;
+  allowed_rooms: string[] | null;
+  active: boolean;
   last_access: string | null;
-  created_at: number;
-  updated_at: number;
+  created_at: Date | string;
+  updated_at: Date | string;
 }
 
 export interface RefreshTokenRow {
@@ -25,19 +25,54 @@ export interface RefreshTokenRow {
   family_id: string;
   token_hash: string;
   kind: SessionKind;
-  expires_at: number;
-  revoked_at: number | null;
+  expires_at: Date | string;
+  revoked_at: Date | string | null;
   replaced_by: string | null;
   user_agent: string | null;
-  created_at: number;
+  created_at: Date | string;
 }
 
 export interface AttemptRow {
   key: string;
   failures: number;
-  window_started_at: number;
-  locked_until: number;
-  updated_at: number;
+  window_started_at: Date | string;
+  locked_until: Date | string | null;
+  updated_at: Date | string;
+}
+
+export interface RoomRow {
+  id: string;
+  name: string;
+  short_label: string | null;
+  icon: string;
+  display_order: number;
+}
+
+export interface DeviceRow {
+  id: string;
+  room_id: string;
+  name: string;
+  type: 'light' | 'climate' | 'power' | 'media' | 'sensor';
+  adapter: string;
+  model: string | null;
+  state_topic: string;
+  command_topic: string | null;
+  availability_topic: string | null;
+  field_map: Record<string, string> | null;
+  metadata: Record<string, unknown>;
+  favorite: boolean;
+  protected: boolean;
+  display_order: number;
+}
+
+export interface ScenarioRow {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  protected: boolean;
+  actions: unknown;
+  display_order: number;
 }
 
 /** Payload JWT: nessun dato sensibile, solo identità e scope. */
@@ -110,7 +145,18 @@ export interface AuthConfig {
   nodeEnv: string;
   host: string;
   port: number;
-  dbPath: string;
+  /** URL completa usata dal pool (mai loggata: contiene la password). */
+  databaseUrl: string;
+  /** Da dove arriva la connessione: `DATABASE_URL` ha la precedenza su `DB_*`. */
+  databaseUrlSource: 'DATABASE_URL' | 'DB_*';
+  dbHost: string;
+  dbPort: number;
+  dbName: string;
+  dbUser: string;
+  dbPoolMax: number;
+  dbSsl: boolean;
+  dbConnectTimeoutMs: number;
+  dbIdleTimeoutMs: number;
   jwtSecret: string;
   cookieSecure: boolean;
   trustProxy: boolean;

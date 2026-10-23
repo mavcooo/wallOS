@@ -6,7 +6,6 @@ import {
   ChevronRight,
 } from 'lucide-react';
 
-import { SCENARIOS } from '@/config/scenarios.config';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useHomeStore } from '@/store/homeStore';
 import { cn, formatTemp, formatWatts } from '@/lib/utils';
@@ -30,6 +29,7 @@ function averageTemperature(devices: Device[]): number | null {
 export function OverviewPage() {
   const devices = useHomeStore((state) => state.devices);
   const rooms = useHomeStore((state) => state.rooms);
+  const scenarios = useHomeStore((state) => state.scenarios);
   const setRoom = useHomeStore((state) => state.setRoom);
   const setView = useHomeStore((state) => state.setView);
   const { sendAction } = useMqttApi();
@@ -61,12 +61,12 @@ export function OverviewPage() {
               Scenari rapidi
             </h2>
             <p className="mt-0.5 text-[11px] text-fg-subtle">
-              Un tocco, più comandi · {SCENARIOS.length} scene disponibili
+              Un tocco, più comandi · {scenarios.length} scene disponibili
             </p>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          {SCENARIOS.map((scenario) => (
+          {scenarios.map((scenario) => (
             <ScenarioButton key={scenario.id} scenario={scenario} />
           ))}
         </div>

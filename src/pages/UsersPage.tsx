@@ -1,7 +1,7 @@
 import { Check, KeyRound, Lock, ShieldCheck, UserRound } from 'lucide-react';
 import { useEffect } from 'react';
 
-import { roomLabel } from '@/config/rooms.config';
+import { roomLabel } from '@/lib/rooms';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';

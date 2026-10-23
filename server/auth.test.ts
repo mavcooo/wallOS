@@ -1,9 +1,12 @@
+import { randomUUID } from 'node:crypto';
+
+import { PGlite } from '@electric-sql/pglite';
 import type { FastifyInstance, LightMyRequestResponse } from 'fastify';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import type { AuthDb } from './db.js';
+import { Database, type AuthDb } from './db.js';
 import { hashSecret } from './security.js';
 import type { AuthConfig, SessionResponse } from './types.js';
 
@@ -14,10 +17,33 @@ const FAMILY_PASSWORD = 'family-password-123';
 const FAMILY_PIN = '1357';
 
 const openApps: FastifyInstance[] = [];
+const openEngines: PGlite[] = [];
 
 afterEach(async () => {
   await Promise.all(openApps.splice(0).map((app) => app.close()));
+  await Promise.all(openEngines.splice(0).map((engine) => engine.close()));
 });
+
+/**
+ * PostgreSQL vero (WASM) senza un'istanza locale: lo schema, le FK e il JSONB
+ * dei test sono esattamente quelli di produzione.
+ */
+async function createTestDb(): Promise<Database> {
+  const engine = new PGlite();
+  openEngines.push(engine);
+  return new Database({
+    connectionString: 'postgres://test:test@localhost:5432/test',
+    client: {
+      async query<T>(sql: string, params?: readonly unknown[]) {
+        const result = await engine.query<T>(sql, params ? [...params] : undefined);
+        return { rows: result.rows, rowCount: result.affectedRows ?? 0 };
+      },
+      async exec(sql: string) {
+        await engine.exec(sql);
+      },
+    },
+  });
+}
 
 function setCookieHeaders(response: LightMyRequestResponse): string[] {
   const raw = response.headers['set-cookie'];
@@ -51,21 +77,23 @@ async function setup(): Promise<{ app: FastifyInstance; db: AuthDb; config: Auth
     KIOSK_PIN,
     KIOSK_DEVICE_ID: 'wall-panel-1',
     BCRYPT_ROUNDS: '4',
-    AUTH_DB_PATH: ':memory:',
+    DATABASE_URL: 'postgres://test:test@localhost:5432/test',
     COOKIE_SECURE: 'false',
     PIN_MAX_ATTEMPTS: '3',
     PIN_LOCKOUT_MS: '80',
     LOGIN_MAX_ATTEMPTS: '3',
     LOGIN_LOCKOUT_MS: '80',
   });
-  const { app, db } = await buildApp({ config });
+  const db = await createTestDb();
+  const { app } = await buildApp({ config, db });
   openApps.push(app);
   return { app, db, config };
 }
 
 async function addFamily(db: AuthDb): Promise<string> {
-  db.insertUser({
-    id: 'user-family',
+  const familyId = randomUUID();
+  await db.insertUser({
+    id: familyId,
     username: 'family',
     displayName: 'Giulia Conti',
     passwordHash: await hashSecret(FAMILY_PASSWORD, 4),
@@ -76,8 +104,8 @@ async function addFamily(db: AuthDb): Promise<string> {
     kioskDeviceId: null,
     allowedRooms: ['living', 'kitchen'],
   });
-  db.insertUser({
-    id: 'user-guest',
+  await db.insertUser({
+    id: randomUUID(),
     username: 'guest',
     displayName: 'Ospite',
     passwordHash: await hashSecret('guest-password-123', 4),
@@ -88,7 +116,7 @@ async function addFamily(db: AuthDb): Promise<string> {
     kioskDeviceId: null,
     allowedRooms: ['living'],
   });
-  return 'user-family';
+  return familyId;
 }
 
 async function login(
@@ -472,6 +500,53 @@ describe('RBAC e profili', () => {
       payload: { userId: adminId, pin: KIOSK_PIN },
     });
     expect(kioskUpward.statusCode).toBe(403);
+  });
+});
+
+describe('diagnostica database', () => {
+  it('legge versione e identità del server per il log di avvio', async () => {
+    const { db } = await setup();
+
+    const info = await db.serverInfo();
+
+    expect(info.version).toMatch(/PostgreSQL/i);
+    expect(info.database.length).toBeGreaterThan(0);
+    expect(info.user.length).toBeGreaterThan(0);
+    // Il log di startup non deve contenere credenziali.
+    expect(JSON.stringify(info)).not.toMatch(/password|postgres:\/\//i);
+  });
+});
+
+describe('health con stato del database', () => {
+  it('risponde 200 con versione PostgreSQL e latenza', async () => {
+    const { app } = await setup();
+
+    const response = await app.inject({ method: 'GET', url: '/api/health' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      status: 'ok',
+      database: {
+        status: 'up',
+        version: expect.stringMatching(/^PostgreSQL \d+/),
+        latencyMs: expect.any(Number),
+      },
+    });
+  });
+
+  it('risponde 503 con il codice di errore quando il database è irraggiungibile', async () => {
+    const { app, db } = await setup();
+    vi.spyOn(db, 'serverInfo').mockRejectedValue(
+      Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' }),
+    );
+
+    const response = await app.inject({ method: 'GET', url: '/api/health' });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      status: 'degraded',
+      database: { status: 'down', error: 'ECONNREFUSED' },
+    });
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Device } from '@/types/device';
+import type { Device } from '../../src/types/device.js';
 
 /**
  * MAPPATURA HARDWARE → MODELLO INTERNO

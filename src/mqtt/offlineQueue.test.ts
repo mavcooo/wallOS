@@ -23,6 +23,9 @@ afterEach(() => {
 async function setup() {
   vi.resetModules();
   const { useHomeStore } = await import('@/store/homeStore');
+  const { SEED_TOPOLOGY } = await import('@/test/fixtures');
+  // La topologia vive nel DB: il test la inietta come farebbe il bootstrap.
+  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
   const queue = await import('@/mqtt/offlineQueue');
   const { useToastStore } = await import('@/store/toastStore');
   return { useHomeStore, useToastStore, ...queue };

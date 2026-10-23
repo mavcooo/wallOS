@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import type { AuthDb } from '../db.js';
+import { timestampMs, type AuthDb } from '../db.js';
 import { HttpError, asRecord, readDigits, readSecret, readString } from '../http.js';
 import {
   REFRESH_COOKIE,
@@ -64,20 +64,20 @@ function userAgentOf(request: FastifyRequest): string | null {
   return typeof agent === 'string' ? agent.slice(0, 256) : null;
 }
 
-function createRefreshToken(
+async function createRefreshToken(
   db: AuthDb,
   config: AuthConfig,
   user: UserRow,
   kind: SessionKind,
   familyId: string,
   userAgent: string | null,
-): { token: string; id: string; ttlSec: number } {
+): Promise<{ token: string; id: string; ttlSec: number }> {
   const token = randomToken();
   const id = randomId();
   const ttlSec =
     kind === 'kiosk' ? config.kioskRefreshTtlSec : config.refreshTtlSec;
 
-  db.createRefreshToken({
+  await db.createRefreshToken({
     id,
     userId: user.id,
     familyId,
@@ -90,7 +90,7 @@ function createRefreshToken(
   return { token, id, ttlSec };
 }
 
-function issueSession(
+async function issueSession(
   db: AuthDb,
   config: AuthConfig,
   reply: FastifyReply,
@@ -98,8 +98,8 @@ function issueSession(
   kind: SessionKind,
   userAgent: string | null,
   familyId = randomId(),
-): string {
-  const refresh = createRefreshToken(db, config, user, kind, familyId, userAgent);
+): Promise<string> {
+  const refresh = await createRefreshToken(db, config, user, kind, familyId, userAgent);
   const accessToken = signAccessToken(
     {
       userId: user.id,
@@ -151,14 +151,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     }
 
     const attemptKey = `login:${username}:${request.ip}`;
-    assertNotLocked(db, attemptKey);
+    await assertNotLocked(db, attemptKey);
 
-    const user = db.findUserByUsername(username);
+    const user = await db.findUserByUsername(username);
     const hash = user?.password_hash ?? deps.dummyPasswordHash;
     const valid = await verifySecret(password, hash);
 
     if (!user || !valid) {
-      const failure = db.recordFailure(attemptKey, config.loginPolicy);
+      const failure = await db.recordFailure(attemptKey, config.loginPolicy);
       if (failure.lockedUntil > 0) {
         throw new HttpError(
           429,
@@ -173,15 +173,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       });
     }
 
-    if (user.active !== 1) {
+    if (!user.active) {
       throw new HttpError(403, 'ACCOUNT_DISABLED', 'Profilo disattivato');
     }
 
-    db.clearFailures(attemptKey);
-    db.markAccess(user.id, 'Sessione attiva');
-    issueSession(db, config, reply, user, 'user', userAgentOf(request));
+    await db.clearFailures(attemptKey);
+    await db.markAccess(user.id, 'Sessione attiva');
+    await issueSession(db, config, reply, user, 'user', userAgentOf(request));
 
-    const fresh = db.findUserById(user.id) ?? user;
+    const fresh = (await db.findUserById(user.id)) ?? user;
     return reply.send(sessionResponse(fresh, config));
   });
 
@@ -194,14 +194,14 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     }
 
     const attemptKey = `kiosk-pin:${deviceId.toLowerCase()}`;
-    assertNotLocked(db, attemptKey, 'PIN_LOCKED');
+    await assertNotLocked(db, attemptKey, 'PIN_LOCKED');
 
-    const user = db.findKioskByDeviceId(deviceId);
+    const user = await db.findKioskByDeviceId(deviceId);
     const hash = user?.pin_hash ?? deps.dummyPasswordHash;
     const valid = await verifySecret(pin, hash);
 
-    if (!user || !valid || user.active !== 1) {
-      const failure = db.recordFailure(attemptKey, config.pinPolicy);
+    if (!user || !valid || !user.active) {
+      const failure = await db.recordFailure(attemptKey, config.pinPolicy);
       if (failure.lockedUntil > 0) {
         throw new HttpError(
           429,
@@ -216,11 +216,11 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       });
     }
 
-    db.clearFailures(attemptKey);
-    db.markAccess(user.id, 'Kiosk collegato');
-    issueSession(db, config, reply, user, 'kiosk', userAgentOf(request));
+    await db.clearFailures(attemptKey);
+    await db.markAccess(user.id, 'Kiosk collegato');
+    await issueSession(db, config, reply, user, 'kiosk', userAgentOf(request));
 
-    const fresh = db.findUserById(user.id) ?? user;
+    const fresh = (await db.findUserById(user.id)) ?? user;
     return reply.send(sessionResponse(fresh, config));
   });
 
@@ -228,27 +228,27 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     const token = readCookie(request, REFRESH_COOKIE);
     if (!token) throw new HttpError(401, 'NO_REFRESH', 'Refresh token assente');
 
-    const row = db.findRefreshTokenByHash(hashToken(token));
+    const row = await db.findRefreshTokenByHash(hashToken(token));
     if (!row) throw new HttpError(401, 'INVALID_REFRESH', 'Refresh token non valido');
 
-    if (row.expires_at <= Date.now()) {
-      db.revokeRefreshToken(row.id);
+    if (timestampMs(row.expires_at) <= Date.now()) {
+      await db.revokeRefreshToken(row.id);
       throw new HttpError(401, 'EXPIRED_REFRESH', 'Sessione scaduta');
     }
 
     // Un token già ruotato che riappare indica un furto: si brucia la famiglia.
     if (row.revoked_at !== null) {
-      db.revokeRefreshFamily(row.family_id);
+      await db.revokeRefreshFamily(row.family_id);
       throw new HttpError(401, 'REFRESH_REUSED', 'Sessione revocata');
     }
 
-    const user = db.findUserById(row.user_id);
-    if (!user || user.active !== 1) {
-      db.revokeRefreshFamily(row.family_id);
+    const user = await db.findUserById(row.user_id);
+    if (!user || !user.active) {
+      await db.revokeRefreshFamily(row.family_id);
       throw new HttpError(401, 'ACCOUNT_UNAVAILABLE', 'Profilo non disponibile');
     }
 
-    const next = createRefreshToken(
+    const next = await createRefreshToken(
       db,
       config,
       user,
@@ -256,7 +256,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       row.family_id,
       userAgentOf(request),
     );
-    db.revokeRefreshToken(row.id, next.id);
+    await db.revokeRefreshToken(row.id, next.id);
 
     const accessToken = signAccessToken(
       {
@@ -302,8 +302,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     async (request, reply) => {
       const token = readCookie(request, REFRESH_COOKIE);
       if (token) {
-        const row = db.findRefreshTokenByHash(hashToken(token));
-        if (row) db.revokeRefreshFamily(row.family_id);
+        const row = await db.findRefreshTokenByHash(hashToken(token));
+        if (row) await db.revokeRefreshFamily(row.family_id);
       }
       clearSessionCookies(reply);
       return reply.code(204).send();
@@ -322,7 +322,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       if (!pin) throw new HttpError(400, 'INVALID_BODY', 'PIN obbligatorio');
 
       const attemptKey = pinAttemptKey(auth.user.id);
-      const retryAfterMs = db.lockRemaining(attemptKey);
+      const retryAfterMs = await db.lockRemaining(attemptKey);
       if (retryAfterMs > 0) {
         return {
           ok: false,
@@ -335,7 +335,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
 
       const valid = await verifySecret(pin, auth.user.pin_hash);
       if (!valid) {
-        const failure = db.recordFailure(attemptKey, config.pinPolicy);
+        const failure = await db.recordFailure(attemptKey, config.pinPolicy);
         const locked = failure.lockedUntil > 0;
         return {
           ok: false,
@@ -348,7 +348,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         };
       }
 
-      db.clearFailures(attemptKey);
+      await db.clearFailures(attemptKey);
       const elevatedUntil = Date.now() + config.elevationTtlSec * 1000;
       const elevationToken = signElevationToken(
         auth.user.id,
@@ -392,10 +392,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         }
 
         const attemptKey = pinAttemptKey(auth.user.id);
-        assertNotLocked(db, attemptKey, 'PIN_LOCKED');
+        await assertNotLocked(db, attemptKey, 'PIN_LOCKED');
         const validCurrent = await verifySecret(currentPin, auth.user.pin_hash);
         if (!validCurrent) {
-          const failure = db.recordFailure(attemptKey, config.pinPolicy);
+          const failure = await db.recordFailure(attemptKey, config.pinPolicy);
           throw new HttpError(
             400,
             'INVALID_PIN',
@@ -405,26 +405,26 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
               : { remainingAttempts: config.pinPolicy.maxAttempts - failure.failures },
           );
         }
-        db.clearFailures(attemptKey);
+        await db.clearFailures(attemptKey);
       }
 
       if (await verifySecret(newPin, auth.user.pin_hash)) {
         throw new HttpError(400, 'PIN_UNCHANGED', 'Il nuovo PIN coincide con quello attuale');
       }
 
-      db.updateUserPin(
+      await db.updateUserPin(
         auth.user.id,
         await hashSecret(newPin, config.bcryptRounds),
         pinLengthOf(newPin),
       );
-      db.clearFailures(pinAttemptKey(auth.user.id));
+      await db.clearFailures(pinAttemptKey(auth.user.id));
 
       // Le altre sessioni del profilo decadono; quella corrente resta valida.
       const refreshToken = readCookie(request, REFRESH_COOKIE);
       const current = refreshToken
-        ? db.findRefreshTokenByHash(hashToken(refreshToken))
+        ? await db.findRefreshTokenByHash(hashToken(refreshToken))
         : undefined;
-      db.revokeUserRefreshTokens(auth.user.id, current?.id);
+      await db.revokeUserRefreshTokens(auth.user.id, current?.id);
 
       clearElevationCookie(reply);
       return reply.code(204).send();
@@ -446,10 +446,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       }
 
       const attemptKey = pinAttemptKey(auth.user.id);
-      assertNotLocked(db, attemptKey, 'PIN_LOCKED');
+      await assertNotLocked(db, attemptKey, 'PIN_LOCKED');
       const valid = await verifySecret(pin, auth.user.pin_hash);
       if (!valid) {
-        const failure = db.recordFailure(attemptKey, config.pinPolicy);
+        const failure = await db.recordFailure(attemptKey, config.pinPolicy);
         throw new HttpError(
           403,
           'INVALID_PIN',
@@ -459,10 +459,10 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
             : { remainingAttempts: config.pinPolicy.maxAttempts - failure.failures },
         );
       }
-      db.clearFailures(attemptKey);
+      await db.clearFailures(attemptKey);
 
-      const target = db.findUserById(userId);
-      if (!target || target.active !== 1) {
+      const target = await db.findUserById(userId);
+      if (!target || !target.active) {
         throw new HttpError(404, 'USER_NOT_FOUND', 'Profilo non disponibile');
       }
       if (target.id === auth.user.id) {
@@ -509,7 +509,7 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
       if (auth.user.role === 'guest' || (auth.user.role === 'kiosk' && !auth.elevated)) {
         throw new HttpError(403, 'FORBIDDEN', 'Permessi insufficienti per l’elenco profili');
       }
-      const users: PublicUser[] = db.listUsers().map((user) => toPublicUser(user));
+      const users: PublicUser[] = (await db.listUsers()).map((user) => toPublicUser(user));
       return reply.send({ users });
     },
   );
@@ -536,13 +536,15 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
         throw new HttpError(400, 'SELF_DISABLE', 'Non puoi disattivare il tuo profilo');
       }
 
-      const target = db.findUserById(userId);
+      const target = await db.findUserById(userId);
       if (!target) throw new HttpError(404, 'USER_NOT_FOUND', 'Profilo non trovato');
 
-      db.setUserActive(userId, body.active);
-      if (!body.active) db.revokeUserRefreshTokens(userId);
+      await db.setUserActive(userId, body.active);
+      if (!body.active) await db.revokeUserRefreshTokens(userId);
 
-      return reply.send({ user: toPublicUser(db.findUserById(userId) ?? target) });
+      return reply.send({
+        user: toPublicUser((await db.findUserById(userId)) ?? target),
+      });
     },
   );
 }

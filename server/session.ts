@@ -46,7 +46,10 @@ export function elevationState(
 }
 
 /** Verifica il token di accesso e carica l'utente: nessuna fiducia nel client. */
-export function authenticate(request: FastifyRequest, deps: AuthDeps): AuthContext {
+export async function authenticate(
+  request: FastifyRequest,
+  deps: AuthDeps,
+): Promise<AuthContext> {
   const token = readCookie(request, ACCESS_COOKIE) ?? bearerToken(request);
   if (!token) {
     throw new HttpError(401, 'UNAUTHENTICATED', 'Sessione assente o scaduta');
@@ -57,8 +60,8 @@ export function authenticate(request: FastifyRequest, deps: AuthDeps): AuthConte
     throw new HttpError(401, 'UNAUTHENTICATED', 'Sessione non valida o scaduta');
   }
 
-  const user = deps.db.findUserById(claims.sub);
-  if (!user || user.active !== 1) {
+  const user = await deps.db.findUserById(claims.sub);
+  if (!user || !user.active) {
     throw new HttpError(401, 'UNAUTHENTICATED', 'Profilo non disponibile');
   }
 
@@ -71,7 +74,7 @@ export function authenticate(request: FastifyRequest, deps: AuthDeps): AuthConte
 
 export function requireAuth(deps: AuthDeps) {
   return async (request: FastifyRequest): Promise<void> => {
-    request.auth = authenticate(request, deps);
+    request.auth = await authenticate(request, deps);
   };
 }
 
@@ -85,8 +88,12 @@ export function requireRole(deps: AuthDeps, roles: readonly UserRow['role'][]) {
   };
 }
 
-export function assertNotLocked(db: AuthDb, key: string, code = 'RATE_LIMITED'): void {
-  const retryAfterMs = db.lockRemaining(key);
+export async function assertNotLocked(
+  db: AuthDb,
+  key: string,
+  code = 'RATE_LIMITED',
+): Promise<void> {
+  const retryAfterMs = await db.lockRemaining(key);
   if (retryAfterMs > 0) {
     throw new HttpError(
       429,
