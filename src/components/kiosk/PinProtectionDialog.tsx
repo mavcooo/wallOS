@@ -1,5 +1,6 @@
 import { Delete, Lock } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import {
@@ -67,6 +68,7 @@ export function PinProtectionDialog({
   verify,
   onSuccess,
 }: PinProtectionDialogProps) {
+  const { t } = useTranslation('auth');
   const rateConfig = useMemo(
     () =>
       normalizePinRateLimitConfig({
@@ -171,21 +173,17 @@ export function PinProtectionDialog({
         }
 
         setRemaining(result.remainingAttempts);
-        setError(
-          result.remainingAttempts === 1
-            ? 'PIN errato · 1 tentativo rimasto'
-            : `PIN errato · ${result.remainingAttempts} tentativi rimasti`,
-        );
+        setError(t('pinDialog.wrongPin', { count: result.remainingAttempts }));
       } catch {
         // Errori di rete/HTTP: non incrementano i tentativi locali.
         setDigits('');
-        setError('Verifica non disponibile. Riprova.');
+        setError(t('pinDialog.verifyUnavailable'));
       } finally {
         setChecking(false);
         verifyingRef.current = false;
       }
     },
-    [onOpenChange, onSuccess, rate, rateConfig, scope, verify],
+    [onOpenChange, onSuccess, rate, rateConfig, scope, t, verify],
   );
 
   useEffect(() => {
@@ -271,7 +269,7 @@ export function PinProtectionDialog({
             'mt-5 flex justify-center gap-3',
             shakeId > 0 && 'animate-shake motion-reduce:animate-none',
           )}
-          aria-label={`PIN di ${length} cifre`}
+          aria-label={t('pinDialog.digitsAria', { length })}
         >
           {Array.from({ length }, (_, index) => {
             const filled = index < digits.length;
@@ -297,9 +295,9 @@ export function PinProtectionDialog({
               role="alert"
               aria-live="assertive"
             >
-              <p className="text-xs font-semibold text-danger">Troppi tentativi errati</p>
+              <p className="text-xs font-semibold text-danger">{t('pinDialog.lockedTitle')}</p>
               <p className="mt-0.5 text-[11px] tabular text-danger/90">
-                Bloccato · riprova tra {lockoutSeconds}s
+                {t('pinDialog.lockedCountdown', { seconds: lockoutSeconds })}
               </p>
             </div>
           ) : (
@@ -311,7 +309,10 @@ export function PinProtectionDialog({
               role="status"
               aria-live="polite"
             >
-              {error ?? (checking ? 'Verifica sul gateway…' : `Inserisci il PIN di ${length} cifre`)}
+              {error ??
+                (checking
+                  ? t('pinDialog.checking')
+                  : t('pinDialog.prompt', { length }))}
             </p>
           )}
         </div>
@@ -338,7 +339,7 @@ export function PinProtectionDialog({
             onClick={clearDigits}
             disabled={isLocked || checking || digits.length === 0}
             className="flex h-14 items-center justify-center rounded-2xl text-xs font-medium uppercase tracking-wide text-fg-subtle transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="Cancella tutto"
+            aria-label={t('pinDialog.clearAll')}
           >
             C
           </button>
@@ -355,15 +356,17 @@ export function PinProtectionDialog({
             onClick={removeDigit}
             disabled={isLocked || checking || digits.length === 0}
             className="flex h-14 items-center justify-center rounded-2xl text-fg-subtle transition-colors hover:text-fg disabled:cursor-not-allowed disabled:opacity-30"
-            aria-label="Cancella ultima cifra"
+            aria-label={t('pinDialog.clearLast')}
           >
             <Delete className="size-5" />
           </button>
         </div>
 
         <p className="mt-4 text-center text-[10px] leading-relaxed text-fg-subtle">
-          Verifica sul gateway · blocco dopo {rateConfig.maxAttempts} tentativi errati
-          {remaining !== null && remaining > 0 && !isLocked ? ` · ${remaining} rimasti` : ''}
+          {t('pinDialog.footer', { count: rateConfig.maxAttempts })}
+          {remaining !== null && remaining > 0 && !isLocked
+            ? t('pinDialog.remaining', { count: remaining })
+            : ''}
         </p>
       </DialogContent>
     </Dialog>

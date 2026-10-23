@@ -9,13 +9,8 @@ export interface Restrictions {
   sensitiveActions: boolean;
 }
 
-export const ROLE_LABELS: Record<UserRole, string> = {
-  admin: 'Amministratore',
-  family: 'Famiglia',
-  guest: 'Ospite',
-  kiosk: 'Pannello Parete',
-};
-
+// Le etichette dei ruoli vivono nei dizionari i18n (`roles.*`), non qui: il
+// modulo espone solo la matrice dei permessi.
 export const ROLE_TONE: Record<UserRole, 'accent' | 'success' | 'neutral' | 'warning'> = {
   admin: 'accent',
   family: 'success',

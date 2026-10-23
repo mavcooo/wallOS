@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 
+import i18n from '@/i18n';
 import { ApiError, authApi } from '@/lib/authApi';
 import type {
   PinPolicy,
@@ -54,12 +55,15 @@ const anonymousState = {
 function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     if (error.retryAfterMs && error.retryAfterMs > 0) {
-      return `${error.message} · riprova tra ${Math.ceil(error.retryAfterMs / 1000)}s`;
+      return `${error.message} · ${i18n.t('lock.retryAfter', {
+        ns: 'auth',
+        seconds: Math.ceil(error.retryAfterMs / 1000),
+      })}`;
     }
     if (error.message) return error.message;
   }
   if (error instanceof Error && error.message) return error.message;
-  return 'Errore imprevisto';
+  return i18n.t('errors.unexpected');
 }
 
 let bootstrapInFlight: Promise<void> | null = null;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { HEALTH_MONITOR } from '@/config/app.config';
+import i18n from '@/i18n';
 import { fetchDatabaseHealth } from '@/lib/healthApi';
 import {
   useDatabaseHealthStore,
@@ -54,16 +55,20 @@ export function useDatabaseHealthMonitor(options?: {
       const toast = useToastStore.getState().push;
       if (health.status === 'down' && lastStatus.current !== 'down') {
         toast({
-          title: 'Database non raggiungibile',
-          description:
-            errorLabel(health.error) +
-            '. I dati della casa potrebbero non essere aggiornati: nuovo tentativo automatico.',
+          title: i18n.t('database.toast.downTitle'),
+          description: i18n.t('database.toast.downDescription', {
+            reason: errorLabel(health.error),
+          }),
           tone: 'error',
         });
       } else if (health.status === 'up' && lastStatus.current === 'down') {
         toast({
-          title: 'Database di nuovo disponibile',
-          description: `Connessione ripristinata${health.version ? ` · ${health.version}` : ''}.`,
+          title: i18n.t('database.toast.upTitle'),
+          description: i18n.t('database.toast.upDescription', {
+            version: health.version
+              ? i18n.t('database.toast.upVersion', { version: health.version })
+              : '',
+          }),
           tone: 'success',
         });
       }
@@ -90,17 +95,19 @@ function errorLabel(code: string | null): string {
   switch (code) {
     case 'ECONNREFUSED':
     case 'ENOTFOUND':
-      return 'Il gateway non risponde';
+      return i18n.t('database.errors.gatewayDown');
     case '28P01':
     case '28000':
-      return 'Autenticazione PostgreSQL rifiutata';
+      return i18n.t('database.errors.authRejected');
     case '3D000':
-      return 'Database PostgreSQL inesistente';
+      return i18n.t('database.errors.missingDatabase');
     case 'TIMEOUT':
-      return 'Il gateway non risponde entro il timeout';
+      return i18n.t('database.errors.timeout');
     case 'NETWORK':
-      return 'Errore di rete verso il gateway';
+      return i18n.t('database.errors.network');
     default:
-      return code ? `Errore database (${code})` : 'Errore database';
+      return code
+        ? i18n.t('database.errors.coded', { code })
+        : i18n.t('database.errors.generic');
   }
 }

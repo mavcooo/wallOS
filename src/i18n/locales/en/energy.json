@@ -1,0 +1,44 @@
+{
+  "summary": {
+    "instantLoad": {
+      "label": "Instantaneous load",
+      "hint": "{{active}} active sockets out of {{total}}"
+    },
+    "daily": {
+      "label": "Daily consumption",
+      "hint": "Estimated cost € {{cost}}"
+    },
+    "contracted": {
+      "label": "Contracted maximum power",
+      "hint": "Household contract · {{percent}}% used"
+    },
+    "average": {
+      "label": "Average socket draw",
+      "hint": "Average across currently active loads"
+    }
+  },
+  "live": {
+    "title": "Real-time telemetry",
+    "hint": "Each card subscribes to its own socket: only the ones that changed receive the flush"
+  },
+  "balance": {
+    "title": "Load balance",
+    "hint": "Total draw compared with the contractual limit",
+    "drawn": "{{value}} drawn"
+  },
+  "sockets": {
+    "title": "Smart sockets",
+    "hint": "Sorted by decreasing consumption",
+    "todayBadge": "{{value}} today",
+    "empty": "No sockets configured.",
+    "active": "Active",
+    "inactive": "Off",
+    "loadMax": "{{percent}}% of max load",
+    "todayShare": "{{value}} today · {{percent}}% of total",
+    "toggleAria": "Turn {{name}} on or off"
+  },
+  "guard": {
+    "title": "Protected load",
+    "description": "Confirm the command on {{name}}."
+  }
+}

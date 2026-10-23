@@ -181,9 +181,14 @@ domus-kiosk/
 │       ├── auth.ts                 # login, kiosk, refresh, PIN, profili
 │       └── topology.ts             # GET topologia + CRUD admin con validazione
 ├── src/
-│   ├── main.tsx                    # bootstrap React 19 + StrictMode
+│   ├── main.tsx                    # bootstrap React 19 + StrictMode + i18n
 │   ├── App.tsx                     # AuthGate, view router, RequireRole
-│   ├── index.css                   # design token Tailwind v4 + base kiosk
+│   ├── index.css                   # design token Tailwind v4, base kiosk,
+│   │                               # override tema alto contrasto
+│   │
+│   ├── i18n/
+│   │   ├── index.ts                # init i18next, detector, tipi delle chiavi
+│   │   └── locales/it|en/          # common, devices, energy, settings, auth
 │   │
 │   ├── types/
 │   │   ├── device.ts               # modello normalizzato (Device, stati, azioni)
@@ -194,6 +199,7 @@ domus-kiosk/
 │   │   └── app.config.ts           # default broker, timeout kiosk, burn-in
 │   ├── lib/
 │   │   ├── adminApi.ts             # CRUD stanze/device/scenari (ruolo admin)
+│   │   ├── contrast.ts             # preferenza alto contrasto + guard API
 │   │   ├── rooms.ts                # helper puri (slug, etichette), nessun seed
 │   │   └── topologyApi.ts          # GET /api/topology + refresh su 401
 │   │
@@ -219,10 +225,12 @@ domus-kiosk/
 │   │   ├── useKioskDimmer.ts       # inattività + wake-guard anti-tocco
 │   │   ├── useClock.ts             # orologio senza drift
 │   │   ├── useSwipeNavigation.ts   # gesture orizzontali pagine/stanze
+│   │   ├── useHighContrast.ts      # tema, prefers-contrast, sensore di luce
 │   │   └── useCurrentUser.ts       # sessione server + restrizioni UI
 │   │
 │   ├── store/
 │   │   ├── authStore.ts            # sessione, elevazione PIN, profili (no persist)
+│   │   ├── contrastStore.ts        # preferenza alto contrasto + sensore
 │   │   ├── homeStore.ts            # Zustand: entità, connessione, UI, preferenze
 │   │   └── toastStore.ts           # feedback comandi
 │   │
@@ -239,6 +247,8 @@ domus-kiosk/
 │   │   ├── layout/                 # AppShell, Sidebar, Header, Clock, ConnectionBadge
 │   │   ├── kiosk/                  # PinProtectionDialog, PinProvider,
 │   │   │                           # KioskDimmerOverlay, Toaster
+│   │   ├── settings/               # LanguageSwitcher, ContrastToggle,
+│   │   │                           # SunlightModeCard
 │   │   └── widgets/                # ClimateCard, LightCard, PowerCard, MediaCard,
 │   │                               # SensorTile, ScenarioButton, SummaryCard
 │   │
@@ -534,6 +544,67 @@ const swipe = useSwipeNavigation<RoomId>({
 return <div {...swipe.handlers} style={{ touchAction: 'pan-y' }}>…</div>;
 ```
 
+### Internazionalizzazione (i18n)
+L'interfaccia non contiene più testo italiano hardcoded: ogni stringa vive in
+`src/i18n/locales/<lingua>/<namespace>.json` ed è letta con `useTranslation()`.
+
+- Librerie: `i18next`, `react-i18next`, `i18next-browser-languagedetector`.
+- Namespace: `common` (shell, ruoli, errori, form admin), `devices` (widget e
+  comandi), `energy`, `settings` (impostazioni, lingua, utenti) e `auth`
+  (lock screen e dialog PIN). `common` è il default e il fallback.
+- Lingue: `it` (fallback) ed `en`; il detector legge **solo** `localStorage`
+  (`domus.language`), senza auto-switch sul `navigator`: un pannello nuovo resta
+  in italiano finché l'utente non sceglie.
+- Cambio a caldo: il selettore in Impostazioni chiama `i18n.changeLanguage`,
+  react-i18next ridisegna i componenti e il detector salva la preferenza (la
+  scelta sopravvive al riavvio del tablet). Anche `document.documentElement.lang`
+  viene aggiornato.
+- Formati: `formatWatts`, `formatKwh`, `formatTemp`, `formatTime`, `formatDate`
+  e i numeri dei sensori usano `Intl` con la locale attiva (`it-IT` / `en-GB`,
+  orologio a 24 ore).
+
+Le chiavi sono tipizzate: `src/i18n/index.ts` estende `CustomTypeOptions` di
+`i18next` con le risorse italiane, quindi una chiave inesistente è un errore di
+compilazione e l'autocompletamento propone solo `nav.*`, `devices.climate.*`, ecc.
+
+```tsx
+const { t } = useTranslation('devices');
+return <span>{t('climate.modes.heat')}</span>; // "Caldo" / "Heat"
+```
+
+Per aggiungere una lingua: copia `src/i18n/locales/en` in `<codice>/`,
+traduci i cinque file, aggiungi il codice a `SUPPORTED_LANGUAGES` e le risorse in
+`resources`, poi aggiungi l'opzione in `LanguageSwitcher`.
+
+Nomi di stanze, device e scenari sono dati (righe PostgreSQL), non copy: restano
+nella lingua con cui l'amministratore li ha inseriti.
+
+### Alto contrasto / leggibilità al sole
+Il tema nativo è pensato per un ambiente scuro: vicino a una finestra o in pieno
+sole i grigi attenuati e i bordi traslucidi spariscono. La modalità **Alta
+leggibilità** ricalibra i token, non i singoli componenti.
+
+- Attivazione: pulsante sole/contrasto nell'header (sempre visibile) e card in
+  Impostazioni con switch e tre modalità: **Automatica**, **Sempre**, **Mai**.
+- Token: `html[data-contrast="high"]` in `src/index.css` sovrascrive
+  `--color-bg` (`#000000`), `--color-panel`, `--color-line` (bianco pieno),
+  `--color-fg-muted` (bianco: nessun testo attenuato) e porta l'accento ad ambra
+  `#facc15`. I rapporti misurati vanno da **10.2:1** a **21:1**, sopra il minimo
+  WCAG AAA di 7:1.
+- Delimitatori e tipografia: ogni utility `border*` passa a 2px, `font-normal`
+  sale a 500, ombre e `backdrop-blur` vengono spenti (riflettono la luce).
+- Slider: track con bordo bianco, range ambra, thumb da 40 px con anello bianco
+  da 3px. Switch: track bordato e indicatori di forma (`|` ON, `O` OFF) oltre al
+  colore, pollice controbordato bianco/nero.
+- `useHighContrast` applica `<html data-contrast>` prima del paint, salva la
+  scelta in `localStorage` (`domus.contrast`) e ascolta:
+  - `prefers-contrast: more` via `matchMedia`;
+  - `AmbientLightSensor`, quando il browser lo espone: oltre **1000 lux**
+    attiva la modalità. Permesso negato o API assente → degradazione silenziosa,
+    resta l'attivazione manuale.
+  La scelta manuale (`Sempre`/`Mai`) vince su sistema e sensore; i listener sono
+  registrati una sola volta anche con header e Impostazioni montati insieme.
+
 ### Profili e restrizioni
 La sessione (id, ruolo, stanze, lunghezza PIN) arriva da `/api/auth/me`; non
 esiste più `activeUserId` nel persist locale. `AuthGate` non monta nessuna vista
@@ -580,7 +651,14 @@ un impianto reale:
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- `npm test` → 28 file, 189 test frontend (jsdom).
+- `npm test` → 34 file, 204 test frontend (jsdom).
+- i18n: parità chiavi `it`/`en` per tutti i namespace, cambio lingua a caldo con
+  persistenza in `localStorage` e `document.documentElement.lang`, fallback
+  italiano e test a compile time sulle chiavi tipizzate.
+- Alto contrasto: 9 test (toggle header con persistenza di `domus.contrast`,
+  listener `prefers-contrast`, soglia 1000 lux con override manuale, card
+  Impostazioni con motivazione, `data-slot` e indicatori di forma di slider e
+  switch).
 - Swipe: 9 test sul hook (soglia 60 px, esclusioni slider/pulsanti, fine
   corsa, gesti verticali, `preventScrollOnSwipe`, `trackMouse`), 3 su
   `RoomsPage` (cambio stanza, bounce alla prima, nessun cambio partendo da uno
@@ -625,8 +703,9 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 
 ## 8. Limiti noti / prossimi passi
 
-- Bundle unico ~786 kB (mqtt.js pesa ~300 kB): valutare `manualChunks` o import
-  dinamico di mqtt per ridurre il first paint su tablet datati.
+- Bundle unico ~970 kB (mqtt.js pesa ~300 kB, i18next + i cinque namespace
+  bilingui ~35 kB): valutare `manualChunks` o import dinamico di mqtt per
+  ridurre il first paint su tablet datati.
 - Lo stato runtime dei device non è persistito nel database: al reload si
   riparte dallo stato del seed finché il broker non ripubblica. Per impianti
   reali conviene `retain: true` sui topic di stato o un cache layer locale.

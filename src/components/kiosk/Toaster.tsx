@@ -1,4 +1,5 @@
 import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { useToastStore } from '@/store/toastStore';
@@ -10,6 +11,7 @@ const ICONS = {
 } as const;
 
 export function Toaster() {
+  const { t } = useTranslation();
   const toasts = useToastStore((state) => state.toasts);
   const dismiss = useToastStore((state) => state.dismiss);
 
@@ -52,7 +54,7 @@ export function Toaster() {
               type="button"
               onClick={() => dismiss(toast.id)}
               className="rounded-md p-1 text-fg-subtle transition-colors hover:text-fg"
-              aria-label="Chiudi notifica"
+              aria-label={t('actions.closeNotification')}
             >
               <X className="size-3.5" />
             </button>

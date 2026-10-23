@@ -1,17 +1,13 @@
 import { Check, KeyRound, Lock, ShieldCheck, UserRound } from 'lucide-react';
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { roomLabel } from '@/lib/rooms';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import {
-  ROLE_LABELS,
-  ROLE_TONE,
-  restrictionsFor,
-  type Restrictions,
-} from '@/lib/permissions';
+import { ROLE_TONE, restrictionsFor, type Restrictions } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
 import { useHomeStore } from '@/store/homeStore';
@@ -19,15 +15,16 @@ import { useToastStore } from '@/store/toastStore';
 import type { SessionUser } from '@/types/user';
 
 function RestrictionChips({ restrictions }: { restrictions: Restrictions }) {
+  const { t } = useTranslation('settings');
   const items = [
-    restrictions.settings && 'no impostazioni',
-    restrictions.energy && 'no consumi',
-    restrictions.users && 'no utenti',
-    restrictions.sensitiveActions && 'azioni con PIN',
+    restrictions.settings && t('users.restrictionsList.settings'),
+    restrictions.energy && t('users.restrictionsList.energy'),
+    restrictions.users && t('users.restrictionsList.users'),
+    restrictions.sensitiveActions && t('users.restrictionsList.sensitiveActions'),
   ].filter((item): item is string => Boolean(item));
 
   if (items.length === 0) {
-    return <span className="text-[10px] text-success">Accesso completo</span>;
+    return <span className="text-[10px] text-success">{t('users.fullAccess')}</span>;
   }
   return (
     <div className="flex flex-wrap gap-1">
@@ -44,6 +41,8 @@ function RestrictionChips({ restrictions }: { restrictions: Restrictions }) {
 }
 
 export function UsersPage() {
+  const { t } = useTranslation('settings');
+  const { t: tCommon } = useTranslation('common');
   const current = useCurrentUser();
   const users = useAuthStore((state) => state.users);
   const loadUsers = useAuthStore((state) => state.loadUsers);
@@ -57,46 +56,53 @@ export function UsersPage() {
   useEffect(() => {
     void loadUsers().catch(() => {
       pushToast({
-        title: 'Elenco profili non disponibile',
-        description: 'Il gateway locale non ha risposto.',
+        title: t('users.toasts.loadFailedTitle'),
+        description: t('users.toasts.loadFailedDescription'),
         tone: 'error',
       });
     });
-  }, [loadUsers, pushToast]);
+  }, [loadUsers, pushToast, t]);
 
   const canSwitch = current.role === 'admin' || (current.role === 'kiosk' && current.elevated);
   const canManage = current.role === 'admin';
+
+  const roleLabel = (role: SessionUser['role']) => tCommon(`roles.${role}`);
 
   const activateProfile = (user: SessionUser) => {
     if (user.id === current.id) return;
     if (!canSwitch) {
       pushToast({
-        title: 'Cambio profilo non consentito',
-        description: 'Solo admin o kiosk elevato con PIN possono cambiare profilo.',
+        title: t('users.toasts.switchDeniedTitle'),
+        description: t('users.toasts.switchDeniedDescription'),
         tone: 'error',
       });
       return;
     }
 
     requestPin({
-      title: 'Cambio profilo',
-      description: `Stai passando al profilo ${user.name} (${ROLE_LABELS[user.role]}).`,
-      action: 'La sessione temporanea scade senza revocare quella del dispositivo.',
+      title: t('users.toasts.switchTitle'),
+      description: t('users.toasts.switchDescription', {
+        name: user.name,
+        role: roleLabel(user.role),
+      }),
+      action: t('users.toasts.switchAction'),
       onConfirm: (pin) => {
         if (!pin) return;
         void switchUser(user.id, pin)
           .then(() => {
             pushToast({
-              title: `Profilo ${user.name} attivo`,
-              description: `${ROLE_LABELS[user.role]} · sessione temporanea`,
+              title: t('users.toasts.switchedTitle', { name: user.name }),
+              description: t('users.toasts.switchedDescription', {
+                role: roleLabel(user.role),
+              }),
               tone: 'success',
             });
           })
           .catch((error: unknown) => {
             pushToast({
-              title: 'Cambio profilo non riuscito',
+              title: t('users.toasts.switchFailedTitle'),
               description:
-                error instanceof Error ? error.message : 'Verifica PIN non riuscita.',
+                error instanceof Error ? error.message : t('users.toasts.switchFailedDescription'),
               tone: 'error',
             });
           });
@@ -109,14 +115,17 @@ export function UsersPage() {
     void setUserActive(user.id, active)
       .then(() => {
         pushToast({
-          title: active ? `${user.name} attivato` : `${user.name} disattivato`,
+          title: active
+            ? t('users.toasts.activated', { name: user.name })
+            : t('users.toasts.deactivated', { name: user.name }),
           tone: 'success',
         });
       })
       .catch((error: unknown) => {
         pushToast({
-          title: 'Aggiornamento non riuscito',
-          description: error instanceof Error ? error.message : 'Operazione rifiutata.',
+          title: t('users.toasts.updateFailedTitle'),
+          description:
+            error instanceof Error ? error.message : t('users.toasts.updateFailedDescription'),
           tone: 'error',
         });
       });
@@ -128,30 +137,28 @@ export function UsersPage() {
         <div className="flex flex-col justify-between rounded-[var(--radius-card)] border border-line bg-panel p-4">
           <div>
             <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-              Sessione attiva
+              {t('users.session')}
             </p>
             <p className="mt-2 text-lg font-medium text-fg">{current.name}</p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <Badge variant={ROLE_TONE[current.role]}>{ROLE_LABELS[current.role]}</Badge>
-              {current.elevated ? <Badge variant="warning">PIN elevato</Badge> : null}
-              {temporary ? <Badge variant="outline">Temporaneo</Badge> : null}
+              <Badge variant={ROLE_TONE[current.role]}>{roleLabel(current.role)}</Badge>
+              {current.elevated ? (
+                <Badge variant="warning">{t('users.elevated')}</Badge>
+              ) : null}
+              {temporary ? <Badge variant="outline">{t('users.temporary')}</Badge> : null}
               <span className="text-[10px] text-fg-subtle">
                 {current.allowedRooms
-                  ? `${current.allowedRooms.length} stanze abilitate`
-                  : 'Tutte le stanze'}
+                  ? t('users.roomsAllowed', { count: current.allowedRooms.length })
+                  : t('users.allRooms')}
               </span>
             </div>
           </div>
-          <p className="mt-4 text-[10px] leading-relaxed text-fg-subtle">
-            Il profilo arriva da /api/auth/me e non da un file compilato nel bundle. Il cambio
-            profilo è verificato dal gateway e la sessione temporanea non sovrascrive il
-            refresh kiosk.
-          </p>
+          <p className="mt-4 text-[10px] leading-relaxed text-fg-subtle">{t('users.sessionNote')}</p>
         </div>
 
         <div className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
           <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-            Restrizioni correnti
+            {t('users.restrictions')}
           </p>
           <div className="mt-3">
             <RestrictionChips restrictions={current.restrictions} />
@@ -167,7 +174,7 @@ export function UsersPage() {
             ))}
             {current.allowedRooms === null ? (
               <span className="rounded-md border border-line bg-panel-2 px-2 py-0.5 text-[10px] text-fg-muted">
-                Tutte le stanze
+                {t('users.allRooms')}
               </span>
             ) : null}
           </div>
@@ -175,20 +182,21 @@ export function UsersPage() {
 
         <div className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
           <p className="text-[11px] font-medium uppercase tracking-wider text-fg-subtle">
-            Sicurezza locale
+            {t('users.security')}
           </p>
           <ul className="mt-3 flex flex-col gap-2 text-[11px] text-fg-muted">
             <li className="flex items-center gap-2">
-              <ShieldCheck className="size-3.5 text-success" /> PIN bcrypt solo nel database
+              <ShieldCheck className="size-3.5 text-success" />
+              {t('users.securityItems.pin')}
             </li>
             <li className="flex items-center gap-2">
-              <Lock className="size-3.5 text-accent" /> Lockout server-side dopo 3 errori
+              <Lock className="size-3.5 text-accent" /> {t('users.securityItems.lockout')}
             </li>
             <li className="flex items-center gap-2">
-              <KeyRound className="size-3.5 text-warning" /> JWT HttpOnly · refresh rotation
+              <KeyRound className="size-3.5 text-warning" /> {t('users.securityItems.token')}
             </li>
             <li className="flex items-center gap-2">
-              <UserRound className="size-3.5 text-fg-subtle" /> Ruoli applicati a viste e API
+              <UserRound className="size-3.5 text-fg-subtle" /> {t('users.securityItems.roles')}
             </li>
           </ul>
         </div>
@@ -196,11 +204,9 @@ export function UsersPage() {
 
       <section className="flex flex-col gap-2.5">
         <div>
-          <h2 className="text-sm font-semibold text-fg">Profili</h2>
+          <h2 className="text-sm font-semibold text-fg">{t('users.profiles')}</h2>
           <p className="mt-0.5 text-[11px] text-fg-subtle">
-            {canSwitch
-              ? 'Seleziona il profilo da usare su questo dispositivo (richiede PIN)'
-              : 'Solo un amministratore o un kiosk elevato può cambiare profilo'}
+            {canSwitch ? t('users.profilesHint') : t('users.profilesReadOnly')}
           </p>
         </div>
         <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-4">
@@ -235,14 +241,14 @@ export function UsersPage() {
                 </div>
                 <div className="w-full">
                   <p className="truncate text-sm font-medium text-fg">{user.name}</p>
-                  <p className="text-[10px] text-fg-subtle">{ROLE_LABELS[user.role]}</p>
+                  <p className="text-[10px] text-fg-subtle">{roleLabel(user.role)}</p>
                 </div>
               </button>
             );
           })}
           {users.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[11px] text-fg-subtle">
-              Caricamento profili dal gateway…
+              {t('users.loading')}
             </p>
           ) : null}
         </div>
@@ -250,9 +256,9 @@ export function UsersPage() {
 
       <section className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-panel">
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <h2 className="text-sm font-semibold text-fg">Utenti locali</h2>
+          <h2 className="text-sm font-semibold text-fg">{t('users.listTitle')}</h2>
           <span className="text-[10px] text-fg-subtle">
-            {users.length} profili nel database
+            {t('users.listCount', { count: users.length })}
           </span>
         </div>
         <ul className="divide-y divide-line">
@@ -269,15 +275,15 @@ export function UsersPage() {
                   <p className="flex items-center gap-2 truncate text-sm font-medium text-fg">
                     {user.name}
                     <Badge variant={ROLE_TONE[user.role]} className="shrink-0">
-                      {ROLE_LABELS[user.role]}
+                      {roleLabel(user.role)}
                     </Badge>
                   </p>
                   <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
                     {user.allowedRooms === null
-                      ? 'Tutte le stanze'
+                      ? t('users.allRooms')
                       : user.allowedRooms.map((room) => roomLabel(rooms, room)).join(' · ')}
                     {' · '}
-                    {user.lastAccess ?? 'mai'}
+                    {user.lastAccess ?? t('users.neverAccess')}
                   </p>
                 </div>
               </div>
@@ -288,13 +294,13 @@ export function UsersPage() {
 
               <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
                 <span className="text-[10px] text-fg-subtle">
-                  {user.active ? 'Attivo' : 'Disattivato'}
+                  {user.active ? t('users.active') : t('users.inactive')}
                 </span>
                 <Switch
                   checked={user.active}
                   onCheckedChange={(active) => toggleActive(user, active)}
                   disabled={!canManage || user.id === current.id}
-                  aria-label={`Attiva o disattiva ${user.name}`}
+                  aria-label={t('users.toggleAria', { name: user.name })}
                 />
               </div>
             </li>
@@ -303,9 +309,7 @@ export function UsersPage() {
       </section>
 
       <p className="rounded-xl border border-line bg-panel/60 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">
-        Nota architetturale: ruoli e permessi sono verificati dal micro-servizio auth e
-        applicati alle API. Le restrizioni mostrate qui servono solo a nascondere o
-        disabilitare controlli: un client browser non è un confine di sicurezza.
+        {t('users.note')}
       </p>
     </div>
   );

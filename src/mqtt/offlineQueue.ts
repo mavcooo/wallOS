@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import { OFFLINE_QUEUE } from '@/config/app.config';
+import i18n from '@/i18n';
 import { rollbackState } from '@/mqtt/optimistic';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
@@ -223,11 +224,11 @@ function rollbackCommand(command: QueuedCommand, reason: 'expired' | 'failed'): 
   if (patch) useHomeStore.getState().applyOptimistic(command.deviceId, patch);
 
   useToastStore.getState().push({
-    title: reason === 'expired' ? 'Comando scaduto' : 'Comando non sincronizzato',
-    description:
-      reason === 'expired'
-        ? `${command.deviceName} · ${command.label}: rimasto offline troppo a lungo, valore ripristinato.`
-        : `${command.deviceName} · ${command.label}: il broker non ha confermato, valore ripristinato.`,
+    title: i18n.t(reason === 'expired' ? 'queue.expiredTitle' : 'queue.failedTitle'),
+    description: i18n.t(
+      reason === 'expired' ? 'queue.expiredDescription' : 'queue.failedDescription',
+      { device: command.deviceName, action: command.label },
+    ),
     tone: reason === 'expired' ? 'info' : 'error',
   });
   return true;
@@ -410,24 +411,27 @@ export function collapseKeyFor(action: ControlAction): string {
 }
 
 export function describeAction(action: ControlAction): string {
+  // Le etichette sono usate nei toast di rollback: vanno nella lingua attiva
+  // al momento dell'invio, non in quella del bundle.
+  const t = i18n.getFixedT(null, 'devices');
   switch (action.type) {
     case 'power':
-      return action.on ? 'Accensione' : 'Spegnimento';
+      return t(action.on ? 'actionLabels.powerOn' : 'actionLabels.powerOff');
     case 'brightness':
-      return `Luminosità ${action.brightness}%`;
+      return t('actionLabels.brightness', { value: action.brightness });
     case 'colorTemp':
-      return `Temperatura colore ${action.kelvin} K`;
+      return t('actionLabels.colorTemp', { value: action.kelvin });
     case 'targetTemp':
-      return `Setpoint ${action.targetTemp} °C`;
+      return t('actionLabels.targetTemp', { value: action.targetTemp });
     case 'climateMode':
-      return `Modalità ${action.mode}`;
+      return t('actionLabels.climateMode', { mode: action.mode });
     case 'fanSpeed':
-      return `Ventola ${action.fanSpeed}`;
+      return t('actionLabels.fanSpeed', { speed: action.fanSpeed });
     case 'swing':
-      return `Oscillazione ${action.swing ? 'on' : 'off'}`;
+      return t('actionLabels.swing', { state: action.swing ? 'on' : 'off' });
     case 'volume':
-      return `Volume ${action.volume}`;
+      return t('actionLabels.volume', { value: action.volume });
     case 'source':
-      return `Sorgente ${action.source}`;
+      return t('actionLabels.source', { source: action.source });
   }
 }

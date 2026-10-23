@@ -2,6 +2,10 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup } from '@testing-library/react';
 import { afterEach } from 'vitest';
 
+// I componenti usano gli hook react-i18next: l'istanza deve esistere anche nei
+// test che non montano <App /> (che la importa dal proprio entry point).
+import '@/i18n';
+
 // React Testing Library fa il cleanup automatico solo con i globali di test
 // attivi: qui i test importano `afterEach` da vitest, quindi va chiamato a mano.
 afterEach(() => {

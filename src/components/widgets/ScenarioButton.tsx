@@ -9,6 +9,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useMqttApi } from '@/mqtt/MqttProvider';
@@ -23,6 +24,7 @@ const ICONS: Record<string, LucideIcon> = {
 };
 
 export function ScenarioButton({ scenario }: { scenario: Scenario }) {
+  const { t } = useTranslation('devices');
   const { runScenario } = useMqttApi();
   const requestPin = usePinGuard();
   const [running, setRunning] = useState(false);
@@ -41,9 +43,9 @@ export function ScenarioButton({ scenario }: { scenario: Scenario }) {
   const handleClick = () => {
     if (scenario.protected) {
       requestPin({
-        title: 'Scenario protetto',
-        description: `Per attivare “${scenario.label}” inserisci il PIN del pannello.`,
-        action: `${scenario.steps.length} comandi verranno inviati.`,
+        title: t('scenario.protectedTitle'),
+        description: t('scenario.protectedDescription', { label: scenario.label }),
+        action: t('scenario.protectedSteps', { count: scenario.steps.length }),
         onConfirm: () => {
           void execute();
         },
@@ -68,7 +70,7 @@ export function ScenarioButton({ scenario }: { scenario: Scenario }) {
           {running ? <Loader2 className="size-5 animate-spin" /> : <Icon className="size-5" />}
         </span>
         {scenario.protected ? (
-          <Lock className="size-3.5 text-fg-subtle" aria-label="Richiede PIN" />
+          <Lock className="size-3.5 text-fg-subtle" aria-label={t('scenario.requiresPin')} />
         ) : null}
       </span>
       <span className="w-full">

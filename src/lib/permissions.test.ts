@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  ROLE_LABELS,
-  canAccess,
-  canView,
-  restrictionsFor,
-} from '@/lib/permissions';
+import i18n from '@/i18n';
+import { canAccess, canView, restrictionsFor } from '@/lib/permissions';
 
 describe('permessi derivati dal ruolo', () => {
   it('admin ha accesso completo', () => {
@@ -50,10 +46,8 @@ describe('permessi derivati dal ruolo', () => {
     expect(canView({ role: 'guest' }, true, 'users')).toBe(false);
   });
 
-  it('espone etichette per tutti i ruoli del server', () => {
-    expect(ROLE_LABELS.admin).toBe('Amministratore');
-    expect(ROLE_LABELS.family).toBe('Famiglia');
-    expect(ROLE_LABELS.guest).toBe('Ospite');
-    expect(ROLE_LABELS.kiosk).toBe('Pannello Parete');
+  it('le etichette dei ruoli arrivano dal dizionario tradotto', () => {
+    expect(i18n.t('roles.admin')).toBe('Amministratore');
+    expect(i18n.t('roles.kiosk')).toBe('Pannello Parete');
   });
 });

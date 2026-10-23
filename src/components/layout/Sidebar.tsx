@@ -1,30 +1,33 @@
 import { ChartNoAxesColumn, House, LayoutGrid, Settings, Users, Wrench } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
-import { ROLE_LABELS, canView } from '@/lib/permissions';
+import { canView } from '@/lib/permissions';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHomeStore, type ViewId } from '@/store/homeStore';
 
 interface NavItem {
   id: ViewId;
-  label: string;
   icon: LucideIcon;
 }
 
+// Solo dati strutturali: le etichette arrivano da `nav.*` nel dizionario.
 const NAV: readonly NavItem[] = [
-  { id: 'overview', label: 'Overview', icon: LayoutGrid },
-  { id: 'rooms', label: 'Stanze', icon: House },
-  { id: 'energy', label: 'Consumi', icon: ChartNoAxesColumn },
-  { id: 'settings', label: 'Impostazioni', icon: Settings },
-  { id: 'users', label: 'Utenti', icon: Users },
-  { id: 'admin', label: 'Amministrazione', icon: Wrench },
+  { id: 'overview', icon: LayoutGrid },
+  { id: 'rooms', icon: House },
+  { id: 'energy', icon: ChartNoAxesColumn },
+  { id: 'settings', icon: Settings },
+  { id: 'users', icon: Users },
+  { id: 'admin', icon: Wrench },
 ];
 
 export function Sidebar() {
+  const { t } = useTranslation();
   const view = useHomeStore((state) => state.ui.view);
   const setView = useHomeStore((state) => state.setView);
   const user = useCurrentUser();
+  const roleLabel = t(`roles.${user.role}`);
 
   return (
     <aside className="flex w-[84px] shrink-0 flex-col border-r border-line bg-panel/60 xl:w-[236px]">
@@ -33,23 +36,31 @@ export function Sidebar() {
           <House className="size-5" strokeWidth={2.2} />
         </div>
         <div className="hidden min-w-0 flex-col xl:flex">
-          <span className="text-sm font-semibold tracking-[0.18em] text-fg">DOMUS</span>
-          <span className="text-[10px] uppercase tracking-wider text-fg-subtle">Local control</span>
+          <span className="text-sm font-semibold tracking-[0.18em] text-fg">
+            {t('app.name')}
+          </span>
+          <span className="text-[10px] uppercase tracking-wider text-fg-subtle">
+            {t('app.tagline')}
+          </span>
         </div>
       </div>
 
-      <nav className="flex flex-1 flex-col gap-1.5 px-2.5 py-4 xl:px-3" aria-label="Navigazione">
+      <nav
+        className="flex flex-1 flex-col gap-1.5 px-2.5 py-4 xl:px-3"
+        aria-label={t('nav.label')}
+      >
         {NAV.map((item) => {
           const disabled = !canView(user, user.elevated, item.id);
           const active = view === item.id;
           const Icon = item.icon;
+          const label = t(`nav.${item.id}`);
           return (
             <button
               key={item.id}
               type="button"
               disabled={disabled}
               onClick={() => setView(item.id)}
-              title={disabled ? `${item.label} non consentito per ${ROLE_LABELS[user.role]}` : item.label}
+              title={disabled ? t('nav.denied', { label, role: roleLabel }) : label}
               className={cn(
                 'group relative flex min-h-12 items-center justify-center gap-3 rounded-2xl px-3 text-sm font-medium transition-colors xl:justify-start xl:px-4',
                 active
@@ -63,7 +74,7 @@ export function Sidebar() {
                 <span className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-accent" />
               ) : null}
               <Icon className={cn('size-5 shrink-0', active && 'text-accent')} />
-              <span className="hidden xl:inline">{item.label}</span>
+              <span className="hidden xl:inline">{label}</span>
             </button>
           );
         })}
@@ -82,7 +93,7 @@ export function Sidebar() {
           </span>
           <span className="hidden min-w-0 flex-col xl:flex">
             <span className="truncate text-xs font-medium text-fg">{user.name}</span>
-            <span className="truncate text-[10px] text-fg-subtle">{ROLE_LABELS[user.role]}</span>
+            <span className="truncate text-[10px] text-fg-subtle">{roleLabel}</span>
           </span>
         </button>
       </div>

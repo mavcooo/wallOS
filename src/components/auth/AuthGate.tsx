@@ -1,10 +1,12 @@
 import { Loader2 } from 'lucide-react';
 import { useEffect, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { useAuthStore } from '@/store/authStore';
 import { LockScreen } from './LockScreen';
 
 function SessionSplash() {
+  const { t } = useTranslation();
   return (
     <div
       className="flex min-h-dvh flex-col items-center justify-center gap-3 bg-bg text-fg-subtle"
@@ -12,7 +14,7 @@ function SessionSplash() {
       aria-live="polite"
     >
       <Loader2 className="size-5 animate-spin text-accent" />
-      <p className="text-[11px] uppercase tracking-wider">Verifica sessione…</p>
+      <p className="text-[11px] uppercase tracking-wider">{t('gate.sessionLoading')}</p>
     </div>
   );
 }

@@ -11,7 +11,10 @@ import {
   Wifi,
 } from 'lucide-react';
 import { useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
+import { LanguageSwitcher } from '@/components/settings/LanguageSwitcher';
+import { SunlightModeCard } from '@/components/settings/SunlightModeCard';
 import { KIOSK_DEFAULTS } from '@/config/app.config';
 import { BURN_IN_INTERVAL_OPTIONS, BURN_IN_LIMITS } from '@/lib/burnIn';
 import { ADAPTERS } from '@/mqtt/adapters';
@@ -37,8 +40,12 @@ const TIMEOUT_OPTIONS = [
 ] as const;
 
 const BURN_IN_MODE_OPTIONS = [
-  { value: 'screensaver-float', label: 'Orologio flottante', hint: 'Salti in punti casuali' },
-  { value: 'subtle-shift', label: 'Micro-shift', hint: 'Oscilla di 1-4 px' },
+  {
+    value: 'screensaver-float',
+    labelKey: 'kiosk.modes.floating',
+    hintKey: 'kiosk.modes.floatingHint',
+  },
+  { value: 'subtle-shift', labelKey: 'kiosk.modes.shift', hintKey: 'kiosk.modes.shiftHint' },
 ] as const;
 
 function Field({
@@ -60,6 +67,8 @@ function Field({
 }
 
 export function SettingsPage() {
+  const { t } = useTranslation('settings');
+  const { t: tCommon } = useTranslation('common');
   const broker = useHomeStore((state) => state.broker);
   const updateBroker = useHomeStore((state) => state.updateBroker);
   const connection = useHomeStore((state) => state.connection);
@@ -90,13 +99,17 @@ export function SettingsPage() {
 
   const saveBroker = () => {
     if (!draft.host.trim() || draft.port <= 0) {
-      pushToast({ title: 'Configurazione non valida', description: 'Host e porta sono obbligatori.', tone: 'error' });
+      pushToast({
+        title: t('broker.invalidTitle'),
+        description: t('broker.invalidDescription'),
+        tone: 'error',
+      });
       return;
     }
     updateBroker(draft);
     pushToast({
-      title: 'Broker aggiornato',
-      description: 'Riconnessione in corso con i nuovi parametri.',
+      title: t('broker.updatedTitle'),
+      description: t('broker.updatedDescription'),
       tone: 'success',
     });
   };
@@ -108,26 +121,26 @@ export function SettingsPage() {
 
   const submitPinChange = () => {
     if (!/^\d{4,6}$/.test(newPin)) {
-      setPinError('Il PIN deve contenere da 4 a 6 cifre.');
+      setPinError(t('pin.errorLength'));
       return;
     }
     if (newPin !== confirmPin) {
-      setPinError('I due PIN non coincidono.');
+      setPinError(t('pin.errorMismatch'));
       return;
     }
     setPinError(null);
     requestPin({
-      title: 'Conferma PIN attuale',
-      description: 'La verifica avviene sul gateway; il nuovo PIN non lascia mai il server.',
+      title: t('pin.confirmTitle'),
+      description: t('pin.confirmDescription'),
       onConfirm: () => {
         void changePin(newPin)
           .then(() => {
             setNewPin('');
             setConfirmPin('');
-            pushToast({ title: 'PIN aggiornato', tone: 'success' });
+            pushToast({ title: t('pin.updatedTitle'), tone: 'success' });
           })
           .catch((error: unknown) => {
-            setPinError(error instanceof Error ? error.message : 'Aggiornamento PIN non riuscito.');
+            setPinError(error instanceof Error ? error.message : t('pin.updateFailed'));
           });
       },
     });
@@ -141,22 +154,20 @@ export function SettingsPage() {
           <CardHeader>
             <div>
               <CardTitle className="flex items-center gap-2">
-                <Wifi className="size-4 text-accent" /> Broker MQTT
+                <Wifi className="size-4 text-accent" /> {t('broker.title')}
               </CardTitle>
-              <CardDescription className="mt-1">
-                Connessione WebSocket in LAN · parametri applicati al pannello
-              </CardDescription>
+              <CardDescription className="mt-1">{t('broker.description')}</CardDescription>
             </div>
             <Badge variant={dirty ? 'warning' : 'success'}>
-              {dirty ? 'Modifiche non salvate' : 'Allineato'}
+              {dirty ? t('broker.dirty') : t('broker.aligned')}
             </Badge>
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               <div className="col-span-2">
-                <Field label="Host / IP broker">
+                <Field label={t('broker.host')}>
                   <Input
-                    aria-label="Host / IP broker"
+                    aria-label={t('broker.host')}
                     value={draft.host}
                     onChange={(event) => patch({ host: event.target.value })}
                     placeholder="192.168.1.10"
@@ -165,18 +176,18 @@ export function SettingsPage() {
                   />
                 </Field>
               </div>
-              <Field label="Porta WS">
+              <Field label={t('broker.port')}>
                 <Input
-                  aria-label="Porta WS"
+                  aria-label={t('broker.port')}
                   type="number"
                   inputMode="numeric"
                   value={draft.port}
                   onChange={(event) => patch({ port: Number(event.target.value) })}
                 />
               </Field>
-              <Field label="Path">
+              <Field label={t('broker.path')}>
                 <Input
-                  aria-label="Path"
+                  aria-label={t('broker.path')}
                   value={draft.path}
                   onChange={(event) => patch({ path: event.target.value })}
                   placeholder="/mqtt"
@@ -185,7 +196,7 @@ export function SettingsPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Field label="Protocollo">
+              <Field label={t('broker.protocol')}>
                 <div className="flex gap-1.5">
                   {(['ws', 'wss'] as const).map((protocol) => (
                     <button
@@ -204,9 +215,9 @@ export function SettingsPage() {
                   ))}
                 </div>
               </Field>
-              <Field label="KeepAlive (s)">
+              <Field label={t('broker.keepAlive')}>
                 <Input
-                  aria-label="KeepAlive (s)"
+                  aria-label={t('broker.keepAlive')}
                   type="number"
                   inputMode="numeric"
                   value={draft.keepAlive}
@@ -214,10 +225,10 @@ export function SettingsPage() {
                 />
               </Field>
               <div className="col-span-2">
-                <Field label="Client ID" hint="Deve essere univoco sul broker.">
+                <Field label={t('broker.clientId')} hint={t('broker.clientIdHint')}>
                   <div className="flex gap-2">
                     <Input
-                      aria-label="Client ID"
+                      aria-label={t('broker.clientId')}
                       value={draft.clientId}
                       onChange={(event) => patch({ clientId: event.target.value })}
                       spellCheck={false}
@@ -227,7 +238,7 @@ export function SettingsPage() {
                       variant="outline"
                       size="icon"
                       onClick={regenerateClientId}
-                      aria-label="Genera nuovo Client ID"
+                      aria-label={t('broker.regenerateClientId')}
                     >
                       <RefreshCw className="size-4" />
                     </Button>
@@ -237,27 +248,27 @@ export function SettingsPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-              <Field label="Username (opzionale)">
+              <Field label={t('broker.username')}>
                 <Input
-                  aria-label="Username (opzionale)"
+                  aria-label={t('broker.username')}
                   value={draft.username}
                   onChange={(event) => patch({ username: event.target.value })}
                   autoComplete="off"
                   spellCheck={false}
                 />
               </Field>
-              <Field label="Password (opzionale)">
+              <Field label={t('broker.password')}>
                 <Input
-                  aria-label="Password (opzionale)"
+                  aria-label={t('broker.password')}
                   type="password"
                   value={draft.password}
                   onChange={(event) => patch({ password: event.target.value })}
                   autoComplete="new-password"
                 />
               </Field>
-              <Field label="Base topic (opzionale)" hint="Prefisso applicato a tutti i topic.">
+              <Field label={t('broker.baseTopic')} hint={t('broker.baseTopicHint')}>
                 <Input
-                  aria-label="Base topic (opzionale)"
+                  aria-label={t('broker.baseTopic')}
                   value={draft.baseTopic}
                   onChange={(event) => patch({ baseTopic: event.target.value })}
                   placeholder="casa/"
@@ -271,67 +282,71 @@ export function SettingsPage() {
                 <Switch
                   checked={draft.demoMode}
                   onCheckedChange={(demoMode) => patch({ demoMode })}
-                  aria-label="Modalità demo"
+                  aria-label={t('broker.demoLabel')}
                 />
                 <div>
-                  <p className="text-xs font-medium text-fg">Modalità demo</p>
-                  <p className="text-[10px] text-fg-subtle">
-                    Simula i dispositivi senza aprire socket verso il broker.
-                  </p>
+                  <p className="text-xs font-medium text-fg">{t('broker.demoLabel')}</p>
+                  <p className="text-[10px] text-fg-subtle">{t('broker.demoHint')}</p>
                 </div>
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="default" onClick={reconnect}>
-                  <RefreshCw className="size-4" /> Riconnetti
+                  <RefreshCw className="size-4" /> {t('broker.reconnect')}
                 </Button>
                 <Button variant="primary" onClick={saveBroker} disabled={!dirty}>
-                  <Check className="size-4" /> Salva e applica
+                  <Check className="size-4" /> {t('broker.save')}
                 </Button>
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-[10px] text-fg-subtle sm:grid-cols-4">
               <span className="rounded-lg border border-line bg-panel-2 px-2 py-1.5">
-                Stato: <strong className="text-fg-muted">{connection.status}</strong>
+                {t('broker.status')}:{' '}
+                <strong className="text-fg-muted">
+                  {tCommon(`connection.status.${connection.status}`)}
+                </strong>
               </span>
               <span className="rounded-lg border border-line bg-panel-2 px-2 py-1.5">
-                Latenza:{' '}
+                {t('broker.latency')}:{' '}
                 <strong className="text-fg-muted">
                   {connection.latencyMs === null ? '—' : `${connection.latencyMs} ms`}
                 </strong>
               </span>
               <span className="rounded-lg border border-line bg-panel-2 px-2 py-1.5">
-                RX/TX:{' '}
+                {t('broker.counters')}:{' '}
                 <strong className="text-fg-muted">
                   {connection.messagesIn}/{connection.messagesOut}
                 </strong>
               </span>
               <span className="rounded-lg border border-line bg-panel-2 px-2 py-1.5">
-                Retry: <strong className="text-fg-muted">{connection.reconnectAttempts}</strong>
+                {t('broker.retry')}:{' '}
+                <strong className="text-fg-muted">{connection.reconnectAttempts}</strong>
               </span>
             </div>
             {connection.lastError ? (
               <p className="rounded-lg border border-danger/25 bg-danger/5 px-3 py-2 text-[10px] text-danger">
-                Ultimo errore: {connection.lastError}
+                {t('broker.lastError', { error: connection.lastError })}
               </p>
             ) : null}
           </CardContent>
         </Card>
 
-        {/* Kiosk + PIN */}
+        {/* Lingua + Kiosk + PIN */}
         <div className="flex flex-col gap-4">
+          <LanguageSwitcher />
+          <SunlightModeCard />
           <Card>
             <CardHeader>
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <Monitor className="size-4 text-accent" /> Kiosk
+                  <Monitor className="size-4 text-accent" /> {t('kiosk.title')}
                 </CardTitle>
-                <CardDescription className="mt-1">Screensaver e protezione burn-in</CardDescription>
+                <CardDescription className="mt-1">{t('kiosk.description')}</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
               <div>
-                <Label>Timeout inattività</Label>
+                <Label>{t('kiosk.timeout')}</Label>
                 <div className="mt-1.5 grid grid-cols-4 gap-1.5">
                   {TIMEOUT_OPTIONS.map((option) => (
                     <button
@@ -351,7 +366,7 @@ export function SettingsPage() {
                 </div>
               </div>
               <div>
-                <Label>Movimento anti burn-in</Label>
+                <Label>{t('kiosk.burnInMode')}</Label>
                 <div className="mt-1.5 grid grid-cols-2 gap-1.5">
                   {BURN_IN_MODE_OPTIONS.map((option) => (
                     <button
@@ -366,15 +381,17 @@ export function SettingsPage() {
                           : 'border-line bg-panel-2 text-fg-muted hover:text-fg',
                       )}
                     >
-                      {option.label}
-                      <span className="text-[9px] font-normal text-fg-subtle">{option.hint}</span>
+                      {t(option.labelKey)}
+                      <span className="text-[9px] font-normal text-fg-subtle">
+                        {t(option.hintKey)}
+                      </span>
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <Label>Intervallo di spostamento</Label>
+                <Label>{t('kiosk.interval')}</Label>
                 <div className="mt-1.5 grid grid-cols-3 gap-1.5">
                   {BURN_IN_INTERVAL_OPTIONS.map((value) => (
                     <button
@@ -389,14 +406,14 @@ export function SettingsPage() {
                           : 'border-line bg-panel-2 text-fg-muted hover:text-fg',
                       )}
                     >
-                      {Math.round(value / 1000)} s
+                      {t('kiosk.seconds', { value: Math.round(value / 1000) })}
                     </button>
                   ))}
                 </div>
               </div>
 
               <div>
-                <Label>Opacità orologio in standby</Label>
+                <Label>{t('kiosk.clockOpacity')}</Label>
                 <div className="mt-1.5 flex items-center gap-3">
                   <Slider
                     value={[Math.round(burnIn.dimClockOpacity * 100)]}
@@ -406,7 +423,7 @@ export function SettingsPage() {
                     onValueChange={(values) =>
                       setBurnInSettings({ dimClockOpacity: (values[0] ?? 30) / 100 })
                     }
-                    aria-label="Opacità orologio in standby"
+                    aria-label={t('kiosk.clockOpacity')}
                   />
                   <span className="tabular w-10 shrink-0 text-right text-[11px] text-fg-muted">
                     {Math.round(burnIn.dimClockOpacity * 100)}%
@@ -415,13 +432,17 @@ export function SettingsPage() {
               </div>
 
               <div className="rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">
-                Fade {KIOSK_DEFAULTS.dimmerFadeMs} ms · orologio in sleep al{' '}
-                {Math.round(burnIn.dimClockOpacity * 100)}% ·{' '}
-                {burnIn.mode === 'screensaver-float'
-                  ? 'orologio flottante'
-                  : 'micro-shift della dashboard'}{' '}
-                ogni {Math.round(burnIn.shiftIntervalMs / 1000)} s · scudo anti-tocco{' '}
-                {KIOSK_DEFAULTS.wakeGuardMs} ms.
+                {t('kiosk.summary', {
+                  fade: KIOSK_DEFAULTS.dimmerFadeMs,
+                  opacity: Math.round(burnIn.dimClockOpacity * 100),
+                  mode: t(
+                    burnIn.mode === 'screensaver-float'
+                      ? 'kiosk.modeFloating'
+                      : 'kiosk.modeShift',
+                  ),
+                  seconds: Math.round(burnIn.shiftIntervalMs / 1000),
+                  guard: KIOSK_DEFAULTS.wakeGuardMs,
+                })}
               </div>
               <button
                 type="button"
@@ -430,7 +451,7 @@ export function SettingsPage() {
                 }}
                 className="h-10 rounded-xl border border-line text-[11px] font-medium text-fg-muted transition-colors hover:text-fg"
               >
-                Mostra anteprima screensaver
+                {t('kiosk.preview')}
               </button>
             </CardContent>
           </Card>
@@ -439,17 +460,15 @@ export function SettingsPage() {
             <CardHeader>
               <div>
                 <CardTitle className="flex items-center gap-2">
-                  <KeyRound className="size-4 text-accent" /> PIN pannello
+                  <KeyRound className="size-4 text-accent" /> {t('pin.title')}
                 </CardTitle>
-                <CardDescription className="mt-1">
-                  Protegge carichi, reset e scenari critici
-                </CardDescription>
+                <CardDescription className="mt-1">{t('pin.description')}</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              <Field label="Nuovo PIN (4-6 cifre)">
+              <Field label={t('pin.newPin')}>
                 <Input
-                  aria-label="Nuovo PIN (4-6 cifre)"
+                  aria-label={t('pin.newPin')}
                   type="password"
                   inputMode="numeric"
                   maxLength={6}
@@ -458,9 +477,9 @@ export function SettingsPage() {
                   placeholder="••••"
                 />
               </Field>
-              <Field label="Conferma PIN">
+              <Field label={t('pin.confirmPin')}>
                 <Input
-                  aria-label="Conferma PIN"
+                  aria-label={t('pin.confirmPin')}
                   type="password"
                   inputMode="numeric"
                   maxLength={6}
@@ -471,13 +490,9 @@ export function SettingsPage() {
               </Field>
               {pinError ? <p className="text-[10px] text-danger">{pinError}</p> : null}
               <Button variant="primary" onClick={submitPinChange} className="w-full">
-                Aggiorna PIN
+                {t('pin.submit')}
               </Button>
-              <p className="text-[10px] leading-relaxed text-fg-subtle">
-                Il PIN è memorizzato come hash bcrypt nel database del gateway. Verifica e
-                lockout autorevole sono server-side; il pannello aggiunge un blocco locale
-                persistente come difesa in profondità.
-              </p>
+              <p className="text-[10px] leading-relaxed text-fg-subtle">{t('pin.note')}</p>
             </CardContent>
           </Card>
         </div>
@@ -488,15 +503,15 @@ export function SettingsPage() {
         <CardHeader className="flex-wrap">
           <div>
             <CardTitle className="flex items-center gap-2">
-              <Database className="size-4 text-accent" /> Test topic · monitor RAW
+              <Database className="size-4 text-accent" /> {t('raw.title')}
             </CardTitle>
             <CardDescription className="mt-1">
-              Ultimi {rawLog.length} messaggi · in/out dal client MQTT
+              {t('raw.description', { count: rawLog.length })}
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Input
-              aria-label="Topic di test"
+              aria-label={t('raw.topic')}
               value={topic}
               onChange={(event) => setTopic(event.target.value)}
               className="h-9 w-40 text-xs"
@@ -504,7 +519,7 @@ export function SettingsPage() {
               spellCheck={false}
             />
             <Input
-              aria-label="Payload di test"
+              aria-label={t('raw.payload')}
               value={payload}
               onChange={(event) => setPayload(event.target.value)}
               className="h-9 w-48 text-xs"
@@ -516,13 +531,13 @@ export function SettingsPage() {
               size="sm"
               onClick={() => {
                 publishRaw(topic, payload);
-                pushToast({ title: 'Pubblicato', description: topic, tone: 'info' });
+                pushToast({ title: t('raw.publishedTitle'), description: topic, tone: 'info' });
               }}
             >
-              <Send className="size-3.5" /> Pubblica
+              <Send className="size-3.5" /> {t('raw.publish')}
             </Button>
             <Button variant="ghost" size="sm" onClick={clearRaw}>
-              <Trash2 className="size-3.5" /> Pulisci
+              <Trash2 className="size-3.5" /> {t('raw.clear')}
             </Button>
           </div>
         </CardHeader>
@@ -530,7 +545,7 @@ export function SettingsPage() {
           <div className="h-64 overflow-y-auto rounded-xl border border-line bg-bg/60 kiosk-scroll">
             {rawLog.length === 0 ? (
               <p className="p-4 text-center text-[11px] text-fg-subtle">
-                In attesa di messaggi… pubblica un test o attendi un telemetry update.
+                {t('raw.empty')}
               </p>
             ) : (
               <ul className="divide-y divide-line/60">

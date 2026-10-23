@@ -5,6 +5,7 @@ import {
   Thermometer,
   ChevronRight,
 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useHomeStore } from '@/store/homeStore';
@@ -27,6 +28,7 @@ function averageTemperature(devices: Device[]): number | null {
 }
 
 export function OverviewPage() {
+  const { t } = useTranslation();
   const devices = useHomeStore((state) => state.devices);
   const rooms = useHomeStore((state) => state.rooms);
   const scenarios = useHomeStore((state) => state.scenarios);
@@ -58,10 +60,10 @@ export function OverviewPage() {
         <div className="flex items-end justify-between">
           <div>
             <h2 id="scenarios-title" className="text-sm font-semibold text-fg">
-              Scenari rapidi
+              {t('overview.scenarios.title')}
             </h2>
             <p className="mt-0.5 text-[11px] text-fg-subtle">
-              Un tocco, più comandi · {scenarios.length} scene disponibili
+              {t('overview.scenarios.hint', { count: scenarios.length })}
             </p>
           </div>
         </div>
@@ -73,32 +75,36 @@ export function OverviewPage() {
       </section>
 
       {/* KPI */}
-      <section aria-label="Stato della casa" className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+      <section aria-label={t('overview.statusAria')} className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <SummaryCard
-          label="Luci accese"
+          label={t('overview.kpi.lights.label')}
           value={`${lightsOn} / ${lights.length}`}
-          hint={lightsOn > 0 ? 'Illuminazione attiva in casa' : 'Tutte le luci sono spente'}
+          hint={t(lightsOn > 0 ? 'overview.kpi.lights.hintOn' : 'overview.kpi.lights.hintOff')}
           icon={Lightbulb}
           tone={lightsOn > 0 ? 'warning' : 'neutral'}
         />
         <SummaryCard
-          label="Temperatura media"
+          label={t('overview.kpi.temperature.label')}
           value={average === null ? '—' : formatTemp(average)}
-          hint="Media sensori e termostati attivi"
+          hint={t('overview.kpi.temperature.hint')}
           icon={Thermometer}
           tone="accent"
         />
         <SummaryCard
-          label="Allarmi attivi"
+          label={t('overview.kpi.alarms.label')}
           value={`${alarms.length}`}
-          hint={alarms.length === 0 ? 'Nessuna anomalia rilevata' : alarms[0]?.name ?? 'Verifica'}
+          hint={
+            alarms.length === 0
+              ? t('overview.kpi.alarms.hintNone')
+              : (alarms[0]?.name ?? t('overview.kpi.alarms.hintFallback'))
+          }
           icon={AlertTriangle}
           tone={alarms.length > 0 ? 'danger' : 'neutral'}
         />
         <SummaryCard
-          label="Carico attuale"
+          label={t('overview.kpi.load.label')}
           value={formatWatts(currentLoad)}
-          hint="Prelievo istantaneo prese smart"
+          hint={t('overview.kpi.load.hint')}
           icon={PlugZap}
           tone={currentLoad > 2500 ? 'danger' : 'neutral'}
         />
@@ -109,16 +115,16 @@ export function OverviewPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 id="rooms-title" className="text-sm font-semibold text-fg">
-              Stanze
+              {t('overview.rooms.title')}
             </h2>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">Accesso rapido agli ambienti</p>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">{t('overview.rooms.hint')}</p>
           </div>
           <button
             type="button"
             onClick={() => setView('rooms')}
             className="flex h-9 items-center gap-1 rounded-lg px-2 text-[11px] font-medium text-fg-muted transition-colors hover:text-fg"
           >
-            Dettaglio <ChevronRight className="size-3.5" />
+            {t('overview.rooms.detail')} <ChevronRight className="size-3.5" />
           </button>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -142,7 +148,9 @@ export function OverviewPage() {
               >
                 <span className="w-full truncate text-xs font-medium text-fg">{room.label}</span>
                 <span className="text-[10px] text-fg-subtle">
-                  {on > 0 ? `${on} luci accese` : `${inRoom.length} dispositivi`}
+                  {on > 0
+                    ? t('overview.rooms.lightsOn', { count: on })
+                    : t('overview.rooms.devices', { count: inRoom.length })}
                 </span>
               </button>
             );
@@ -154,15 +162,13 @@ export function OverviewPage() {
       <section aria-labelledby="favorites-title" className="flex flex-col gap-3">
         <div>
           <h2 id="favorites-title" className="text-sm font-semibold text-fg">
-            Preferiti
+            {t('overview.favorites.title')}
           </h2>
-          <p className="mt-0.5 text-[11px] text-fg-subtle">
-            Dispositivi più usati, sempre a portata di mano
-          </p>
+          <p className="mt-0.5 text-[11px] text-fg-subtle">{t('overview.favorites.hint')}</p>
         </div>
         {favorites.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
-            Nessun preferito. Tocca la stella su un dispositivo per aggiungerlo.
+            {t('overview.favorites.empty')}
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
@@ -183,7 +189,7 @@ export function OverviewPage() {
           className="flex h-12 items-center justify-center gap-2 rounded-2xl border border-line bg-panel text-xs font-medium text-fg-muted transition-colors hover:text-fg"
         >
           <Lightbulb className="size-4" />
-          Spegni tutte le luci ({lightsOn})
+          {t('overview.turnOffAll', { count: lightsOn })}
         </button>
       ) : null}
     </div>

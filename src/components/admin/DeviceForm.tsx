@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Field, FormError, ToggleField, selectClass } from '@/components/admin/fields';
 import { Button } from '@/components/ui/button';
@@ -7,20 +8,14 @@ import { adminApi, type DevicePayload } from '@/lib/adminApi';
 import { roomIdFromLabel, type RoomConfig } from '@/lib/rooms';
 import type { AdapterId, Device, DeviceKind } from '@/types/device';
 
-const TYPES: { value: DeviceKind; label: string }[] = [
-  { value: 'light', label: 'Luce' },
-  { value: 'climate', label: 'Clima' },
-  { value: 'power', label: 'Presa / energia' },
-  { value: 'media', label: 'Media' },
-  { value: 'sensor', label: 'Sensore' },
-];
+const TYPES: readonly DeviceKind[] = ['light', 'climate', 'power', 'media', 'sensor'];
 
-const ADAPTERS: { value: AdapterId; label: string }[] = [
-  { value: 'zigbee2mqtt', label: 'Zigbee2MQTT' },
-  { value: 'shelly', label: 'Shelly Gen2' },
-  { value: 'tasmota', label: 'Tasmota' },
-  { value: 'custom-json', label: 'JSON custom' },
-  { value: 'ha-discovery', label: 'Home Assistant Discovery' },
+const ADAPTERS: readonly AdapterId[] = [
+  'zigbee2mqtt',
+  'shelly',
+  'tasmota',
+  'custom-json',
+  'ha-discovery',
 ];
 
 export function DeviceForm({
@@ -34,6 +29,7 @@ export function DeviceForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(device?.name ?? '');
   const [id, setId] = useState(device?.id ?? '');
   const [idTouched, setIdTouched] = useState(Boolean(device));
@@ -70,15 +66,19 @@ export function DeviceForm({
       try {
         const raw: unknown = JSON.parse(fieldMap);
         if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-          throw new Error('deve essere un oggetto');
+          throw new Error(t('forms.device.fieldMapObject'));
         }
         const entries = Object.entries(raw as Record<string, unknown>);
         if (entries.some(([, value]) => typeof value !== 'string')) {
-          throw new Error('i valori devono essere stringhe');
+          throw new Error(t('forms.device.fieldMapStrings'));
         }
         parsedFieldMap = Object.fromEntries(entries) as Record<string, string>;
       } catch (cause) {
-        setError(`fieldMap non valido: ${cause instanceof Error ? cause.message : 'JSON'}`);
+        setError(
+          t('forms.device.fieldMapInvalid', {
+            reason: cause instanceof Error ? cause.message : 'JSON',
+          }),
+        );
         setBusy(false);
         return;
       }
@@ -106,7 +106,7 @@ export function DeviceForm({
       }
       onSaved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Salvataggio non riuscito');
+      setError(cause instanceof Error ? cause.message : t('forms.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -115,18 +115,18 @@ export function DeviceForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Nome">
+        <Field label={t('forms.name')}>
           <Input
             value={name}
             onChange={(event) => changeName(event.target.value)}
             required
             maxLength={80}
-            placeholder="Luce garage"
+            placeholder={t('forms.device.namePlaceholder')}
           />
         </Field>
         <Field
-          label="ID (slug)"
-          hint={device ? 'Chiave stabile: non modificabile' : 'Usato in topic e scenari'}
+          label={t('forms.id')}
+          hint={device ? t('forms.idLocked') : t('forms.idHint')}
         >
           <Input
             value={id}
@@ -141,7 +141,7 @@ export function DeviceForm({
             placeholder="light-garage"
           />
         </Field>
-        <Field label="Stanza">
+        <Field label={t('forms.device.room')}>
           <select
             className={selectClass}
             value={roomId}
@@ -155,33 +155,33 @@ export function DeviceForm({
             ))}
           </select>
         </Field>
-        <Field label="Tipo">
+        <Field label={t('forms.device.type')}>
           <select
             className={selectClass}
             value={type}
             onChange={(event) => setType(event.target.value as DeviceKind)}
           >
             {TYPES.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
+              <option key={item} value={item}>
+                {t(`forms.device.types.${item}`)}
               </option>
             ))}
           </select>
         </Field>
-        <Field label="Adapter">
+        <Field label={t('forms.device.adapter')}>
           <select
             className={selectClass}
             value={adapter}
             onChange={(event) => setAdapter(event.target.value as AdapterId)}
           >
             {ADAPTERS.map((item) => (
-              <option key={item.value} value={item.value}>
-                {item.label}
+              <option key={item} value={item}>
+                {t(`forms.device.adapters.${item}`)}
               </option>
             ))}
           </select>
         </Field>
-        <Field label="Modello" hint="Solo descrittivo">
+        <Field label={t('forms.device.model')} hint={t('forms.device.modelHint')}>
           <Input
             value={model}
             onChange={(event) => setModel(event.target.value)}
@@ -189,7 +189,7 @@ export function DeviceForm({
             placeholder="Ikea TRADFRI"
           />
         </Field>
-        <Field label="Topic di stato">
+        <Field label={t('forms.device.stateTopic')}>
           <Input
             value={stateTopic}
             onChange={(event) => setStateTopic(event.target.value)}
@@ -198,7 +198,7 @@ export function DeviceForm({
             placeholder="zigbee2mqtt/garage/light"
           />
         </Field>
-        <Field label="Topic di comando" hint="Vuoto per i sensori read-only">
+        <Field label={t('forms.device.commandTopic')} hint={t('forms.device.commandHint')}>
           <Input
             value={commandTopic}
             onChange={(event) => setCommandTopic(event.target.value)}
@@ -206,7 +206,10 @@ export function DeviceForm({
             placeholder="zigbee2mqtt/garage/light/set"
           />
         </Field>
-        <Field label="Topic availability" hint="LWT online/offline (opzionale)">
+        <Field
+          label={t('forms.device.availabilityTopic')}
+          hint={t('forms.device.availabilityHint')}
+        >
           <Input
             value={availabilityTopic}
             onChange={(event) => setAvailabilityTopic(event.target.value)}
@@ -214,7 +217,7 @@ export function DeviceForm({
             placeholder="zigbee2mqtt/garage/light/availability"
           />
         </Field>
-        <Field label="Ordine" hint="Numeri più bassi compaiono prima">
+        <Field label={t('forms.order')} hint={t('forms.orderHint')}>
           <Input
             type="number"
             min={0}
@@ -226,10 +229,7 @@ export function DeviceForm({
       </div>
 
       {adapter === 'custom-json' ? (
-        <Field
-          label="fieldMap (JSON)"
-          hint='Es. {"on":"state.power","brightness":"state.dimmer"}. Vuoto = mantieni il valore salvato.'
-        >
+        <Field label={t('forms.device.fieldMap')} hint={t('forms.device.fieldMapHint')}>
           <textarea
             value={fieldMap}
             onChange={(event) => setFieldMap(event.target.value)}
@@ -242,14 +242,14 @@ export function DeviceForm({
 
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <ToggleField
-          label="Preferito"
-          hint="Compare nella sezione Preferiti della overview"
+          label={t('forms.device.favorite')}
+          hint={t('forms.device.favoriteHint')}
           checked={favorite}
           onChange={setFavorite}
         />
         <ToggleField
-          label="Comandi protetti"
-          hint="Richiede il PIN prima di ogni azione"
+          label={t('forms.device.protected')}
+          hint={t('forms.device.protectedHint')}
           checked={protectedDevice}
           onChange={setProtectedDevice}
         />
@@ -259,14 +259,14 @@ export function DeviceForm({
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
-          Annulla
+          {t('forms.cancel')}
         </Button>
         <Button
           type="submit"
           variant="primary"
           disabled={busy || name.trim().length === 0 || stateTopic.trim().length === 0}
         >
-          {busy ? 'Salvataggio…' : device ? 'Salva dispositivo' : 'Crea dispositivo'}
+          {busy ? t('forms.saving') : t(device ? 'forms.device.save' : 'forms.device.create')}
         </Button>
       </div>
     </form>

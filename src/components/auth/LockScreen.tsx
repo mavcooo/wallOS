@@ -1,5 +1,6 @@
 import { House, KeyRound, Loader2, ShieldCheck, TabletSmartphone } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { Input, Label } from '@/components/ui/input';
@@ -11,6 +12,8 @@ type Mode = 'kiosk' | 'account';
 const DEFAULT_DEVICE_ID = import.meta.env.VITE_KIOSK_DEVICE_ID?.trim() || 'wall-panel-1';
 
 export function LockScreen() {
+  const { t } = useTranslation('auth');
+  const { t: tCommon } = useTranslation('common');
   const loginKiosk = useAuthStore((state) => state.loginKiosk);
   const login = useAuthStore((state) => state.login);
   const clearError = useAuthStore((state) => state.clearError);
@@ -49,9 +52,11 @@ export function LockScreen() {
           <div className="flex size-14 items-center justify-center rounded-2xl border border-accent/25 bg-accent-soft text-accent">
             <House className="size-6" strokeWidth={2.2} />
           </div>
-          <h1 className="mt-3 text-lg font-semibold tracking-[0.18em] text-fg">DOMUS</h1>
+          <h1 className="mt-3 text-lg font-semibold tracking-[0.18em] text-fg">
+            {tCommon('app.name')}
+          </h1>
           <p className="mt-1 text-[11px] uppercase tracking-wider text-fg-subtle">
-            Local control · accesso protetto
+            {t('lock.tagline')}
           </p>
         </div>
 
@@ -66,7 +71,7 @@ export function LockScreen() {
                 mode === 'kiosk' ? 'bg-elevated text-fg' : 'text-fg-subtle hover:text-fg',
               )}
             >
-              <TabletSmartphone className="size-3.5" /> Kiosk
+              <TabletSmartphone className="size-3.5" /> {t('lock.mode.kiosk')}
             </button>
             <button
               type="button"
@@ -77,7 +82,7 @@ export function LockScreen() {
                 mode === 'account' ? 'bg-elevated text-fg' : 'text-fg-subtle hover:text-fg',
               )}
             >
-              <KeyRound className="size-3.5" /> Account
+              <KeyRound className="size-3.5" /> {t('lock.mode.account')}
             </button>
           </div>
 
@@ -85,7 +90,7 @@ export function LockScreen() {
             {mode === 'kiosk' ? (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="kiosk-device">Identificativo dispositivo</Label>
+                  <Label htmlFor="kiosk-device">{t('lock.deviceId')}</Label>
                   <Input
                     id="kiosk-device"
                     value={deviceId}
@@ -96,7 +101,7 @@ export function LockScreen() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="kiosk-pin">PIN dispositivo</Label>
+                  <Label htmlFor="kiosk-pin">{t('lock.devicePin')}</Label>
                   <Input
                     id="kiosk-pin"
                     type="password"
@@ -114,7 +119,7 @@ export function LockScreen() {
             ) : (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="auth-username">Username</Label>
+                  <Label htmlFor="auth-username">{t('lock.username')}</Label>
                   <Input
                     id="auth-username"
                     value={username}
@@ -125,7 +130,7 @@ export function LockScreen() {
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="auth-password">Password</Label>
+                  <Label htmlFor="auth-password">{t('lock.password')}</Label>
                   <Input
                     id="auth-password"
                     type="password"
@@ -153,7 +158,7 @@ export function LockScreen() {
               disabled={busy || (mode === 'kiosk' ? pin.length < 4 : !username || !password)}
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              {busy ? 'Verifica…' : mode === 'kiosk' ? 'Sblocca pannello' : 'Accedi'}
+              {busy ? t('lock.busy') : t(mode === 'kiosk' ? 'lock.submitKiosk' : 'lock.submitAccount')}
             </Button>
           </form>
         </div>
@@ -161,13 +166,9 @@ export function LockScreen() {
         <div className="mt-4 flex flex-col gap-2 rounded-xl border border-line bg-panel/60 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">
           <span className="flex items-start gap-2">
             <ShieldCheck className="mt-0.5 size-3.5 shrink-0 text-success" />
-            Credenziali e PIN sono verificati dal gateway locale. Il browser riceve solo un
-            token HttpOnly e il profilo sanitizzato.
+            {t('lock.securityPin')}
           </span>
-          <span>
-            Il PIN del dispositivo viene richiesto una sola volta: la sessione kiosk resta
-            valida 90 giorni, anche dopo un riavvio del tablet.
-          </span>
+          <span>{t('lock.securitySession')}</span>
         </div>
       </div>
     </div>

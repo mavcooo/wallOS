@@ -1,18 +1,10 @@
 import { CloudUpload, Radio, RotateCw, WifiOff } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { useOfflineQueue } from '@/mqtt/offlineQueue';
 import { useHomeStore } from '@/store/homeStore';
 import type { ConnectionStatus } from '@/types/mqtt';
-
-const LABELS: Record<ConnectionStatus, string> = {
-  idle: 'In attesa',
-  connecting: 'Connessione',
-  connected: 'Online',
-  reconnecting: 'Riconnessione',
-  offline: 'Offline',
-  error: 'Errore',
-};
 
 const TONES: Record<ConnectionStatus, string> = {
   idle: 'border-line bg-panel-2 text-fg-muted',
@@ -24,11 +16,13 @@ const TONES: Record<ConnectionStatus, string> = {
 };
 
 export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => void }) {
+  const { t } = useTranslation();
   const connection = useHomeStore((state) => state.connection);
   const demoMode = useHomeStore((state) => state.broker.demoMode);
   const pending = useOfflineQueue((state) => state.commands.length);
   const status = connection.status;
   const busy = status === 'connecting' || status === 'reconnecting';
+  const statusLabel = t(`connection.status.${status}`);
 
   return (
     <button
@@ -39,8 +33,8 @@ export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => voi
         TONES[status],
         'hover:brightness-110',
       )}
-      aria-label={`Stato connessione MQTT: ${LABELS[status]}${
-        pending > 0 ? ` · ${pending} comandi in attesa di sincronizzazione` : ''
+      aria-label={`${t('connection.aria', { status: statusLabel })}${
+        pending > 0 ? ` · ${t('connection.pending', { count: pending })}` : ''
       }`}
     >
       <span className="relative flex size-2.5 shrink-0">
@@ -51,16 +45,16 @@ export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => voi
       </span>
       <span className="flex flex-col leading-tight">
         <span className="flex items-center gap-1.5 text-xs font-semibold">
-          MQTT · {LABELS[status]}
+          MQTT · {statusLabel}
           {demoMode ? (
             <span className="rounded bg-current/10 px-1 py-0.5 text-[9px] font-bold uppercase">
-              demo
+              {t('connection.demo')}
             </span>
           ) : null}
           {pending > 0 ? (
             <span
               className="flex items-center gap-1 rounded bg-current/10 px-1 py-0.5 text-[9px] font-bold"
-              title={`${pending} comandi in attesa di sincronizzazione`}
+              title={t('connection.pending', { count: pending })}
             >
               <CloudUpload
                 className={cn('size-2.5', status === 'connected' && 'animate-pulse')}
@@ -72,7 +66,9 @@ export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => voi
         </span>
         <span className="mt-0.5 flex items-center gap-2 text-[10px] font-medium text-fg-muted">
           <span className="tabular">
-            {connection.latencyMs === null ? '— ms' : `${connection.latencyMs} ms`}
+            {connection.latencyMs === null
+              ? t('connection.latencyEmpty')
+              : `${connection.latencyMs} ms`}
           </span>
           <span className="text-fg-subtle">·</span>
           <span className="flex items-center gap-1">
@@ -87,7 +83,7 @@ export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => voi
                 ) : (
                   <WifiOff className="size-2.5" />
                 )}
-                {connection.messagesIn} rx
+                {t('connection.rx', { count: connection.messagesIn })}
               </>
             )}
           </span>

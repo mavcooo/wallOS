@@ -1,6 +1,8 @@
 import { Database, Loader2, Info } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
+import { activeLocale } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { useDatabaseHealthStore } from '@/store/databaseHealthStore';
 
@@ -21,7 +23,14 @@ function versionLabel(version: string | null): string | null {
 }
 
 function timeLabel(checkedAt: number | null): string | null {
-  return checkedAt ? new Date(checkedAt).toLocaleTimeString() : null;
+  return checkedAt
+    ? new Date(checkedAt).toLocaleTimeString(activeLocale(), {
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      })
+    : null;
 }
 
 /** Indicatore persistente del database nell'header: verde con la versione,
@@ -32,6 +41,7 @@ export function DatabaseBadge() {
   // Il pannello diagnostico si apre solo dal trigger: prima era legato a
   // `!isChecking`, quindi dopo il primo poll riuscito restava aperto come modale
   // e bloccava touch/swipe sull'intera dashboard.
+  const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const status = useDatabaseHealthStore((state) => state.status);
   const version = useDatabaseHealthStore((state) => state.version);
@@ -41,34 +51,45 @@ export function DatabaseBadge() {
 
   const versionText = versionLabel(version);
   const label =
-    status === 'up' ? (versionText ?? 'DB ok') : status === 'down' ? 'DB offline' : 'DB…';
+    status === 'up'
+      ? (versionText ?? t('database.badge.ok'))
+      : status === 'down'
+        ? t('database.badge.offline')
+        : t('database.badge.checking');
 
   const checked = timeLabel(checkedAt);
+  const checkedText = checked ? t('database.badge.checkedAt', { time: checked }) : null;
   const title =
     status === 'up'
       ? [
-          `Database disponibile${versionText ? ` · ${versionText.replace(/^PG /, 'PostgreSQL ')}` : ''}`,
+          `${t('database.badge.available')}${
+            versionText ? ` · ${versionText.replace(/^PG /, 'PostgreSQL ')}` : ''
+          }`,
           latencyMs !== null ? `${latencyMs} ms` : null,
-          checked ? `ultimo controllo ${checked}` : null,
+          checkedText,
         ]
           .filter(Boolean)
           .join(' · ')
       : status === 'down'
         ? [
-            `Database non raggiungibile${error ? ` (${error})` : ''}`,
-            checked ? `ultimo controllo ${checked}` : null,
-            'nuovo tentativo automatico',
+            error
+              ? t('database.badge.unavailableTitle', { error })
+              : t('database.badge.unavailable'),
+            checkedText,
+            t('database.badge.retry'),
           ]
             .filter(Boolean)
             .join(' · ')
-        : 'Verifica del database in corso';
+        : t('database.badge.checkingTitle');
 
   const aria =
     status === 'up'
-      ? `Database disponibile${versionText ? `, ${versionText}` : ''}`
+      ? versionText
+        ? t('database.badge.availableAria', { version: versionText })
+        : t('database.badge.available')
       : status === 'down'
-        ? 'Database non raggiungibile'
-        : 'Verifica del database in corso';
+        ? t('database.badge.unavailable')
+        : t('database.badge.checkingTitle');
 
   // Determina se mostrare l'indicatore di "checking" (solo al primo poll o durante il timeout)
   const isChecking = status === 'checking';
@@ -105,54 +126,67 @@ export function DatabaseBadge() {
         <DialogTrigger asChild>
           <button
             className="hidden sm:inline-flex items-center gap-1.5 rounded-full border px-2.5 text-[10px] font-medium transition-colors hover:bg-panel-2"
-            aria-label="Visualizza diagnostica database"
-            title="Visualizza diagnostica database"
+            aria-label={t('database.trigger')}
+            title={t('database.trigger')}
           >
             <Info className="size-3" aria-hidden />
           </button>
         </DialogTrigger>
         <DialogContent className="p-4 max-w-sm">
           <DialogHeader className="mb-3">
-            <DialogTitle>Diagnostica Database</DialogTitle>
+            <DialogTitle>{t('database.details.title')}</DialogTitle>
           </DialogHeader>
 
           <DialogDescription>
             {status === 'up'
-              ? `Database raggiungibile in ${latencyMs !== null ? latencyMs + ' ms' : 'tempo sconosciuto'}.`
+              ? t('database.details.descriptionUp', {
+                  latency:
+                    latencyMs !== null
+                      ? `${latencyMs} ms`
+                      : t('database.details.latencyUnknown'),
+                })
               : status === 'down'
-                ? `Database non raggiungibile${error ? ': ' + error : ''}.`
-                : 'Verifica del database in corso.'}
+                ? t('database.details.descriptionDown', {
+                    error: error ? t('database.details.descriptionDownError', { error }) : '',
+                  })
+                : t('database.details.descriptionChecking')}
           </DialogDescription>
 
           {/* Tabella stato corrente */}
           <div className="space-y-2 mb-4">
             <div>
-              <span className="font-medium text-fg-subtle">Stato:</span>
+              <span className="font-medium text-fg-subtle">{t('database.details.status')}</span>
               <span className={cn(
                 'px-1.5 rounded text-[10px] font-medium',
                 status === 'up' && 'bg-success/20 text-success',
                 status === 'down' && 'bg-danger/20 text-danger',
                 status === 'checking' && 'bg-panel-2 text-fg-subtle',
               )}>
-                {status}
+                {t(`database.details.statusValue.${status}`)}
               </span>
             </div>
             <div>
-              <span className="font-medium text-fg-subtle">Versione:</span>
+              <span className="font-medium text-fg-subtle">{t('database.details.version')}</span>
               <span className="text-sm capitalize capitalize-normal">
-                {versionText ?? 'Non disponibile'}
+                {versionText ?? t('database.details.versionUnavailable')}
               </span>
             </div>
             <div>
-              <span className="font-medium text-fg-subtle">Latenza:</span>
+              <span className="font-medium text-fg-subtle">
+                {t('database.details.latency')}
+              </span>
               <span className="text-sm">
-                {latencyMs !== null ? latencyMs + ' ms' : 'Non misurata'}
+                {latencyMs !== null ? latencyMs + ' ms' : t('database.details.latencyNotMeasured')}
               </span>
             </div>
             <div>
-              <span className="font-medium text-fg-subtle">Ultimo controllo:</span>
+              <span className="font-medium text-fg-subtle">
+                {t('database.details.lastCheck')}
+              </span>
               <span className="text-sm">
-                {checked ? new Date(checkedAt ?? 0).toLocaleString() : 'Mai'}
+                {checked
+                  ? new Date(checkedAt ?? 0).toLocaleString(activeLocale())
+                  : t('database.details.never')}
               </span>
             </div>
           </div>
@@ -160,11 +194,13 @@ export function DatabaseBadge() {
           {/* Cronologia controlli (ultimi 5) */}
           {status !== 'checking' && (
             <div>
-              <span className="font-medium text-fg-subtle text-xs uppercase tracking-wider mb-2">Storico ultimi 5 controlli</span>
+              <span className="font-medium text-fg-subtle text-xs uppercase tracking-wider mb-2">
+                {t('database.details.history')}
+              </span>
               <div className="space-y-1 max-h-32 overflow-y-auto">
                 {/* Qui potremmo iniettare la storia, ma per ora mostriamo un placeholder */}
                 <span className="text-xs text-fg-muted rounded border border-panel-2 px-1.5 py-1">
-                  Caricamento storico...
+                  {t('database.details.historyLoading')}
                 </span>
               </div>
             </div>
@@ -174,9 +210,9 @@ export function DatabaseBadge() {
           <div className="mt-3 pt-t border-t pt-3">
             <DialogClose
               className="w-full justify-start py-1.5 px-2 rounded text-[10px] font-medium transition-colors hover:bg-panel-2"
-              aria-label="Chiudi pannello diagnostica"
+              aria-label={t('database.details.closeAria')}
             >
-              Chiudi
+              {t('database.details.close')}
             </DialogClose>
           </div>
         </DialogContent>

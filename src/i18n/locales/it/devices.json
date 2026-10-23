@@ -1,0 +1,100 @@
+{
+  "climate": {
+    "modes": {
+      "off": "Spento",
+      "heat": "Caldo",
+      "cool": "Freddo",
+      "auto": "Auto",
+      "fan_only": "Ventilazione",
+      "dry": "Deumidifica"
+    },
+    "actions": {
+      "idle": "In attesa",
+      "heating": "Riscaldamento",
+      "cooling": "Raffrescamento",
+      "drying": "Deumidifica",
+      "fan": "Ventilazione"
+    },
+    "off": "Spento",
+    "humidity": "Umidità {{value}}%",
+    "target": "Target",
+    "now": "Ora {{temp}}",
+    "decreaseSetpoint": "Riduci setpoint",
+    "increaseSetpoint": "Aumenta setpoint",
+    "setpointAria": "Setpoint {{name}}",
+    "fan": "Ventola",
+    "fanSpeeds": {
+      "auto": "Auto",
+      "low": "1",
+      "medium": "2",
+      "high": "3"
+    },
+    "swing": "Oscillazione"
+  },
+  "light": {
+    "off": "spenta",
+    "intensity": "Intensità",
+    "toggleAria": "Accendi o spegni {{name}}",
+    "brightnessAria": "Luminosità {{name}}",
+    "presets": {
+      "warm": "Calda",
+      "neutral": "Neutra",
+      "cool": "Fredda"
+    }
+  },
+  "power": {
+    "today": "{{value}} oggi",
+    "load": "Carico",
+    "loadOf": "{{value}}% di {{max}}",
+    "toggleAria": "Alimenta {{name}}"
+  },
+  "media": {
+    "noSource": "Nessuna sorgente",
+    "off": "Spento",
+    "powerOff": "Spegni media player",
+    "powerOn": "Accendi media player",
+    "mute": "Muta",
+    "unmute": "Riattiva audio",
+    "volumeAria": "Volume {{name}}"
+  },
+  "sensor": {
+    "smoke": {
+      "alarm": "Allarme",
+      "safe": "Sicuro"
+    },
+    "contact": {
+      "open": "Aperto",
+      "closed": "Chiuso"
+    },
+    "motion": {
+      "detected": "Movimento",
+      "none": "Nessuno"
+    }
+  },
+  "scenario": {
+    "requiresPin": "Richiede PIN",
+    "protectedTitle": "Scenario protetto",
+    "protectedDescription": "Per attivare “{{label}}” inserisci il PIN del pannello.",
+    "protectedSteps": "{{count}} comandi verranno inviati."
+  },
+  "guard": {
+    "title": "Azione protetta",
+    "description": "Il comando su {{name}} richiede il PIN del pannello."
+  },
+  "actionLabels": {
+    "powerOn": "Accensione",
+    "powerOff": "Spegnimento",
+    "brightness": "Luminosità {{value}}%",
+    "colorTemp": "Temperatura colore {{value}} K",
+    "targetTemp": "Setpoint {{value}} °C",
+    "climateMode": "Modalità {{mode}}",
+    "fanSpeed": "Ventola {{speed}}",
+    "swing": "Oscillazione {{state}}",
+    "volume": "Volume {{value}}",
+    "source": "Sorgente {{source}}"
+  },
+  "live": {
+    "underLoad": "Sotto carico",
+    "standby": "In standby"
+  }
+}

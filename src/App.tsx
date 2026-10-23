@@ -1,5 +1,6 @@
 import { Lock } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { AuthGate } from '@/components/auth/AuthGate';
 import { RequireRole } from '@/components/auth/RequireRole';
@@ -10,6 +11,7 @@ import { PinProvider } from '@/components/kiosk/PinProvider';
 import { Toaster } from '@/components/kiosk/Toaster';
 import { CarouselDots } from '@/components/ui/carousel-dots';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useHighContrast } from '@/hooks/useHighContrast';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { canView } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
@@ -26,31 +28,26 @@ import { useHomeStore, type ViewId } from '@/store/homeStore';
  * Ordine naturale del carosello orizzontale. Le schermate non consentite al
  * profilo attivo vengono filtrate: lo swipe non porta mai a un AccessDenied.
  */
-const SWIPE_PAGES: readonly { id: ViewId; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'rooms', label: 'Stanze' },
-  { id: 'energy', label: 'Consumi' },
-  { id: 'settings', label: 'Impostazioni' },
-];
+const SWIPE_PAGES: readonly ViewId[] = ['overview', 'rooms', 'energy', 'settings'];
 
-function AccessDenied({ view }: { view: string }) {
+function AccessDenied({ viewKey }: { viewKey: 'energy' | 'settings' | 'users' | 'admin' }) {
+  const { t } = useTranslation();
   const setView = useHomeStore((state) => state.setView);
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
       <span className="flex size-12 items-center justify-center rounded-2xl border border-line bg-panel text-fg-subtle">
         <Lock className="size-5" />
       </span>
-      <p className="text-sm font-medium text-fg">Vista “{view}” non consentita</p>
-      <p className="max-w-sm text-xs text-fg-subtle">
-        Il ruolo del profilo attivo non ha i permessi per questa schermata. Le impostazioni e
-        i profili del kiosk si sbloccano con il PIN del dispositivo.
+      <p className="text-sm font-medium text-fg">
+        {t('accessDenied.title', { view: t(`accessDenied.views.${viewKey}`) })}
       </p>
+      <p className="max-w-sm text-xs text-fg-subtle">{t('accessDenied.description')}</p>
       <button
         type="button"
         onClick={() => setView('overview')}
         className="mt-2 h-10 rounded-xl border border-line px-4 text-xs font-medium text-fg-muted hover:text-fg"
       >
-        Torna alla overview
+        {t('accessDenied.back')}
       </button>
     </div>
   );
@@ -61,7 +58,7 @@ function CurrentView() {
   const user = useCurrentUser();
 
   if (view === 'energy' && user.restrictions.energy) {
-    return <AccessDenied view="Consumi" />;
+    return <AccessDenied viewKey="energy" />;
   }
 
   switch (view) {
@@ -76,7 +73,7 @@ function CurrentView() {
         <RequireRole
           roles={['admin', 'family']}
           allowElevated
-          fallback={<AccessDenied view="Impostazioni" />}
+          fallback={<AccessDenied viewKey="settings" />}
         >
           <SettingsPage />
         </RequireRole>
@@ -86,14 +83,14 @@ function CurrentView() {
         <RequireRole
           roles={['admin', 'family']}
           allowElevated
-          fallback={<AccessDenied view="Utenti e profili" />}
+          fallback={<AccessDenied viewKey="users" />}
         >
           <UsersPage />
         </RequireRole>
       );
     case 'admin':
       return (
-        <RequireRole roles={['admin']} fallback={<AccessDenied view="Amministrazione" />}>
+        <RequireRole roles={['admin']} fallback={<AccessDenied viewKey="admin" />}>
           <AdminPage />
         </RequireRole>
       );
@@ -105,16 +102,17 @@ function CurrentView() {
  * Lo swipe cambia pagina tramite lo store, mantenendo Sidebar e header in sync.
  */
 function AppNavigation() {
+  const { t } = useTranslation();
   const view = useHomeStore((state) => state.ui.view);
   const setView = useHomeStore((state) => state.setView);
   const user = useCurrentUser();
   const [enterFrom, setEnterFrom] = useState<'left' | 'right' | null>(null);
 
   const pages = useMemo(
-    () => SWIPE_PAGES.filter((page) => canView(user, user.elevated, page.id)),
+    () => SWIPE_PAGES.filter((page) => canView(user, user.elevated, page)),
     [user],
   );
-  const pageIds = useMemo(() => pages.map((page) => page.id), [pages]);
+  const pageIds = useMemo(() => pages, [pages]);
 
   const swipe = useSwipeNavigation<ViewId>({
     items: pageIds,
@@ -152,7 +150,11 @@ function AppNavigation() {
           data-testid="page-swipe-dots"
         >
           <div className="rounded-full border border-line/70 bg-panel/85 px-2 py-1 shadow-lg shadow-black/20">
-            <CarouselDots count={pages.length} activeIndex={swipe.currentIndex} label="Pagina" />
+            <CarouselDots
+              count={pages.length}
+              activeIndex={swipe.currentIndex}
+              label={t('swipe.page')}
+            />
           </div>
         </div>
       ) : null}
@@ -161,6 +163,10 @@ function AppNavigation() {
 }
 
 export default function App() {
+  // Il tema alto contrasto vive a livello applicazione: `data-contrast` su
+  // <html> è già attivo sul lock screen, prima che l'utente faccia login.
+  useHighContrast();
+
   return (
     <>
       {/* Health del database a livello applicazione: notifiche e badge anche

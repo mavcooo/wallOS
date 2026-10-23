@@ -175,3 +175,150 @@
     margin: 0;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   High Contrast / Sunlight Mode
+   ---------------------------------------------------------------------------
+   Attivata da `useHighContrast` con `<html data-contrast="high">`. I token
+   sono ricalibrati qui, non nei componenti: ogni utility (`bg-panel`,
+   `text-fg-muted`, `border-line`, ...) legge queste variabili, quindi un solo
+   blocco copre tutta la UI. Obiettivo WCAG AAA su nero (≥ 7:1):
+   - testo pieno, niente grigi attenuati;
+   - bordi bianchi da 2px al posto delle sfumature traslucide;
+   - accento ambra ad altissima visibilità al posto del teal;
+   - nessun blur/ombra che peggiori i riflessi sotto il sole.
+   Il selettore `html[data-contrast='high']` batte `:root` per specificità e
+   queste regole non sono in un layer: vincono sulle utility di Tailwind. */
+html[data-contrast='high'] {
+  color-scheme: dark;
+
+  /* Sfondi: nero puro per OLED/AMOLED, pannelli appena distinguibili. */
+  --color-bg: #000000;
+  --color-panel: #000000;
+  --color-panel-2: #0a0a0a;
+  --color-elevated: #161616;
+
+  /* Delimitatori: bianco pieno, poi portati a 2px dalle regole sotto. */
+  --color-line: #ffffff;
+  --color-line-strong: #ffffff;
+
+  /* Tipografia: nessun grigio attenuato, tutti i testi a contrasto pieno. */
+  --color-fg: #ffffff;
+  --color-fg-muted: #ffffff;
+  --color-fg-subtle: #f3f4f6;
+
+  /* Accento segnaletico ambra (≈ 15:1 su nero). */
+  --color-accent: #facc15;
+  --color-accent-fg: #000000;
+  --color-accent-soft: #2a2306;
+
+  /* Stati: tonalità schiarite per restare sopra 7:1 anche su nero. */
+  --color-danger: #ff9b9b;
+  --color-warning: #fde047;
+  --color-success: #86efac;
+  --color-heat: #fdba74;
+  --color-cool: #7dd3fc;
+}
+
+html[data-contrast='high'] body {
+  font-weight: 500;
+}
+
+/* Testi secondari: da font-normal a font-medium, mai sotto il peso 500. */
+html[data-contrast='high'] :where(.font-light, .font-normal),
+html[data-contrast='high'] :where(.text-fg-muted, .text-fg-subtle) {
+  font-weight: 500;
+}
+
+/* Bordi netti e spessi: rispetta il lato dichiarato dalla utility. */
+html[data-contrast='high'] :where(.border) {
+  border-width: 2px;
+}
+html[data-contrast='high'] :where(.border-t) {
+  border-top-width: 2px;
+}
+html[data-contrast='high'] :where(.border-b) {
+  border-bottom-width: 2px;
+}
+html[data-contrast='high'] :where(.border-l) {
+  border-left-width: 2px;
+}
+html[data-contrast='high'] :where(.border-r) {
+  border-right-width: 2px;
+}
+html[data-contrast='high'] :where(.border-x) {
+  border-left-width: 2px;
+  border-right-width: 2px;
+}
+html[data-contrast='high'] :where(.border-y) {
+  border-top-width: 2px;
+  border-bottom-width: 2px;
+}
+
+/* Glassmorphism e ombre: sotto il sole riflettono e spengono il testo. */
+html[data-contrast='high'] :where([class*='backdrop-blur']) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-contrast='high']
+  :where(.shadow-sm, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl, [data-slot='card']) {
+  box-shadow: none;
+}
+
+/* Focus tastiera: contorno più spesso e bianco, visibile anche in pieno sole. */
+html[data-contrast='high'] :focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 2px;
+}
+
+/* --- Slider ------------------------------------------------------------- */
+/* Track inattivo: sfondo scuro con bordo bianco, mai invisibile sul pannello. */
+html[data-contrast='high'] [data-slot='slider-track'] {
+  height: 1rem;
+  background: #161616;
+  border: 2px solid #ffffff;
+}
+/* Range attivo: ambra piena ad alta saturazione. */
+html[data-contrast='high'] [data-slot='slider-range'] {
+  background: var(--color-accent);
+}
+/* Thumb touch-friendly: 40px, anello bianco da 3px e alone nero. */
+html[data-contrast='high'] [data-slot='slider-thumb'] {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: var(--color-accent);
+  border: 3px solid #ffffff;
+  box-shadow: 0 0 0 2px #000000;
+}
+
+/* --- Switch ------------------------------------------------------------- */
+html[data-contrast='high'] [data-slot='switch-track'] {
+  width: 3.75rem;
+  height: 2.25rem;
+  border: 2px solid #ffffff;
+}
+html[data-contrast='high'] [data-slot='switch-track'][data-state='unchecked'] {
+  background: #161616;
+}
+html[data-contrast='high'] [data-slot='switch-track'][data-state='checked'] {
+  background: var(--color-accent);
+}
+/* Pollice: bianco su OFF, nero bordato di bianco su ON. */
+html[data-contrast='high'] [data-slot='switch-thumb'] {
+  width: 1.75rem;
+  height: 1.75rem;
+  background: #ffffff;
+  border: 2px solid #000000;
+  box-shadow: none;
+}
+html[data-contrast='high']
+  [data-slot='switch-track'][data-state='checked']
+  [data-slot='switch-thumb'] {
+  background: #000000;
+  border-color: #ffffff;
+}
+
+/* Indicatori di forma: | per ON, O per OFF, ingranditi per il touch da lontano. */
+html[data-contrast='high'] [data-slot='switch-indicator'] {
+  scale: 1.25;
+}

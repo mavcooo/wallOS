@@ -3,6 +3,7 @@ import mqtt, { type IClientOptions, type MqttClient } from 'mqtt';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { DISCOVERY, OFFLINE_QUEUE } from '@/config/app.config';
+import i18n from '@/i18n';
 import { getAdapter } from '@/mqtt/adapters';
 import {
   createHaDiscoveryBridge,
@@ -559,12 +560,14 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       const offline = useHomeStore.getState().connection.status !== 'connected';
       const queued = useOfflineQueue.getState().commands.length;
       useToastStore.getState().push({
-        title: offline
-          ? `Scenario “${scenario.label}” in coda`
-          : `Scenario “${scenario.label}” avviato`,
-        description: offline
-          ? `${queued} comandi in attesa di connessione: saranno inviati al ripristino (entro il TTL).`
-          : `${scenario.steps.length} comandi inviati in ${elapsed} ms`,
+        title: i18n.t(
+          offline ? 'scenarioToast.queuedTitle' : 'scenarioToast.startedTitle',
+          { label: scenario.label },
+        ),
+        description: i18n.t(
+          offline ? 'scenarioToast.queuedDescription' : 'scenarioToast.sentDescription',
+          { count: offline ? queued : scenario.steps.length, elapsed },
+        ),
         tone: offline ? 'info' : 'success',
       });
     },

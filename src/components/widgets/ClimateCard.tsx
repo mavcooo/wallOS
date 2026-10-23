@@ -9,6 +9,7 @@ import {
   Wind,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { roomLabel } from '@/lib/rooms';
 import { clamp, cn, formatTemp } from '@/lib/utils';
@@ -35,27 +36,14 @@ const RADIUS = 82;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const SWEEP = 0.75; // 270°
 
-const MODE_BUTTONS: readonly { mode: ClimateMode; label: string; icon: typeof Flame }[] = [
-  { mode: 'off', label: 'Spento', icon: Power },
-  { mode: 'heat', label: 'Caldo', icon: Flame },
-  { mode: 'cool', label: 'Freddo', icon: Snowflake },
-  { mode: 'auto', label: 'Auto', icon: RefreshCw },
+const MODE_BUTTONS: readonly { mode: ClimateMode; icon: typeof Flame }[] = [
+  { mode: 'off', icon: Power },
+  { mode: 'heat', icon: Flame },
+  { mode: 'cool', icon: Snowflake },
+  { mode: 'auto', icon: RefreshCw },
 ];
 
-const FAN_SPEEDS: readonly { speed: FanSpeed; label: string }[] = [
-  { speed: 'auto', label: 'Auto' },
-  { speed: 'low', label: '1' },
-  { speed: 'medium', label: '2' },
-  { speed: 'high', label: '3' },
-];
-
-const ACTION_LABELS: Record<ClimateAction, string> = {
-  idle: 'In attesa',
-  heating: 'Riscaldamento',
-  cooling: 'Raffrescamento',
-  drying: 'Deumidifica',
-  fan: 'Ventilazione',
-};
+const FAN_SPEEDS: readonly FanSpeed[] = ['auto', 'low', 'medium', 'high'];
 
 function accentFor(action: ClimateAction): string {
   if (action === 'heating') return 'text-heat';
@@ -71,6 +59,8 @@ export function ClimateCard({
   pending = false,
   className,
 }: ClimateCardProps) {
+  const { t } = useTranslation('devices');
+  const { t: tCommon } = useTranslation('common');
   const { state } = device;
   const rooms = useHomeStore((store) => store.rooms);
   const [draft, setDraft] = useState(state.targetTemp);
@@ -136,7 +126,9 @@ export function ClimateCard({
               <button
                 type="button"
                 onClick={onToggleFavorite}
-                aria-label={device.favorite ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+                aria-label={tCommon(
+                  device.favorite ? 'favorites.remove' : 'favorites.add',
+                )}
                 className="ml-0.5 text-fg-subtle transition-colors hover:text-fg"
               >
                 <Star className={cn('size-3.5', device.favorite && 'fill-accent text-accent')} />
@@ -144,7 +136,7 @@ export function ClimateCard({
             ) : null}
           </p>
           <p className="truncate text-[11px] text-fg-subtle">
-            {roomLabel(rooms, device.room)} · Umidità {state.humidity ?? '—'}%
+            {roomLabel(rooms, device.room)} · {t('climate.humidity', { value: state.humidity ?? '—' })}
           </p>
         </div>
         <span
@@ -154,7 +146,7 @@ export function ClimateCard({
           )}
         >
           <span className="size-1.5 rounded-full bg-current" />
-          {off ? 'Spento' : ACTION_LABELS[state.action]}
+          {off ? t('climate.off') : t(`climate.actions.${state.action}`)}
         </span>
       </div>
 
@@ -165,7 +157,7 @@ export function ClimateCard({
             type="button"
             onClick={() => nudge(-device.tempStep)}
             className="flex size-11 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:bg-elevated hover:text-fg active:scale-95"
-            aria-label="Riduci setpoint"
+            aria-label={t('climate.decreaseSetpoint')}
           >
             <Minus className="size-4" />
           </button>
@@ -173,7 +165,7 @@ export function ClimateCard({
           <div
             role="slider"
             tabIndex={0}
-            aria-label={`Setpoint ${device.name}`}
+            aria-label={t('climate.setpointAria', { name: device.name })}
             aria-valuemin={device.minTemp}
             aria-valuemax={device.maxTemp}
             aria-valuenow={draft}
@@ -268,13 +260,15 @@ export function ClimateCard({
             </svg>
 
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <span className="text-[10px] uppercase tracking-[0.2em] text-fg-subtle">Target</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] text-fg-subtle">
+                {t('climate.target')}
+              </span>
               <span className="tabular mt-0.5 text-5xl font-extralight leading-none text-fg">
                 {formatTemp(draft).replace('°', '')}
                 <span className="align-top text-lg text-fg-muted">°</span>
               </span>
               <span className="tabular mt-1.5 text-[11px] text-fg-muted">
-                Ora {formatTemp(state.currentTemp)}
+                {t('climate.now', { temp: formatTemp(state.currentTemp) })}
               </span>
             </div>
           </div>
@@ -283,7 +277,7 @@ export function ClimateCard({
             type="button"
             onClick={() => nudge(device.tempStep)}
             className="flex size-11 items-center justify-center rounded-full border border-line text-fg-muted transition-colors hover:bg-elevated hover:text-fg active:scale-95"
-            aria-label="Aumenta setpoint"
+            aria-label={t('climate.increaseSetpoint')}
           >
             <Plus className="size-4" />
           </button>
@@ -292,7 +286,7 @@ export function ClimateCard({
         {/* Controlli modalità */}
         <div className="flex w-full min-w-0 flex-1 flex-col gap-3">
           <div className="grid grid-cols-4 gap-1.5">
-            {MODE_BUTTONS.map(({ mode, label, icon: Icon }) => {
+            {MODE_BUTTONS.map(({ mode, icon: Icon }) => {
               const selected = state.mode === mode;
               return (
                 <button
@@ -308,7 +302,7 @@ export function ClimateCard({
                   aria-pressed={selected}
                 >
                   <Icon className="size-4" />
-                  {label}
+                  {t(`climate.modes.${mode}`)}
                 </button>
               );
             })}
@@ -316,10 +310,10 @@ export function ClimateCard({
 
           <div className="flex items-center justify-between gap-2">
             <span className="flex items-center gap-1.5 text-[11px] text-fg-subtle">
-              <Wind className="size-3.5" /> Ventola
+              <Wind className="size-3.5" /> {t('climate.fan')}
             </span>
             <div className="flex gap-1">
-              {FAN_SPEEDS.map(({ speed, label }) => (
+              {FAN_SPEEDS.map((speed) => (
                 <button
                   key={speed}
                   type="button"
@@ -334,14 +328,14 @@ export function ClimateCard({
                   )}
                   aria-pressed={state.fanSpeed === speed}
                 >
-                  {label}
+                  {t(`climate.fanSpeeds.${speed}`)}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="flex items-center justify-between rounded-xl border border-line bg-panel-2 px-3 py-2">
-            <span className="text-[11px] text-fg-subtle">Oscillazione</span>
+            <span className="text-[11px] text-fg-subtle">{t('climate.swing')}</span>
             <button
               type="button"
               onClick={() => onAction({ type: 'swing', swing: !state.swing })}

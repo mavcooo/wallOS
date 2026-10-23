@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import type { ComponentProps } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 
@@ -17,6 +18,7 @@ export function DialogContent({
   showClose = true,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content> & { showClose?: boolean }) {
+  const { t } = useTranslation();
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay
@@ -37,7 +39,7 @@ export function DialogContent({
         {showClose ? (
           <DialogPrimitive.Close
             className="absolute right-4 top-4 flex size-10 items-center justify-center rounded-full text-fg-subtle transition-colors hover:bg-elevated hover:text-fg"
-            aria-label="Chiudi"
+            aria-label={t('actions.close')}
           >
             <X className="size-5" />
           </DialogPrimitive.Close>

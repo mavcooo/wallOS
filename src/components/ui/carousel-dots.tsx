@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { cn } from '@/lib/utils';
 
 export interface CarouselDotsProps {
@@ -21,6 +23,7 @@ export function CarouselDots({
   onSelect,
   className,
 }: CarouselDotsProps) {
+  const { t } = useTranslation();
   if (count < 2) return null;
   const active = Math.min(Math.max(activeIndex, 0), count - 1);
 
@@ -28,7 +31,9 @@ export function CarouselDots({
     <div
       className={cn('flex items-center justify-center gap-0.5', className)}
       role={onSelect ? 'group' : 'img'}
-      aria-label={onSelect ? label : `${label}: ${active + 1} di ${count}`}
+      aria-label={
+        onSelect ? label : t('swipe.position', { label, index: active + 1, count })
+      }
       data-swipe-ignore
     >
       {Array.from({ length: count }, (_, index) => {
@@ -55,7 +60,7 @@ export function CarouselDots({
             key={index}
             type="button"
             onClick={() => onSelect(index)}
-            aria-label={`${label} ${index + 1} di ${count}`}
+            aria-label={t('swipe.goTo', { label, index: index + 1, count })}
             aria-current={isActive ? 'true' : undefined}
             className="flex size-7 items-center justify-center rounded-full transition-colors hover:bg-panel-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50"
           >

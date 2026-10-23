@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { BURN_IN_DEFAULTS, KIOSK_DEFAULTS } from '@/config/app.config';
 import { useClock } from '@/hooks/useClock';
@@ -38,6 +39,7 @@ export function KioskDimmerOverlay({
   shiftIntervalMs = BURN_IN_DEFAULTS.shiftIntervalMs,
   transitionMs = BURN_IN_DEFAULTS.transitionMs,
 }: KioskDimmerOverlayProps) {
+  const { t } = useTranslation();
   const now = useClock(1000);
   const clockRef = useRef<HTMLDivElement>(null);
   const shift = usePixelShift({
@@ -80,7 +82,7 @@ export function KioskDimmerOverlay({
         </span>
         <span className="text-xl font-light text-white/80">{formatDate(now)}</span>
         <span className="mt-6 text-[11px] uppercase tracking-[0.35em] text-white/50">
-          Standby · tocca per riattivare
+          {t('standby.hint')}
         </span>
       </div>
     </div>

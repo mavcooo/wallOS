@@ -1,0 +1,44 @@
+{
+  "summary": {
+    "instantLoad": {
+      "label": "Carico istantaneo",
+      "hint": "{{active}} prese attive su {{total}}"
+    },
+    "daily": {
+      "label": "Consumo giornaliero",
+      "hint": "Costo stimato € {{cost}}"
+    },
+    "contracted": {
+      "label": "Potenza massima impegnata",
+      "hint": "Contratto domestico · {{percent}}% usato"
+    },
+    "average": {
+      "label": "Prelievo medio prese",
+      "hint": "Media sui carichi attualmente attivi"
+    }
+  },
+  "live": {
+    "title": "Telemetria in tempo reale",
+    "hint": "Ogni card si sottoscrive alla propria presa: riceve il flush solo chi è cambiato"
+  },
+  "balance": {
+    "title": "Bilancio di carico",
+    "hint": "Prelievo totale rispetto al limite contrattuale",
+    "drawn": "{{value}} prelevati"
+  },
+  "sockets": {
+    "title": "Prese smart",
+    "hint": "Ordinate per consumo decrescente",
+    "todayBadge": "{{value}} oggi",
+    "empty": "Nessuna presa configurata.",
+    "active": "Attiva",
+    "inactive": "Spenta",
+    "loadMax": "{{percent}}% del carico max",
+    "todayShare": "{{value}} oggi · {{percent}}% del totale",
+    "toggleAria": "Accendi o spegni {{name}}"
+  },
+  "guard": {
+    "title": "Carico protetto",
+    "description": "Conferma il comando su {{name}}."
+  }
+}

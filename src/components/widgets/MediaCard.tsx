@@ -1,5 +1,6 @@
 import { Power, Radio, Volume2, VolumeX } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
@@ -16,6 +17,7 @@ interface MediaCardProps {
 }
 
 export function MediaCard({ device, onAction, pending = false, className }: MediaCardProps) {
+  const { t } = useTranslation('devices');
   const { state } = device;
   const [volume, setVolume] = useState(state.volume);
 
@@ -46,7 +48,7 @@ export function MediaCard({ device, onAction, pending = false, className }: Medi
               <SyncIndicator pending={pending} />
             </p>
             <p className="truncate text-[11px] text-fg-subtle">
-              {state.power ? (state.nowPlaying ?? 'Nessuna sorgente') : 'Spento'}
+              {state.power ? (state.nowPlaying ?? t('media.noSource')) : t('media.off')}
             </p>
           </div>
         </div>
@@ -59,7 +61,7 @@ export function MediaCard({ device, onAction, pending = false, className }: Medi
               ? 'border-accent/30 bg-accent-soft text-accent'
               : 'border-line bg-panel-2 text-fg-muted hover:text-fg',
           )}
-          aria-label={state.power ? 'Spegni media player' : 'Accendi media player'}
+          aria-label={t(state.power ? 'media.powerOff' : 'media.powerOn')}
         >
           <Power className="size-4" />
         </button>
@@ -71,7 +73,7 @@ export function MediaCard({ device, onAction, pending = false, className }: Medi
             type="button"
             onClick={() => onAction({ type: 'volume', volume: state.muted ? volume : 0 })}
             className="text-fg-muted transition-colors hover:text-fg"
-            aria-label={state.muted ? 'Riattiva audio' : 'Muta'}
+            aria-label={t(state.muted ? 'media.unmute' : 'media.mute')}
           >
             {state.muted || volume === 0 ? (
               <VolumeX className="size-4" />
@@ -86,7 +88,7 @@ export function MediaCard({ device, onAction, pending = false, className }: Medi
             step={1}
             onValueChange={(values) => setVolume(values[0] ?? 0)}
             onValueCommit={(values) => onAction({ type: 'volume', volume: values[0] ?? 0 })}
-            aria-label={`Volume ${device.name}`}
+            aria-label={t('media.volumeAria', { name: device.name })}
           />
           <span className="tabular w-8 text-right text-xs text-fg-muted">{volume}</span>
         </div>

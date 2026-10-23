@@ -10,7 +10,10 @@ import {
   DoorOpen,
   type LucideIcon,
 } from 'lucide-react';
+import type { TFunction } from 'i18next';
+import { useTranslation } from 'react-i18next';
 
+import { activeLocale } from '@/i18n';
 import { cn } from '@/lib/utils';
 import type { SensorDevice, SensorType } from '@/types/device';
 
@@ -31,26 +34,36 @@ interface SensorTileProps {
   className?: string;
 }
 
-function displayValue(device: SensorDevice): { value: string; unit: string } {
+function displayValue(
+  device: SensorDevice,
+  t: TFunction<'devices'>,
+): { value: string; unit: string } {
   if (device.state.type === 'smoke') {
-    return { value: device.state.value ? 'Allarme' : 'Sicuro', unit: '' };
+    return { value: t(device.state.value ? 'sensor.smoke.alarm' : 'sensor.smoke.safe'), unit: '' };
   }
   if (device.state.type === 'contact') {
-    return { value: device.state.value ? 'Aperto' : 'Chiuso', unit: '' };
+    return {
+      value: t(device.state.value ? 'sensor.contact.open' : 'sensor.contact.closed'),
+      unit: '',
+    };
   }
   if (device.state.type === 'motion') {
-    return { value: device.state.value ? 'Movimento' : 'Nessuno', unit: '' };
+    return {
+      value: t(device.state.value ? 'sensor.motion.detected' : 'sensor.motion.none'),
+      unit: '',
+    };
   }
   const numeric = typeof device.state.value === 'number' ? device.state.value : 0;
-  return { value: numeric.toLocaleString('it-IT'), unit: device.state.unit };
+  return { value: numeric.toLocaleString(activeLocale()), unit: device.state.unit };
 }
 
 export function SensorTile({ device, className }: SensorTileProps) {
+  const { t } = useTranslation('devices');
   const Icon = ICONS[device.state.type];
   const alarm =
     (device.state.type === 'smoke' && device.state.value === true) ||
     (device.state.type === 'contact' && device.state.value === true);
-  const { value, unit } = displayValue(device);
+  const { value, unit } = displayValue(device, t);
 
   return (
     <div

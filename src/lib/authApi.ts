@@ -1,3 +1,4 @@
+import i18n from '@/i18n';
 import type {
   SessionEnvelope,
   SessionUser,
@@ -44,7 +45,9 @@ async function toApiError(response: Response): Promise<ApiError> {
   const data = (await response.json().catch(() => null)) as Record<string, unknown> | null;
   const code = typeof data?.error === 'string' ? data.error : 'HTTP_ERROR';
   const message =
-    typeof data?.message === 'string' ? data.message : `Errore ${response.status}`;
+    typeof data?.message === 'string'
+      ? data.message
+      : i18n.t('errors.http', { status: response.status });
   return new ApiError(
     response.status,
     code,

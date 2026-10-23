@@ -1,0 +1,430 @@
+{
+  "app": {
+    "name": "DOMUS",
+    "tagline": "Local control"
+  },
+  "nav": {
+    "label": "Navigation",
+    "overview": "Overview",
+    "rooms": "Rooms",
+    "energy": "Energy",
+    "settings": "Settings",
+    "users": "Users",
+    "admin": "Administration",
+    "denied": "{{label}} is not allowed for {{role}}"
+  },
+  "roles": {
+    "admin": "Administrator",
+    "family": "Family",
+    "guest": "Guest",
+    "kiosk": "Wall panel"
+  },
+  "header": {
+    "views": {
+      "overview": {
+        "title": "Overview",
+        "subtitle": "Live status of your home"
+      },
+      "rooms": {
+        "title": "Rooms",
+        "subtitle": "Local control by room"
+      },
+      "energy": {
+        "title": "Energy",
+        "subtitle": "Loads and consumption monitoring"
+      },
+      "settings": {
+        "title": "Settings",
+        "subtitle": "Broker, diagnostics and kiosk profile"
+      },
+      "users": {
+        "title": "Users and profiles",
+        "subtitle": "Roles, rooms and protected actions"
+      },
+      "admin": {
+        "title": "Administration",
+        "subtitle": "Rooms, devices and scenarios in PostgreSQL"
+      }
+    },
+    "roomSubtitle": "Room · {{room}}",
+    "unlock": {
+      "label": "Unlock",
+      "aria": "Unlock panel with PIN",
+      "title": "Unlock settings and profiles with the PIN",
+      "dialogTitle": "Unlock panel",
+      "dialogDescription": "Enter the device PIN to access settings and profiles.",
+      "dialogAction": "The elevation lasts 5 minutes.",
+      "toastTitle": "Panel unlocked",
+      "toastDescription": "Settings and profiles available for 5 minutes."
+    },
+    "standby": "Screen standby",
+    "logout": "Sign out",
+    "contrast": {
+      "on": "Enable high contrast",
+      "off": "Disable high contrast"
+    }
+  },
+  "actions": {
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "close": "Close",
+    "closeNotification": "Dismiss notification",
+    "edit": "Edit {{name}}",
+    "delete": "Delete {{name}}"
+  },
+  "sliderLevel": "Level",
+  "favorites": {
+    "add": "Add to favorites",
+    "remove": "Remove from favorites"
+  },
+  "accessDenied": {
+    "title": "“{{view}}” is not allowed",
+    "description": "The active profile role does not have permission for this screen. Settings and kiosk profiles unlock with the device PIN.",
+    "back": "Back to overview",
+    "views": {
+      "energy": "Energy",
+      "settings": "Settings",
+      "users": "Users and profiles",
+      "admin": "Administration"
+    }
+  },
+  "gate": {
+    "sessionLoading": "Checking session…",
+    "topologyLoading": "Loading the home…",
+    "topologyError": "Home configuration unavailable"
+  },
+  "swipe": {
+    "page": "Page",
+    "room": "Room",
+    "position": "{{label}}: {{index}} of {{count}}",
+    "goTo": "{{label}} {{index}} of {{count}}"
+  },
+  "overview": {
+    "statusAria": "Home status",
+    "scenarios": {
+      "title": "Quick scenes",
+      "hint": "One tap, many commands · {{count}} scenes available"
+    },
+    "kpi": {
+      "lights": {
+        "label": "Lights on",
+        "hintOn": "Lighting is on in the house",
+        "hintOff": "All lights are off"
+      },
+      "temperature": {
+        "label": "Average temperature",
+        "hint": "Average of active sensors and thermostats"
+      },
+      "alarms": {
+        "label": "Active alarms",
+        "hintNone": "No anomalies detected",
+        "hintFallback": "Check"
+      },
+      "load": {
+        "label": "Current load",
+        "hint": "Instantaneous draw from smart sockets"
+      }
+    },
+    "rooms": {
+      "title": "Rooms",
+      "hint": "Quick access to every room",
+      "detail": "Details",
+      "lightsOn": "{{count}} lights on",
+      "devices": "{{count}} devices"
+    },
+    "favorites": {
+      "title": "Favorites",
+      "hint": "Most used devices, always at hand",
+      "empty": "No favorites yet. Tap the star on a device to add it."
+    },
+    "turnOffAll": "Turn off all lights ({{count}})"
+  },
+  "rooms": {
+    "noneEnabled": "No room is enabled for this profile.",
+    "online": "{{online}}/{{total}} online",
+    "turnOff": "Turn off lights",
+    "guardTitle": "Turn off room lights",
+    "guardDescription": "Confirm turning off the lights in {{room}}.",
+    "empty": "No devices configured in {{room}}.",
+    "groups": {
+      "climate": "Climate and thermostat",
+      "lights": "Lights",
+      "powers": "Sockets and loads",
+      "media": "Media",
+      "sensors": "Environmental sensors"
+    },
+    "adapters": "Active adapters: {{adapters}}",
+    "topic": "Topic: {{topic}}"
+  },
+  "errors": {
+    "http": "Error {{status}}",
+    "unexpected": "Unexpected error"
+  },
+  "queue": {
+    "expiredTitle": "Command expired",
+    "failedTitle": "Command not synchronized",
+    "expiredDescription": "{{device}} · {{action}}: offline for too long, value restored.",
+    "failedDescription": "{{device}} · {{action}}: the broker did not confirm, value restored."
+  },
+  "scenarioToast": {
+    "queuedTitle": "Scenario “{{label}}” queued",
+    "startedTitle": "Scenario “{{label}}” started",
+    "queuedDescription": "{{count}} commands waiting for a connection: they will be sent on reconnect (within the TTL).",
+    "sentDescription": "{{count}} commands sent in {{elapsed}} ms"
+  },
+  "sync": {
+    "title": "Waiting for broker synchronization",
+    "aria": "Waiting for synchronization"
+  },
+  "time": {
+    "never": "never",
+    "now": "now",
+    "secondsAgo": "{{count}}s ago",
+    "minutesAgo": "{{count}}m ago",
+    "hoursAgo": "{{count}}h ago"
+  },
+  "standby": {
+    "hint": "Standby · tap to wake"
+  },
+  "connection": {
+    "status": {
+      "idle": "Idle",
+      "connecting": "Connecting",
+      "connected": "Online",
+      "reconnecting": "Reconnecting",
+      "offline": "Offline",
+      "error": "Error"
+    },
+    "aria": "MQTT connection status: {{status}}",
+    "pending": "{{count}} commands waiting for synchronization",
+    "demo": "demo",
+    "latencyEmpty": "— ms",
+    "rx": "{{count}} rx"
+  },
+  "database": {
+    "badge": {
+      "ok": "DB ok",
+      "offline": "DB offline",
+      "checking": "DB…",
+      "available": "Database available",
+      "unavailable": "Database unreachable",
+      "availableAria": "Database available, {{version}}",
+      "unavailableTitle": "Database unreachable ({{error}})",
+      "checkedAt": "last check {{time}}",
+      "retry": "automatic retry",
+      "checkingTitle": "Database check in progress"
+    },
+    "trigger": "View database diagnostics",
+    "details": {
+      "title": "Database diagnostics",
+      "descriptionUp": "Database reachable in {{latency}}.",
+      "latencyUnknown": "unknown time",
+      "descriptionDown": "Database unreachable{{error}}.",
+      "descriptionDownError": ": {{error}}",
+      "descriptionChecking": "Database check in progress.",
+      "status": "Status:",
+      "statusValue": {
+        "up": "Available",
+        "down": "Unreachable",
+        "checking": "Checking"
+      },
+      "version": "Version:",
+      "versionUnavailable": "Unavailable",
+      "latency": "Latency:",
+      "latencyNotMeasured": "Not measured",
+      "lastCheck": "Last check:",
+      "never": "Never",
+      "history": "Last 5 checks",
+      "historyLoading": "Loading history…",
+      "close": "Close",
+      "closeAria": "Close diagnostics panel"
+    },
+    "toast": {
+      "downTitle": "Database unreachable",
+      "downDescription": "{{reason}}. Home data may be stale: automatic retry in progress.",
+      "upTitle": "Database available again",
+      "upDescription": "Connection restored{{version}}.",
+      "upVersion": " · {{version}}"
+    },
+    "errors": {
+      "gatewayDown": "The gateway is not responding",
+      "authRejected": "PostgreSQL authentication rejected",
+      "missingDatabase": "PostgreSQL database not found",
+      "timeout": "The gateway did not respond before the timeout",
+      "network": "Network error reaching the gateway",
+      "coded": "Database error ({{code}})",
+      "generic": "Database error"
+    }
+  },
+  "admin": {
+    "title": "Home configuration",
+    "description": "Rooms, devices and scenarios are PostgreSQL rows. Every save goes through the protected APIs (admin role) and updates the store immediately: no kiosk restart.",
+    "tabs": {
+      "rooms": "Rooms",
+      "devices": "Devices",
+      "scenarios": "Scenarios"
+    },
+    "create": {
+      "room": "New room",
+      "device": "New device",
+      "scenario": "New scenario"
+    },
+    "entity": {
+      "room": "room",
+      "device": "device",
+      "scenario": "scenario"
+    },
+    "deviceKind": {
+      "light": "Light",
+      "climate": "Climate",
+      "power": "Power",
+      "media": "Media",
+      "sensor": "Sensor"
+    },
+    "badges": {
+      "favorite": "Favorite",
+      "pin": "PIN",
+      "steps": "{{count}} steps"
+    },
+    "empty": {
+      "rooms": "No rooms yet: create one to get started.",
+      "devices": "No devices in the database.",
+      "scenarios": "No scenarios in the database."
+    },
+    "roomMeta": "{{id}} · {{count}} devices",
+    "roomOrder": " · order {{order}}",
+    "noDescription": "no description",
+    "warning": "Deleting a room requires it to be empty. Deleting a device does not clean up scenario steps that reference it: check the scenarios first.",
+    "dialog": {
+      "edit": "Edit {{entity}}",
+      "create": "New {{entity}}",
+      "roomDescription": "The room is visible in the overview, navigation and filters.",
+      "deviceDescription": "Topics and adapter determine how the kiosk talks to the hardware.",
+      "scenarioDescription": "Steps run in order, with the declared delay."
+    },
+    "saved": {
+      "room": "Room saved",
+      "device": "Device saved",
+      "scenario": "Scenario saved",
+      "description": "Saved to PostgreSQL."
+    },
+    "deleted": {
+      "title": "{{label}} deleted",
+      "description": "The topology is updated for every panel.",
+      "failed": "Delete failed"
+    },
+    "deleteDialog": {
+      "title": "Delete {{label}}?",
+      "description": "This removes the row from PostgreSQL and applies immediately to every panel.",
+      "busy": "Deleting…",
+      "confirm": "Delete"
+    }
+  },
+  "forms": {
+    "name": "Name",
+    "id": "ID (slug)",
+    "idLocked": "Stable key: cannot be changed",
+    "idHint": "Used in topics, scenarios and APIs",
+    "idScenarioHint": "Used by the API and the tests",
+    "shortLabel": "Short label",
+    "shortLabelHint": "Shown in chips and cards",
+    "icon": "Icon",
+    "iconHint": "Lucide icon name (e.g. sofa, car)",
+    "order": "Order",
+    "orderHint": "Lower numbers appear first",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "saveFailed": "Save failed",
+    "room": {
+      "save": "Save room",
+      "create": "Create room"
+    },
+    "device": {
+      "namePlaceholder": "Garage light",
+      "room": "Room",
+      "type": "Type",
+      "types": {
+        "light": "Light",
+        "climate": "Climate",
+        "power": "Socket / power",
+        "media": "Media",
+        "sensor": "Sensor"
+      },
+      "adapter": "Adapter",
+      "adapters": {
+        "zigbee2mqtt": "Zigbee2MQTT",
+        "shelly": "Shelly Gen2",
+        "tasmota": "Tasmota",
+        "custom-json": "Custom JSON",
+        "ha-discovery": "Home Assistant Discovery"
+      },
+      "model": "Model",
+      "modelHint": "Descriptive only",
+      "stateTopic": "State topic",
+      "commandTopic": "Command topic",
+      "commandHint": "Empty for read-only sensors",
+      "availabilityTopic": "Availability topic",
+      "availabilityHint": "LWT online/offline (optional)",
+      "fieldMap": "fieldMap (JSON)",
+      "fieldMapHint": "E.g. {\"on\":\"state.power\",\"brightness\":\"state.dimmer\"}. Empty = keep the saved value.",
+      "favorite": "Favorite",
+      "favoriteHint": "Appears in the Favorites section of the overview",
+      "protected": "Protected commands",
+      "protectedHint": "Requires the PIN before every action",
+      "save": "Save device",
+      "create": "Create device",
+      "fieldMapObject": "must be an object",
+      "fieldMapStrings": "values must be strings",
+      "fieldMapInvalid": "invalid fieldMap: {{reason}}"
+    },
+    "scenario": {
+      "namePlaceholder": "Goodnight",
+      "description": "Description",
+      "descriptionPlaceholder": "Turns off lights and closes the shutters",
+      "iconHint": "clapperboard · moon · door-open · spa · sparkles",
+      "pin": "Requires PIN",
+      "pinHint": "The kiosk asks for the PIN before running the scenario",
+      "steps": "Steps",
+      "stepsAria": "Scenario steps",
+      "stepsHint": "Run in order: every step sends one command to a device.",
+      "addStep": "Add step",
+      "noDevices": "No devices available: create a device first, then add steps.",
+      "noSteps": "No steps yet: the scenario will not send any command.",
+      "step": "Step {{index}}",
+      "moveUp": "Move step {{index}} up",
+      "moveUpTitle": "Move up",
+      "moveDown": "Move step {{index}} down",
+      "moveDownTitle": "Move down",
+      "remove": "Remove step {{index}}",
+      "removeTitle": "Remove step",
+      "device": "Device",
+      "deviceAria": "Step {{index}} device",
+      "deviceNotFound": "not found",
+      "action": "Action",
+      "actionAria": "Step {{index}} action",
+      "value": "Value",
+      "valueAria": "Step {{index}} value",
+      "delay": "Delay (ms)",
+      "delayHint": "Wait before running the step",
+      "delayAria": "Step {{index}} delay",
+      "save": "Save scenario",
+      "create": "Create scenario",
+      "noDevice": "Every step must reference a device",
+      "actions": {
+        "power": "Turn on / off",
+        "brightness": "Brightness",
+        "colorTemp": "Color temperature",
+        "targetTemp": "Target temperature",
+        "climateMode": "Climate mode",
+        "fanSpeed": "Fan speed",
+        "swing": "Oscillation",
+        "volume": "Volume",
+        "source": "Source"
+      },
+      "on": "On",
+      "off": "Off",
+      "enable": "Enable",
+      "disable": "Disable"
+    }
+  }
+}

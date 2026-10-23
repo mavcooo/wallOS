@@ -1,0 +1,100 @@
+{
+  "climate": {
+    "modes": {
+      "off": "Off",
+      "heat": "Heat",
+      "cool": "Cool",
+      "auto": "Auto",
+      "fan_only": "Fan only",
+      "dry": "Dry"
+    },
+    "actions": {
+      "idle": "Idle",
+      "heating": "Heating",
+      "cooling": "Cooling",
+      "drying": "Drying",
+      "fan": "Fan only"
+    },
+    "off": "Off",
+    "humidity": "Humidity {{value}}%",
+    "target": "Target",
+    "now": "Now {{temp}}",
+    "decreaseSetpoint": "Lower setpoint",
+    "increaseSetpoint": "Raise setpoint",
+    "setpointAria": "Setpoint {{name}}",
+    "fan": "Fan",
+    "fanSpeeds": {
+      "auto": "Auto",
+      "low": "1",
+      "medium": "2",
+      "high": "3"
+    },
+    "swing": "Oscillation"
+  },
+  "light": {
+    "off": "off",
+    "intensity": "Brightness",
+    "toggleAria": "Turn {{name}} on or off",
+    "brightnessAria": "Brightness {{name}}",
+    "presets": {
+      "warm": "Warm",
+      "neutral": "Neutral",
+      "cool": "Cool"
+    }
+  },
+  "power": {
+    "today": "{{value}} today",
+    "load": "Load",
+    "loadOf": "{{value}}% of {{max}}",
+    "toggleAria": "Power {{name}}"
+  },
+  "media": {
+    "noSource": "No source",
+    "off": "Off",
+    "powerOff": "Turn media player off",
+    "powerOn": "Turn media player on",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "volumeAria": "Volume {{name}}"
+  },
+  "sensor": {
+    "smoke": {
+      "alarm": "Alarm",
+      "safe": "Safe"
+    },
+    "contact": {
+      "open": "Open",
+      "closed": "Closed"
+    },
+    "motion": {
+      "detected": "Motion",
+      "none": "None"
+    }
+  },
+  "scenario": {
+    "requiresPin": "PIN required",
+    "protectedTitle": "Protected scenario",
+    "protectedDescription": "To run “{{label}}” enter the panel PIN.",
+    "protectedSteps": "{{count}} commands will be sent."
+  },
+  "guard": {
+    "title": "Protected action",
+    "description": "The command on {{name}} requires the panel PIN."
+  },
+  "actionLabels": {
+    "powerOn": "Power on",
+    "powerOff": "Power off",
+    "brightness": "Brightness {{value}}%",
+    "colorTemp": "Color temperature {{value}} K",
+    "targetTemp": "Setpoint {{value}} °C",
+    "climateMode": "Mode {{mode}}",
+    "fanSpeed": "Fan {{speed}}",
+    "swing": "Oscillation {{state}}",
+    "volume": "Volume {{value}}",
+    "source": "Source {{source}}"
+  },
+  "live": {
+    "underLoad": "Under load",
+    "standby": "Standby"
+  }
+}

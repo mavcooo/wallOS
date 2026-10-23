@@ -1,5 +1,6 @@
 import { PlugZap } from 'lucide-react';
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
@@ -26,6 +27,8 @@ export const LivePowerCard = memo(function LivePowerCard({
   deviceId,
   className,
 }: LivePowerCardProps) {
+  const { t } = useTranslation('devices');
+  const { t: tEnergy } = useTranslation('energy');
   const metrics = useHomeStore(
     useShallow((state) => {
       const device = state.devices[deviceId];
@@ -52,8 +55,8 @@ export const LivePowerCard = memo(function LivePowerCard({
   const toggle = (on: boolean) => {
     if (metrics.protected) {
       requestPin({
-        title: 'Carico protetto',
-        description: `Conferma il comando su ${metrics.name}.`,
+        title: tEnergy('guard.title'),
+        description: tEnergy('guard.description', { name: metrics.name }),
         onConfirm: () => sendAction(deviceId, { type: 'power', on }),
       });
       return;
@@ -89,14 +92,14 @@ export const LivePowerCard = memo(function LivePowerCard({
                   metrics.on ? 'bg-accent' : 'bg-fg-subtle/50',
                 )}
               />
-              {metrics.on ? 'Sotto carico' : 'In standby'}
+              {metrics.on ? t('live.underLoad') : t('live.standby')}
             </p>
           </div>
         </div>
         <Switch
           checked={metrics.on}
           onCheckedChange={toggle}
-          aria-label={`Alimenta ${metrics.name}`}
+          aria-label={t('power.toggleAria', { name: metrics.name })}
         />
       </header>
 
@@ -122,9 +125,11 @@ export const LivePowerCard = memo(function LivePowerCard({
           />
         </div>
         <div className="mt-1 flex justify-between text-[10px] text-fg-subtle">
-          <span className="tabular">{formatKwh(metrics.todayKwh)} oggi</span>
           <span className="tabular">
-            {metrics.load}% di {formatWatts(metrics.maxWatts)}
+            {t('power.today', { value: formatKwh(metrics.todayKwh) })}
+          </span>
+          <span className="tabular">
+            {t('power.loadOf', { value: metrics.load, max: formatWatts(metrics.maxWatts) })}
           </span>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { useAuthStore } from '@/store/authStore';
 import { PinProtectionDialog } from './PinProtectionDialog';
@@ -25,6 +26,7 @@ const PinGuardContext = createContext<RequestPin | null>(null);
  * `usePinGuard()({ ... })` e viene eseguita solo dopo la verifica.
  */
 export function PinProvider({ children }: { children: ReactNode }) {
+  const { t } = useTranslation('auth');
   const [request, setRequest] = useState<PinRequest | null>(null);
   const verifyPin = useAuthStore((state) => state.verifyPin);
   const pinPolicy = useAuthStore((state) => state.pinPolicy);
@@ -56,11 +58,11 @@ export function PinProvider({ children }: { children: ReactNode }) {
         onOpenChange={(open) => {
           if (!open) setRequest(null);
         }}
-        title={request?.title ?? 'Conferma PIN'}
+        title={request?.title ?? t('pinDialog.defaultTitle')}
         description={
           request
             ? [request.description, request.action].filter(Boolean).join(' ')
-            : 'Azione protetta'
+            : t('pinDialog.defaultDescription')
         }
         length={request?.length ?? pinLength}
         scope={pinScope}

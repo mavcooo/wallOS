@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Field, FormError } from '@/components/admin/fields';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ export function RoomForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(room?.label ?? '');
   const [id, setId] = useState(room?.id ?? '');
   const [idTouched, setIdTouched] = useState(Boolean(room));
@@ -49,7 +51,7 @@ export function RoomForm({
       }
       onSaved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Salvataggio non riuscito');
+      setError(cause instanceof Error ? cause.message : t('forms.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -58,7 +60,7 @@ export function RoomForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Nome">
+        <Field label={t('forms.name')}>
           <Input
             value={name}
             onChange={(event) => changeName(event.target.value)}
@@ -68,8 +70,8 @@ export function RoomForm({
           />
         </Field>
         <Field
-          label="ID (slug)"
-          hint={room ? 'Chiave stabile: non modificabile' : 'Usato in topic, scenari e API'}
+          label={t('forms.id')}
+          hint={room ? t('forms.idLocked') : t('forms.idHint')}
         >
           <Input
             value={id}
@@ -84,7 +86,7 @@ export function RoomForm({
             placeholder="garage"
           />
         </Field>
-        <Field label="Etichetta breve" hint="Mostrata nei chip e nelle card">
+        <Field label={t('forms.shortLabel')} hint={t('forms.shortLabelHint')}>
           <Input
             value={shortLabel}
             onChange={(event) => setShortLabel(event.target.value)}
@@ -92,7 +94,7 @@ export function RoomForm({
             placeholder="Garage"
           />
         </Field>
-        <Field label="Icona" hint="Nome icona Lucide (es. sofa, car)">
+        <Field label={t('forms.icon')} hint={t('forms.iconHint')}>
           <Input
             value={icon}
             onChange={(event) => setIcon(event.target.value)}
@@ -106,7 +108,7 @@ export function RoomForm({
             ))}
           </datalist>
         </Field>
-        <Field label="Ordine" hint="Numeri più bassi compaiono prima">
+        <Field label={t('forms.order')} hint={t('forms.orderHint')}>
           <Input
             type="number"
             min={0}
@@ -121,10 +123,10 @@ export function RoomForm({
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
-          Annulla
+          {t('forms.cancel')}
         </Button>
         <Button type="submit" variant="primary" disabled={busy || name.trim().length === 0}>
-          {busy ? 'Salvataggio…' : room ? 'Salva stanza' : 'Crea stanza'}
+          {busy ? t('forms.saving') : t(room ? 'forms.room.save' : 'forms.room.create')}
         </Button>
       </div>
     </form>

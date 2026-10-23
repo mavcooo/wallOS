@@ -1,3 +1,5 @@
+import { useTranslation } from 'react-i18next';
+
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useOfflineQueue } from '@/mqtt/offlineQueue';
@@ -17,6 +19,7 @@ interface DeviceCardProps {
 
 /** Smista l'entità normalizzata verso il widget corretto. */
 export function DeviceCard({ device, showFavorite = false, className }: DeviceCardProps) {
+  const { t } = useTranslation('devices');
   const { sendAction } = useMqttApi();
   const requestPin = usePinGuard();
   const toggleFavorite = useHomeStore((state) => state.toggleFavorite);
@@ -34,8 +37,8 @@ export function DeviceCard({ device, showFavorite = false, className }: DeviceCa
   const onAction = (action: Parameters<typeof sendAction>[1]) => {
     if (device.protected) {
       requestPin({
-        title: 'Azione protetta',
-        description: `Il comando su ${device.name} richiede il PIN del pannello.`,
+        title: t('guard.title'),
+        description: t('guard.description', { name: device.name }),
         onConfirm: () => sendAction(device.id, action),
       });
       return;

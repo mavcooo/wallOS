@@ -1,5 +1,6 @@
 import { Lightbulb, Power, RadioTower } from 'lucide-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { DeviceCard } from '@/components/widgets/DeviceCard';
@@ -47,6 +48,7 @@ function groupByKind(devices: Device[]) {
 }
 
 export function RoomsPage() {
+  const { t } = useTranslation();
   const room = useHomeStore((state) => state.ui.room);
   const setRoom = useHomeStore((state) => state.setRoom);
   const devices = useHomeStore((state) => state.devices);
@@ -92,7 +94,7 @@ export function RoomsPage() {
   if (!active) {
     return (
       <p className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-fg-muted">
-        Nessuna stanza abilitata per questo profilo.
+        {t('rooms.noneEnabled')}
       </p>
     );
   }
@@ -108,8 +110,8 @@ export function RoomsPage() {
   const guardAndTurnOff = () => {
     if (lights.some((light) => light.protected)) {
       requestPin({
-        title: 'Spegni luci stanza',
-        description: `Conferma lo spegnimento delle luci in ${active.label}.`,
+        title: t('rooms.guardTitle'),
+        description: t('rooms.guardDescription', { room: active.label }),
         onConfirm: turnOffLights,
       });
       return;
@@ -150,7 +152,7 @@ export function RoomsPage() {
 
         <div className="flex items-center gap-2">
           <span className="rounded-full border border-line bg-panel px-2.5 py-1 text-[10px] text-fg-subtle">
-            {online}/{roomDevices.length} online
+            {t('rooms.online', { online, total: roomDevices.length })}
           </span>
           {lights.length > 0 ? (
             <button
@@ -160,7 +162,7 @@ export function RoomsPage() {
               className="flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-[11px] font-medium text-fg-muted transition-colors hover:text-fg disabled:opacity-40"
             >
               <Lightbulb className="size-3.5" />
-              Spegni luci
+              {t('rooms.turnOff')}
             </button>
           ) : null}
         </div>
@@ -169,7 +171,7 @@ export function RoomsPage() {
       <CarouselDots
         count={rooms.length}
         activeIndex={activeIndex}
-        label="Stanza"
+        label={t('swipe.room')}
         onSelect={(index) => {
           const next = rooms[index];
           if (!next) return;
@@ -189,12 +191,12 @@ export function RoomsPage() {
       >
         {roomDevices.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-fg-muted">
-            Nessun dispositivo configurato in {active.label}.
+            {t('rooms.empty', { room: active.label })}
           </p>
         ) : null}
 
         {climates.length > 0 ? (
-          <Group title="Clima e termostato" count={climates.length}>
+          <Group title={t('rooms.groups.climate')} count={climates.length}>
             <div className="grid grid-cols-1 gap-3 2xl:grid-cols-2">
               {climates.map((device) => (
                 <DeviceCard key={device.id} device={device} showFavorite />
@@ -204,7 +206,7 @@ export function RoomsPage() {
         ) : null}
 
         {lights.length > 0 ? (
-          <Group title="Luci" count={lights.length}>
+          <Group title={t('rooms.groups.lights')} count={lights.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
               {lights.map((device) => (
                 <DeviceCard key={device.id} device={device} showFavorite />
@@ -214,7 +216,7 @@ export function RoomsPage() {
         ) : null}
 
         {powers.length > 0 ? (
-          <Group title="Prese e carichi" count={powers.length}>
+          <Group title={t('rooms.groups.powers')} count={powers.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
               {powers.map((device) => (
                 <DeviceCard key={device.id} device={device} showFavorite />
@@ -224,7 +226,7 @@ export function RoomsPage() {
         ) : null}
 
         {media.length > 0 ? (
-          <Group title="Media" count={media.length}>
+          <Group title={t('rooms.groups.media')} count={media.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
               {media.map((device) => (
                 <DeviceCard key={device.id} device={device} showFavorite />
@@ -234,7 +236,7 @@ export function RoomsPage() {
         ) : null}
 
         {sensors.length > 0 ? (
-          <Group title="Sensori ambientali" count={sensors.length}>
+          <Group title={t('rooms.groups.sensors')} count={sensors.length}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {sensors.map((device) => (
                 <DeviceCard key={device.id} device={device} />
@@ -246,11 +248,13 @@ export function RoomsPage() {
         {roomDevices.length > 0 ? (
           <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel/60 px-4 py-3 text-[10px] text-fg-subtle">
             <span className="flex items-center gap-1.5">
-              <RadioTower className="size-3.5" /> Adapter attivi:{' '}
-              {[...new Set(roomDevices.map((device) => device.adapter))].join(' · ')}
+              <RadioTower className="size-3.5" />{' '}
+              {t('rooms.adapters', {
+                adapters: [...new Set(roomDevices.map((device) => device.adapter))].join(' · '),
+              })}
             </span>
             <span className="flex items-center gap-1.5">
-              <Power className="size-3.5" /> Topic: {roomDevices[0]?.topics.state}
+              <Power className="size-3.5" /> {t('rooms.topic', { topic: roomDevices[0]?.topics.state })}
             </span>
           </div>
         ) : null}

@@ -1,5 +1,6 @@
 import { Lightbulb, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { roomLabel } from '@/lib/rooms';
 import { useHomeStore } from '@/store/homeStore';
@@ -19,9 +20,9 @@ interface LightCardProps {
 }
 
 const PRESETS = [
-  { label: 'Calda', kelvin: 2400 },
-  { label: 'Neutra', kelvin: 3500 },
-  { label: 'Fredda', kelvin: 5500 },
+  { key: 'warm', kelvin: 2400 },
+  { key: 'neutral', kelvin: 3500 },
+  { key: 'cool', kelvin: 5500 },
 ] as const;
 
 export function LightCard({
@@ -31,6 +32,8 @@ export function LightCard({
   pending = false,
   className,
 }: LightCardProps) {
+  const { t } = useTranslation('devices');
+  const { t: tCommon } = useTranslation('common');
   const { state, capabilities } = device;
   const rooms = useHomeStore((store) => store.rooms);
   const [brightness, setBrightness] = useState(state.brightness);
@@ -68,7 +71,7 @@ export function LightCard({
             </p>
             <p className="truncate text-[11px] text-fg-subtle">
               {roomLabel(rooms, device.room)}
-              {active ? ` · ${brightness}%` : ' · spenta'}
+              {active ? ` · ${brightness}%` : ` · ${t('light.off')}`}
             </p>
           </div>
         </div>
@@ -77,7 +80,7 @@ export function LightCard({
             <button
               type="button"
               onClick={onToggleFavorite}
-              aria-label={device.favorite ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+              aria-label={tCommon(device.favorite ? 'favorites.remove' : 'favorites.add')}
               className="flex size-9 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-elevated hover:text-fg"
             >
               <Star className={cn('size-4', device.favorite && 'fill-accent text-accent')} />
@@ -86,7 +89,7 @@ export function LightCard({
           <Switch
             checked={active}
             onCheckedChange={(on) => onAction({ type: 'power', on })}
-            aria-label={`Accendi o spegni ${device.name}`}
+            aria-label={t('light.toggleAria', { name: device.name })}
           />
         </div>
       </div>
@@ -94,7 +97,7 @@ export function LightCard({
       <div className={cn('transition-opacity', !active && 'opacity-45')}>
         <div className="flex items-end justify-between">
           <span className="text-[10px] font-medium uppercase tracking-wider text-fg-subtle">
-            Intensità
+            {t('light.intensity')}
           </span>
           <span className="tabular text-2xl font-light leading-none text-fg">
             {brightness}
@@ -112,7 +115,7 @@ export function LightCard({
             const next = values[0] ?? 0;
             onAction({ type: 'brightness', brightness: next });
           }}
-          aria-label={`Luminosità ${device.name}`}
+          aria-label={t('light.brightnessAria', { name: device.name })}
           className="mt-1"
         />
       </div>
@@ -137,7 +140,7 @@ export function LightCard({
                   'disabled:opacity-30',
                 )}
               >
-                {preset.label}
+                {t(`light.presets.${preset.key}`)}
               </button>
             );
           })}

@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Field, FormError, ToggleField, selectClass } from '@/components/admin/fields';
 import { Button } from '@/components/ui/button';
@@ -15,16 +16,16 @@ import type {
   ScenarioStep,
 } from '@/types/device';
 
-const ACTIONS: { value: ControlAction['type']; label: string }[] = [
-  { value: 'power', label: 'Accendi / spegni' },
-  { value: 'brightness', label: 'Luminosità' },
-  { value: 'colorTemp', label: 'Temperatura colore' },
-  { value: 'targetTemp', label: 'Temperatura target' },
-  { value: 'climateMode', label: 'Modalità clima' },
-  { value: 'fanSpeed', label: 'Velocità ventola' },
-  { value: 'swing', label: 'Oscillazione' },
-  { value: 'volume', label: 'Volume' },
-  { value: 'source', label: 'Sorgente' },
+const ACTIONS: readonly ControlAction['type'][] = [
+  'power',
+  'brightness',
+  'colorTemp',
+  'targetTemp',
+  'climateMode',
+  'fanSpeed',
+  'swing',
+  'volume',
+  'source',
 ];
 
 const CLIMATE_MODES: ClimateMode[] = ['off', 'heat', 'cool', 'auto', 'fan_only', 'dry'];
@@ -68,7 +69,9 @@ function ActionValue({
   action: ControlAction;
   onChange: (action: ControlAction) => void;
 }) {
-  const label = `Valore passo ${index + 1}`;
+  const { t } = useTranslation();
+  const { t: tDevices } = useTranslation('devices');
+  const label = t('forms.scenario.valueAria', { index: index + 1 });
   switch (action.type) {
     case 'power':
       return (
@@ -78,8 +81,8 @@ function ActionValue({
           value={action.on ? 'on' : 'off'}
           onChange={(event) => onChange({ type: 'power', on: event.target.value === 'on' })}
         >
-          <option value="on">Acceso</option>
-          <option value="off">Spento</option>
+          <option value="on">{t('forms.scenario.on')}</option>
+          <option value="off">{t('forms.scenario.off')}</option>
         </select>
       );
     case 'brightness':
@@ -138,7 +141,7 @@ function ActionValue({
         >
           {CLIMATE_MODES.map((mode) => (
             <option key={mode} value={mode}>
-              {mode}
+              {tDevices(`climate.modes.${mode}`)}
             </option>
           ))}
         </select>
@@ -155,7 +158,7 @@ function ActionValue({
         >
           {FAN_SPEEDS.map((speed) => (
             <option key={speed} value={speed}>
-              {speed}
+              {tDevices(`climate.fanSpeeds.${speed}`)}
             </option>
           ))}
         </select>
@@ -168,8 +171,8 @@ function ActionValue({
           value={action.swing ? 'on' : 'off'}
           onChange={(event) => onChange({ type: 'swing', swing: event.target.value === 'on' })}
         >
-          <option value="on">Attiva</option>
-          <option value="off">Disattiva</option>
+          <option value="on">{t('forms.scenario.enable')}</option>
+          <option value="off">{t('forms.scenario.disable')}</option>
         </select>
       );
     case 'volume':
@@ -209,6 +212,7 @@ export function ScenarioForm({
   onSaved: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const [label, setLabel] = useState(scenario?.label ?? '');
   const [id, setId] = useState(scenario?.id ?? '');
   const [idTouched, setIdTouched] = useState(Boolean(scenario));
@@ -263,7 +267,7 @@ export function ScenarioForm({
     setError(null);
 
     if (steps.some((step) => step.deviceId.length === 0)) {
-      setError('Ogni passo deve indicare un dispositivo');
+      setError(t('forms.scenario.noDevice'));
       setBusy(false);
       return;
     }
@@ -288,7 +292,7 @@ export function ScenarioForm({
       }
       onSaved();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Salvataggio non riuscito');
+      setError(cause instanceof Error ? cause.message : t('forms.saveFailed'));
     } finally {
       setBusy(false);
     }
@@ -297,18 +301,18 @@ export function ScenarioForm({
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <Field label="Nome">
+        <Field label={t('forms.name')}>
           <Input
             value={label}
             onChange={(event) => changeLabel(event.target.value)}
             required
             maxLength={80}
-            placeholder="Buonanotte"
+            placeholder={t('forms.scenario.namePlaceholder')}
           />
         </Field>
         <Field
-          label="ID (slug)"
-          hint={scenario ? 'Chiave stabile: non modificabile' : 'Usato dalla API e dai test'}
+          label={t('forms.id')}
+          hint={scenario ? t('forms.idLocked') : t('forms.idScenarioHint')}
         >
           <Input
             value={id}
@@ -323,15 +327,15 @@ export function ScenarioForm({
             placeholder="goodnight"
           />
         </Field>
-        <Field label="Descrizione">
+        <Field label={t('forms.scenario.description')}>
           <Input
             value={description}
             onChange={(event) => setDescription(event.target.value)}
             maxLength={240}
-            placeholder="Spegne luci e abbassa le tapparelle"
+            placeholder={t('forms.scenario.descriptionPlaceholder')}
           />
         </Field>
-        <Field label="Icona" hint="clapperboard · moon · door-open · spa · sparkles">
+        <Field label={t('forms.icon')} hint={t('forms.scenario.iconHint')}>
           <Input
             value={icon}
             onChange={(event) => setIcon(event.target.value)}
@@ -339,7 +343,7 @@ export function ScenarioForm({
             placeholder="moon"
           />
         </Field>
-        <Field label="Ordine" hint="Numeri più bassi compaiono prima">
+        <Field label={t('forms.order')} hint={t('forms.orderHint')}>
           <Input
             type="number"
             min={0}
@@ -351,19 +355,17 @@ export function ScenarioForm({
       </div>
 
       <ToggleField
-        label="Richiede PIN"
-        hint="Il kiosk chiede il PIN prima di eseguire lo scenario"
+        label={t('forms.scenario.pin')}
+        hint={t('forms.scenario.pinHint')}
         checked={protectedScenario}
         onChange={setProtectedScenario}
       />
 
-      <section className="flex flex-col gap-2" aria-label="Passi dello scenario">
+      <section className="flex flex-col gap-2" aria-label={t('forms.scenario.stepsAria')}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-medium text-fg">Passi</p>
-            <p className="mt-0.5 text-[10px] text-fg-subtle">
-              Eseguiti in ordine: ogni passo invia un comando a un dispositivo.
-            </p>
+            <p className="text-xs font-medium text-fg">{t('forms.scenario.steps')}</p>
+            <p className="mt-0.5 text-[10px] text-fg-subtle">{t('forms.scenario.stepsHint')}</p>
           </div>
           <Button
             type="button"
@@ -372,17 +374,17 @@ export function ScenarioForm({
             onClick={addStep}
             disabled={devices.length === 0}
           >
-            <Plus className="size-4" /> Aggiungi passo
+            <Plus className="size-4" /> {t('forms.scenario.addStep')}
           </Button>
         </div>
 
         {devices.length === 0 ? (
           <p className="rounded-xl border border-dashed border-line p-4 text-center text-[11px] text-fg-subtle">
-            Nessun dispositivo disponibile: crea prima un dispositivo, poi aggiungi i passi.
+            {t('forms.scenario.noDevices')}
           </p>
         ) : steps.length === 0 ? (
           <p className="rounded-xl border border-dashed border-line p-4 text-center text-[11px] text-fg-subtle">
-            Nessun passo: lo scenario non invierà comandi.
+            {t('forms.scenario.noSteps')}
           </p>
         ) : (
           <ol className="flex flex-col gap-2">
@@ -394,14 +396,16 @@ export function ScenarioForm({
                   className="rounded-2xl border border-line bg-panel-2/60 p-3"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="text-[11px] font-semibold text-fg-muted">Passo {index + 1}</p>
+                    <p className="text-[11px] font-semibold text-fg-muted">
+                      {t('forms.scenario.step', { index: index + 1 })}
+                    </p>
                     <div className="flex items-center gap-1">
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        aria-label={`Sposta su passo ${index + 1}`}
-                        title="Sposta su"
+                        aria-label={t('forms.scenario.moveUp', { index: index + 1 })}
+                        title={t('forms.scenario.moveUpTitle')}
                         onClick={() => moveStep(index, -1)}
                         disabled={index === 0}
                       >
@@ -411,8 +415,8 @@ export function ScenarioForm({
                         type="button"
                         variant="ghost"
                         size="icon"
-                        aria-label={`Sposta giù passo ${index + 1}`}
-                        title="Sposta giù"
+                        aria-label={t('forms.scenario.moveDown', { index: index + 1 })}
+                        title={t('forms.scenario.moveDownTitle')}
                         onClick={() => moveStep(index, 1)}
                         disabled={index === steps.length - 1}
                       >
@@ -423,8 +427,8 @@ export function ScenarioForm({
                         variant="ghost"
                         size="icon"
                         className="text-danger hover:bg-danger/10 hover:text-danger"
-                        aria-label={`Rimuovi passo ${index + 1}`}
-                        title="Rimuovi passo"
+                        aria-label={t('forms.scenario.remove', { index: index + 1 })}
+                        title={t('forms.scenario.removeTitle')}
                         onClick={() => removeStep(index)}
                       >
                         <Trash2 className="size-4" />
@@ -433,15 +437,17 @@ export function ScenarioForm({
                   </div>
 
                   <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <Field label="Dispositivo">
+                    <Field label={t('forms.scenario.device')}>
                       <select
                         className={selectClass}
-                        aria-label={`Dispositivo passo ${index + 1}`}
+                        aria-label={t('forms.scenario.deviceAria', { index: index + 1 })}
                         value={step.deviceId}
                         onChange={(event) => patchStep(index, { deviceId: event.target.value })}
                       >
                         {!knownDevice && step.deviceId ? (
-                          <option value={step.deviceId}>{step.deviceId} (non trovato)</option>
+                          <option value={step.deviceId}>
+                            {step.deviceId} ({t('forms.scenario.deviceNotFound')})
+                          </option>
                         ) : null}
                         {devices.map((device) => (
                           <option key={device.id} value={device.id}>
@@ -450,10 +456,10 @@ export function ScenarioForm({
                         ))}
                       </select>
                     </Field>
-                    <Field label="Azione">
+                    <Field label={t('forms.scenario.action')}>
                       <select
                         className={selectClass}
-                        aria-label={`Azione passo ${index + 1}`}
+                        aria-label={t('forms.scenario.actionAria', { index: index + 1 })}
                         value={step.action.type}
                         onChange={(event) =>
                           patchStep(index, {
@@ -462,26 +468,29 @@ export function ScenarioForm({
                         }
                       >
                         {ACTIONS.map((action) => (
-                          <option key={action.value} value={action.value}>
-                            {action.label}
+                          <option key={action} value={action}>
+                            {t(`forms.scenario.actions.${action}`)}
                           </option>
                         ))}
                       </select>
                     </Field>
-                    <Field label="Valore">
+                    <Field label={t('forms.scenario.value')}>
                       <ActionValue
                         index={index}
                         action={step.action}
                         onChange={(action) => patchStep(index, { action })}
                       />
                     </Field>
-                    <Field label="Ritardo (ms)" hint="Attesa prima di eseguire il passo">
+                    <Field
+                      label={t('forms.scenario.delay')}
+                      hint={t('forms.scenario.delayHint')}
+                    >
                       <Input
                         type="number"
                         min={0}
                         max={600000}
                         step={50}
-                        aria-label={`Ritardo passo ${index + 1}`}
+                        aria-label={t('forms.scenario.delayAria', { index: index + 1 })}
                         value={step.delayMs ?? 0}
                         onChange={(event) => {
                           const value = numberValue(event);
@@ -501,10 +510,10 @@ export function ScenarioForm({
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel} disabled={busy}>
-          Annulla
+          {t('forms.cancel')}
         </Button>
         <Button type="submit" variant="primary" disabled={busy || label.trim().length === 0}>
-          {busy ? 'Salvataggio…' : scenario ? 'Salva scenario' : 'Crea scenario'}
+          {busy ? t('forms.saving') : t(scenario ? 'forms.scenario.save' : 'forms.scenario.create')}
         </Button>
       </div>
     </form>

@@ -1,4 +1,5 @@
 import { Activity, BatteryCharging, Gauge, PlugZap, Zap } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { LivePowerCard } from '@/components/widgets/LivePowerCard';
@@ -12,6 +13,7 @@ const CONTRACT_LIMIT_W = 3_300;
 const ENERGY_PRICE_EUR_KWH = 0.28;
 
 export function EnergyPage() {
+  const { t } = useTranslation('energy');
   const devices = useHomeStore((state) => state.devices);
   const requestPin = usePinGuard();
   const { sendAction } = useMqttApi();
@@ -30,8 +32,8 @@ export function EnergyPage() {
   const toggleSocket = (socket: PowerDevice, on: boolean) => {
     if (socket.protected) {
       requestPin({
-        title: 'Carico protetto',
-        description: `Conferma il comando su ${socket.name}.`,
+        title: t('guard.title'),
+        description: t('guard.description', { name: socket.name }),
         onConfirm: () => sendAction(socket.id, { type: 'power', on }),
       });
       return;
@@ -43,29 +45,32 @@ export function EnergyPage() {
     <div className="flex flex-col gap-5">
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
         <SummaryCard
-          label="Carico istantaneo"
+          label={t('summary.instantLoad.label')}
           value={formatWatts(instantaneous)}
-          hint={`${activeSockets} prese attive su ${sockets.length}`}
+          hint={t('summary.instantLoad.hint', {
+            active: activeSockets,
+            total: sockets.length,
+          })}
           icon={Zap}
           tone={contractLoad > 85 ? 'danger' : 'accent'}
         />
         <SummaryCard
-          label="Consumo giornaliero"
+          label={t('summary.daily.label')}
           value={formatKwh(todayKwh)}
-          hint={`Costo stimato € ${estimatedCost.toFixed(2)}`}
+          hint={t('summary.daily.hint', { cost: estimatedCost.toFixed(2) })}
           icon={BatteryCharging}
         />
         <SummaryCard
-          label="Potenza massima impegnata"
+          label={t('summary.contracted.label')}
           value={formatWatts(CONTRACT_LIMIT_W)}
-          hint={`Contratto domestico · ${contractLoad}% usato`}
+          hint={t('summary.contracted.hint', { percent: contractLoad })}
           icon={Gauge}
           tone={contractLoad > 85 ? 'danger' : 'neutral'}
         />
         <SummaryCard
-          label="Prelievo medio prese"
+          label={t('summary.average.label')}
           value={formatWatts(activeSockets > 0 ? instantaneous / activeSockets : 0)}
-          hint="Media sui carichi attualmente attivi"
+          hint={t('summary.average.hint')}
           icon={Activity}
         />
       </section>
@@ -74,11 +79,9 @@ export function EnergyPage() {
         <section aria-labelledby="live-power-title" className="flex flex-col gap-3">
           <div>
             <h2 id="live-power-title" className="text-sm font-semibold text-fg">
-              Telemetria in tempo reale
+              {t('live.title')}
             </h2>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">
-              Ogni card si sottoscrive alla propria presa: riceve il flush solo chi è cambiato
-            </p>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">{t('live.hint')}</p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
             {allSockets.map((socket) => (
@@ -91,10 +94,8 @@ export function EnergyPage() {
       <section className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
         <div className="flex items-end justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-fg">Bilancio di carico</h2>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">
-              Prelievo totale rispetto al limite contrattuale
-            </p>
+            <h2 className="text-sm font-semibold text-fg">{t('balance.title')}</h2>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">{t('balance.hint')}</p>
           </div>
           <span
             className={cn(
@@ -116,7 +117,7 @@ export function EnergyPage() {
         </div>
         <div className="mt-2 flex justify-between text-[10px] text-fg-subtle">
           <span>0 W</span>
-          <span>{formatWatts(instantaneous)} prelevati</span>
+          <span>{t('balance.drawn', { value: formatWatts(instantaneous) })}</span>
           <span>{formatWatts(CONTRACT_LIMIT_W)}</span>
         </div>
       </section>
@@ -124,19 +125,17 @@ export function EnergyPage() {
       <section className="flex flex-col gap-2.5">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-fg">Prese smart</h2>
-            <p className="mt-0.5 text-[11px] text-fg-subtle">
-              Ordinate per consumo decrescente
-            </p>
+            <h2 className="text-sm font-semibold text-fg">{t('sockets.title')}</h2>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">{t('sockets.hint')}</p>
           </div>
           <span className="rounded-full border border-line px-2.5 py-1 text-[10px] text-fg-subtle">
-            {formatKwh(todayKwh)} oggi
+            {t('sockets.todayBadge', { value: formatKwh(todayKwh) })}
           </span>
         </div>
 
         <div className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-panel">
           {sockets.length === 0 ? (
-            <p className="p-6 text-center text-xs text-fg-subtle">Nessuna presa configurata.</p>
+            <p className="p-6 text-center text-xs text-fg-subtle">{t('sockets.empty')}</p>
           ) : (
             <ul className="divide-y divide-line">
               {sockets.map((socket) => {
@@ -176,10 +175,14 @@ export function EnergyPage() {
                       </div>
                       <div className="mt-1 flex justify-between text-[10px] text-fg-subtle">
                         <span>
-                          {socket.state.on ? 'Attiva' : 'Spenta'} · {load}% del carico max
+                          {socket.state.on ? t('sockets.active') : t('sockets.inactive')} ·{' '}
+                          {t('sockets.loadMax', { percent: load })}
                         </span>
                         <span className="tabular">
-                          {formatKwh(socket.state.energyTodayKwh)} oggi · {share}% del totale
+                          {t('sockets.todayShare', {
+                            value: formatKwh(socket.state.energyTodayKwh),
+                            percent: share,
+                          })}
                         </span>
                       </div>
                     </div>
@@ -204,7 +207,7 @@ export function EnergyPage() {
                           'relative h-8 w-14 rounded-full border-2 border-transparent transition-colors',
                           socket.state.on ? 'bg-accent' : 'bg-elevated',
                         )}
-                        aria-label={`Accendi o spegni ${socket.name}`}
+                        aria-label={t('sockets.toggleAria', { name: socket.name })}
                       >
                         <span
                           className={cn(

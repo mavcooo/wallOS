@@ -1,25 +1,19 @@
 import { KeyRound, LogOut, MoonStar } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { roomLabel } from '@/lib/rooms';
+import { ContrastToggle } from '@/components/settings/ContrastToggle';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthStore } from '@/store/authStore';
-import { useHomeStore, type ViewId } from '@/store/homeStore';
+import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
 import { Clock } from './Clock';
 import { ConnectionBadge } from './ConnectionBadge';
 import { DatabaseBadge } from './DatabaseBadge';
 
-const TITLES: Record<ViewId, { title: string; subtitle: string }> = {
-  overview: { title: 'Overview', subtitle: 'Stato della casa in tempo reale' },
-  rooms: { title: 'Stanze', subtitle: 'Controllo locale per ambiente' },
-  energy: { title: 'Consumi', subtitle: 'Monitoraggio carichi e prelievo' },
-  settings: { title: 'Impostazioni', subtitle: 'Broker, diagnostica e profilo kiosk' },
-  users: { title: 'Utenti e profili', subtitle: 'Ruoli, stanze e azioni protette' },
-  admin: { title: 'Amministrazione', subtitle: 'Stanze, dispositivi e scenari su PostgreSQL' },
-};
-
 export function Header({ onStandby }: { onStandby: () => void }) {
+  const { t } = useTranslation();
   const view = useHomeStore((state) => state.ui.view);
   const room = useHomeStore((state) => state.ui.room);
   const rooms = useHomeStore((state) => state.rooms);
@@ -28,29 +22,32 @@ export function Header({ onStandby }: { onStandby: () => void }) {
   const user = useCurrentUser();
   const requestPin = usePinGuard();
   const pushToast = useToastStore((state) => state.push);
-  const meta = TITLES[view];
+  const title = t(`header.views.${view}.title`);
 
   const unlockPanel = () => {
     requestPin({
-      title: 'Sblocca pannello',
-      description: 'Inserisci il PIN del dispositivo per accedere a impostazioni e profili.',
-      action: 'L’elevazione dura 5 minuti.',
+      title: t('header.unlock.dialogTitle'),
+      description: t('header.unlock.dialogDescription'),
+      action: t('header.unlock.dialogAction'),
       onConfirm: () => {
         pushToast({
-          title: 'Pannello sbloccato',
-          description: 'Impostazioni e profili disponibili per 5 minuti.',
+          title: t('header.unlock.toastTitle'),
+          description: t('header.unlock.toastDescription'),
           tone: 'success',
         });
       },
     });
   };
-  const subtitle = view === 'rooms' ? `Ambiente · ${roomLabel(rooms, room)}` : meta.subtitle;
+  const subtitle =
+    view === 'rooms'
+      ? t('header.roomSubtitle', { room: roomLabel(rooms, room) })
+      : t(`header.views.${view}.subtitle`);
 
   return (
     <header className="flex h-20 shrink-0 items-center justify-between gap-3 border-b border-line bg-panel/40 px-4 lg:px-6">
       <div className="min-w-0">
         <h1 className="truncate text-base font-semibold tracking-tight text-fg lg:text-lg">
-          {meta.title}
+          {title}
         </h1>
         <p className="mt-0.5 truncate text-[11px] text-fg-subtle">{subtitle}</p>
       </div>
@@ -61,19 +58,22 @@ export function Header({ onStandby }: { onStandby: () => void }) {
             type="button"
             onClick={unlockPanel}
             className="flex h-11 items-center gap-2 rounded-2xl border border-warning/30 bg-warning/10 px-3 text-[11px] font-medium text-warning transition-colors hover:bg-warning/15"
-            aria-label="Sblocca pannello con PIN"
-            title="Sblocca impostazioni e profili con il PIN"
+            aria-label={t('header.unlock.aria')}
+            title={t('header.unlock.title')}
           >
             <KeyRound className="size-4" />
-            <span className="hidden lg:inline">Sblocca</span>
+            <span className="hidden lg:inline">{t('header.unlock.label')}</span>
           </button>
         ) : null}
+        {/* Accesso rapido al tema alto contrasto: sempre visibile, anche sui
+            pannelli piccoli dove gli altri badge sono nascosti. */}
+        <ContrastToggle />
         <button
           type="button"
           onClick={onStandby}
           className="hidden size-11 items-center justify-center rounded-2xl border border-line text-fg-muted transition-colors hover:bg-panel-2 hover:text-fg sm:flex"
-          aria-label="Standby schermo"
-          title="Standby schermo"
+          aria-label={t('header.standby')}
+          title={t('header.standby')}
         >
           <MoonStar className="size-4" />
         </button>
@@ -88,8 +88,8 @@ export function Header({ onStandby }: { onStandby: () => void }) {
           type="button"
           onClick={() => void logout()}
           className="hidden size-11 items-center justify-center rounded-2xl border border-line text-fg-subtle transition-colors hover:bg-panel-2 hover:text-fg sm:flex"
-          aria-label="Esci dalla sessione"
-          title="Esci dalla sessione"
+          aria-label={t('header.logout')}
+          title={t('header.logout')}
         >
           <LogOut className="size-4" />
         </button>

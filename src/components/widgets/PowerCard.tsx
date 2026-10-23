@@ -1,4 +1,5 @@
 import { Lock, Plug, Star } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn, formatKwh, formatWatts, percent } from '@/lib/utils';
 import { Switch } from '@/components/ui/switch';
@@ -21,6 +22,8 @@ export function PowerCard({
   pending = false,
   className,
 }: PowerCardProps) {
+  const { t } = useTranslation('devices');
+  const { t: tCommon } = useTranslation('common');
   const { state } = device;
   const load = percent(state.watts, state.maxWatts);
 
@@ -49,7 +52,9 @@ export function PowerCard({
               {device.protected ? <Lock className="size-3 shrink-0 text-fg-subtle" /> : null}
               <SyncIndicator pending={pending} />
             </p>
-            <p className="text-[11px] text-fg-subtle">{formatKwh(state.energyTodayKwh)} oggi</p>
+            <p className="text-[11px] text-fg-subtle">
+              {t('power.today', { value: formatKwh(state.energyTodayKwh) })}
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-1">
@@ -57,7 +62,7 @@ export function PowerCard({
             <button
               type="button"
               onClick={onToggleFavorite}
-              aria-label={device.favorite ? 'Rimuovi dai preferiti' : 'Aggiungi ai preferiti'}
+              aria-label={tCommon(device.favorite ? 'favorites.remove' : 'favorites.add')}
               className="flex size-9 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-elevated hover:text-fg"
             >
               <Star className={cn('size-4', device.favorite && 'fill-accent text-accent')} />
@@ -66,7 +71,7 @@ export function PowerCard({
           <Switch
             checked={state.on}
             onCheckedChange={(on) => onAction({ type: 'power', on })}
-            aria-label={`Alimenta ${device.name}`}
+            aria-label={t('power.toggleAria', { name: device.name })}
           />
         </div>
       </div>
@@ -91,8 +96,10 @@ export function PowerCard({
           />
         </div>
         <div className="mt-1 flex justify-between text-[10px] text-fg-subtle">
-          <span>Carico</span>
-          <span className="tabular">{load}% di {formatWatts(state.maxWatts)}</span>
+          <span>{t('power.load')}</span>
+          <span className="tabular">
+            {t('power.loadOf', { value: load, max: formatWatts(state.maxWatts) })}
+          </span>
         </div>
       </div>
     </div>

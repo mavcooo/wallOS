@@ -8,6 +8,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { DeviceForm } from '@/components/admin/DeviceForm';
 import { RoomForm } from '@/components/admin/RoomForm';
@@ -26,7 +27,7 @@ import { adminApi } from '@/lib/adminApi';
 import { roomLabel, type RoomConfig } from '@/lib/rooms';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
-import type { Device, DeviceKind, Scenario } from '@/types/device';
+import type { Device, Scenario } from '@/types/device';
 
 type Tab = 'rooms' | 'devices' | 'scenarios';
 
@@ -41,27 +42,21 @@ interface PendingDelete {
   label: string;
 }
 
-const DEVICE_TYPE_LABEL: Record<DeviceKind, string> = {
-  light: 'Luce',
-  climate: 'Clima',
-  power: 'Energia',
-  media: 'Media',
-  sensor: 'Sensore',
-};
-
-const TAB_META: Record<Tab, { label: string; create: string; title: string }> = {
-  rooms: { label: 'Stanze', create: 'Nuova stanza', title: 'stanza' },
-  devices: { label: 'Dispositivi', create: 'Nuovo dispositivo', title: 'dispositivo' },
-  scenarios: { label: 'Scenari', create: 'Nuovo scenario', title: 'scenario' },
-};
-
 const EDIT_TAB: Record<Editing['kind'], Tab> = {
   room: 'rooms',
   device: 'devices',
   scenario: 'scenarios',
 };
 
+// Le tab sono plurali, le chiavi i18n delle entità sono singolari.
+const ENTITY_KEY: Record<Tab, 'room' | 'device' | 'scenario'> = {
+  rooms: 'room',
+  devices: 'device',
+  scenarios: 'scenario',
+};
+
 export function AdminPage() {
+  const { t } = useTranslation();
   const rooms = useHomeStore((state) => state.rooms);
   const devices = useHomeStore((state) => state.devices);
   const scenarios = useHomeStore((state) => state.scenarios);
@@ -79,7 +74,11 @@ export function AdminPage() {
   const finishEdit = async (message: string) => {
     setEditing(null);
     await reloadTopology();
-    pushToast({ title: message, description: 'Salvato su PostgreSQL.', tone: 'success' });
+    pushToast({
+      title: message,
+      description: t('admin.saved.description'),
+      tone: 'success',
+    });
   };
 
   const confirmDelete = async () => {
@@ -94,12 +93,12 @@ export function AdminPage() {
       setDeleting(null);
       await reloadTopology();
       pushToast({
-        title: `${deleting.label} eliminato`,
-        description: 'La topologia è aggiornata per tutti i pannelli.',
+        title: t('admin.deleted.title', { label: deleting.label }),
+        description: t('admin.deleted.description'),
         tone: 'success',
       });
     } catch (cause) {
-      setDeleteError(cause instanceof Error ? cause.message : 'Eliminazione non riuscita');
+      setDeleteError(cause instanceof Error ? cause.message : t('admin.deleted.failed'));
     } finally {
       setDeleteBusy(false);
     }
@@ -110,8 +109,8 @@ export function AdminPage() {
       type="button"
       variant="ghost"
       size="icon"
-      aria-label={`Modifica ${label}`}
-      title={`Modifica ${label}`}
+      aria-label={t('actions.edit', { name: label })}
+      title={t('actions.edit', { name: label })}
       onClick={onClick}
     >
       <Pencil className="size-4" />
@@ -124,8 +123,8 @@ export function AdminPage() {
       variant="ghost"
       size="icon"
       className="text-danger hover:bg-danger/10 hover:text-danger"
-      aria-label={`Elimina ${label}`}
-      title={`Elimina ${label}`}
+      aria-label={t('actions.delete', { name: label })}
+      title={t('actions.delete', { name: label })}
       onClick={onClick}
     >
       <Trash2 className="size-4" />
@@ -137,12 +136,9 @@ export function AdminPage() {
       <div className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
         <p className="flex items-center gap-2 text-sm font-medium text-fg">
           <Cpu className="size-4 text-accent" />
-          Configurazione della casa
+          {t('admin.title')}
         </p>
-        <p className="mt-1 text-[11px] leading-relaxed text-fg-subtle">
-          Stanze, dispositivi e scenari sono righe di PostgreSQL. Ogni salvataggio passa dalle
-          API protette (ruolo admin) e aggiorna subito lo store: nessun riavvio del kiosk.
-        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-fg-subtle">{t('admin.description')}</p>
       </div>
 
       <Tabs
@@ -153,13 +149,13 @@ export function AdminPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="rooms">
-              <DoorOpen className="size-4" /> Stanze
+              <DoorOpen className="size-4" /> {t('admin.tabs.rooms')}
             </TabsTrigger>
             <TabsTrigger value="devices">
-              <Cpu className="size-4" /> Dispositivi
+              <Cpu className="size-4" /> {t('admin.tabs.devices')}
             </TabsTrigger>
             <TabsTrigger value="scenarios">
-              <Sparkles className="size-4" /> Scenari
+              <Sparkles className="size-4" /> {t('admin.tabs.scenarios')}
             </TabsTrigger>
           </TabsList>
           <Button
@@ -177,14 +173,14 @@ export function AdminPage() {
             }
           >
             <Plus className="size-4" />
-            {TAB_META[tab].create}
+            {t(`admin.create.${ENTITY_KEY[tab]}`)}
           </Button>
         </div>
 
         <TabsContent value="rooms">
           {rooms.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
-              Nessuna stanza: creane una per iniziare.
+              {t('admin.empty.rooms')}
             </p>
           ) : (
             <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
@@ -198,8 +194,10 @@ export function AdminPage() {
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-fg">{room.label}</p>
                       <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
-                        {room.id} · {count} dispositivi
-                        {room.displayOrder !== undefined ? ` · ordine ${room.displayOrder}` : ''}
+                        {t('admin.roomMeta', { id: room.id, count })}
+                        {room.displayOrder !== undefined
+                          ? t('admin.roomOrder', { order: room.displayOrder })
+                          : ''}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center">
@@ -219,7 +217,7 @@ export function AdminPage() {
         <TabsContent value="devices">
           {deviceList.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
-              Nessun dispositivo nel database.
+              {t('admin.empty.devices')}
             </p>
           ) : (
             <div className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-panel">
@@ -232,9 +230,15 @@ export function AdminPage() {
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
                         {device.name}
-                        <Badge variant="outline">{DEVICE_TYPE_LABEL[device.kind]}</Badge>
-                        {device.favorite ? <Badge variant="accent">Preferito</Badge> : null}
-                        {device.protected ? <Badge variant="warning">PIN</Badge> : null}
+                        <Badge variant="outline">
+                          {t(`admin.deviceKind.${device.kind}`)}
+                        </Badge>
+                        {device.favorite ? (
+                          <Badge variant="accent">{t('admin.badges.favorite')}</Badge>
+                        ) : null}
+                        {device.protected ? (
+                          <Badge variant="warning">{t('admin.badges.pin')}</Badge>
+                        ) : null}
                       </p>
                       <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
                         {device.id} · {roomLabel(rooms, device.room)} · {device.adapter} ·{' '}
@@ -258,7 +262,7 @@ export function AdminPage() {
         <TabsContent value="scenarios">
           {scenarios.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
-              Nessuno scenario nel database.
+              {t('admin.empty.scenarios')}
             </p>
           ) : (
             <div className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-panel">
@@ -271,11 +275,15 @@ export function AdminPage() {
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
                         {scenario.label}
-                        <Badge variant="outline">{scenario.steps.length} passi</Badge>
-                        {scenario.protected ? <Badge variant="warning">PIN</Badge> : null}
+                        <Badge variant="outline">
+                          {t('admin.badges.steps', { count: scenario.steps.length })}
+                        </Badge>
+                        {scenario.protected ? (
+                          <Badge variant="warning">{t('admin.badges.pin')}</Badge>
+                        ) : null}
                       </p>
                       <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
-                        {scenario.id} · {scenario.description || 'nessuna descrizione'}
+                        {scenario.id} · {scenario.description || t('admin.noDescription')}
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center">
@@ -301,8 +309,7 @@ export function AdminPage() {
 
       <p className="flex items-start gap-2 rounded-xl border border-line bg-panel/60 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
-        Eliminare una stanza richiede che sia vuota. Eliminare un dispositivo non ripulisce gli
-        eventuali passi di scenario che lo citano: controlla gli scenari prima.
+        {t('admin.warning')}
       </p>
 
       <Dialog
@@ -315,14 +322,19 @@ export function AdminPage() {
           <DialogContent className="max-h-[92dvh] w-[min(94vw,44rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
-                {editing.item ? 'Modifica' : 'Nuovo'} {TAB_META[EDIT_TAB[editing.kind]].title}
+                {t(
+                  editing.item ? 'admin.dialog.edit' : 'admin.dialog.create',
+                  { entity: t(`admin.entity.${ENTITY_KEY[EDIT_TAB[editing.kind]]}`) },
+                )}
               </DialogTitle>
               <DialogDescription>
-                {editing.kind === 'room'
-                  ? 'La stanza è visibile in overview, nella navigazione e nei filtri.'
-                  : editing.kind === 'device'
-                    ? 'Topic e adapter determinano come il kiosk parla con l’hardware.'
-                    : 'I passi vengono eseguiti in ordine, con il ritardo dichiarato.'}
+                {t(
+                  editing.kind === 'room'
+                    ? 'admin.dialog.roomDescription'
+                    : editing.kind === 'device'
+                      ? 'admin.dialog.deviceDescription'
+                      : 'admin.dialog.scenarioDescription',
+                )}
               </DialogDescription>
             </DialogHeader>
             <div className="mt-4">
@@ -330,21 +342,21 @@ export function AdminPage() {
                 <RoomForm
                   room={editing.item}
                   onCancel={() => setEditing(null)}
-                  onSaved={() => void finishEdit('Stanza salvata')}
+                  onSaved={() => void finishEdit(t('admin.saved.room'))}
                 />
               ) : editing.kind === 'device' ? (
                 <DeviceForm
                   device={editing.item}
                   rooms={rooms}
                   onCancel={() => setEditing(null)}
-                  onSaved={() => void finishEdit('Dispositivo salvato')}
+                  onSaved={() => void finishEdit(t('admin.saved.device'))}
                 />
               ) : (
                 <ScenarioForm
                   scenario={editing.item}
                   devices={deviceList}
                   onCancel={() => setEditing(null)}
-                  onSaved={() => void finishEdit('Scenario salvato')}
+                  onSaved={() => void finishEdit(t('admin.saved.scenario'))}
                 />
               )}
             </div>
@@ -361,10 +373,10 @@ export function AdminPage() {
         {deleting ? (
           <DialogContent className="w-[min(92vw,26rem)]">
             <DialogHeader>
-              <DialogTitle>Eliminare {deleting.label}?</DialogTitle>
-              <DialogDescription>
-                L’operazione elimina la riga da PostgreSQL ed è immediata per tutti i pannelli.
-              </DialogDescription>
+              <DialogTitle>
+                {t('admin.deleteDialog.title', { label: deleting.label })}
+              </DialogTitle>
+              <DialogDescription>{t('admin.deleteDialog.description')}</DialogDescription>
             </DialogHeader>
             {deleteError ? (
               <p
@@ -381,7 +393,7 @@ export function AdminPage() {
                 onClick={() => setDeleting(null)}
                 disabled={deleteBusy}
               >
-                Annulla
+                {t('actions.cancel')}
               </Button>
               <Button
                 type="button"
@@ -389,7 +401,7 @@ export function AdminPage() {
                 onClick={() => void confirmDelete()}
                 disabled={deleteBusy}
               >
-                {deleteBusy ? 'Eliminazione…' : 'Elimina'}
+                {deleteBusy ? t('admin.deleteDialog.busy') : t('admin.deleteDialog.confirm')}
               </Button>
             </div>
           </DialogContent>
