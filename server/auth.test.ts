@@ -562,4 +562,28 @@ describe('protezione delle richieste', () => {
     expect(response.statusCode).toBe(403);
     expect(response.json()).toMatchObject({ error: 'ORIGIN_NOT_ALLOWED' });
   });
+
+  it('accetta il pannello aperto da un altro dispositivo (same-origin)', async () => {
+    const { app } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: 'http://192.168.0.20:3000', host: '192.168.0.20:3000' },
+      payload: { username: 'admin', password: PASSWORD },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(setCookieHeaders(response).length).toBeGreaterThan(0);
+  });
+
+  it('non confonde un’altra porta dello stesso host con la stessa origine', async () => {
+    const { app } = await setup();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      headers: { origin: 'http://192.168.0.20:4000', host: '192.168.0.20:3000' },
+      payload: { username: 'admin', password: PASSWORD },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.json()).toMatchObject({ error: 'ORIGIN_NOT_ALLOWED' });
+  });
 });

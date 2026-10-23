@@ -17,5 +17,32 @@ export default defineConfig({
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     // matcher di jest-dom + cleanup automatico di React Testing Library
     setupFiles: ['src/test/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      reportsDirectory: 'coverage',
+      // Solo codice applicativo: test, fixture, dizionari e bootstrap esclusi.
+      include: ['src/**/*.{ts,tsx}'],
+      exclude: [
+        'src/**/*.test.{ts,tsx}',
+        'src/test/**',
+        'src/i18n/locales/**',
+        'src/types/**',
+        'src/main.tsx',
+      ],
+      thresholds: {
+        // Il contratto IoT: parsing/normalizzazione e encoding dei comandi.
+        // Una regressione qui corrompe lo store e i widget, quindi la soglia
+        // è più alta del resto del frontend.
+        'src/mqtt/adapters/**': {
+          statements: 95,
+          // I rami sono quasi tutti guardie su campi opzionali dei firmware:
+          // 80% è il pavimento realistico, statements e righe restano alti.
+          branches: 80,
+          functions: 100,
+          lines: 95,
+        },
+      },
+    },
   },
 });

@@ -86,6 +86,24 @@ npm run build      # typecheck + bundle di produzione
 npm run preview    # serve dist/ su :3000
 ```
 
+### Accesso da altri dispositivi della LAN
+Vite ascolta su `0.0.0.0:3000` (`server.host` in `vite.config.ts`): dal tablet o
+dal telefono apri `http://<IP-del-PC>:3000`, non `localhost`.
+
+- Le richieste mutanti (`POST`, `PATCH`, `DELETE`) sono accettate quando
+  `Origin` coincide con l'`Host` inoltrato dal proxy: l'IP della LAN non va
+  aggiunto a `CORS_ORIGINS`, che resta per origini **diverse** (reverse proxy,
+  dominio dedicato).
+- Se la pagina non si apre affatto, è il firewall del PC a bloccare la porta
+  3000: consenti Node sulle reti private (su Windows regola inbound TCP 3000).
+- `AUTH_HOST` può restare `127.0.0.1`: il browser parla solo con Vite, che
+  proxa `/api` sul servizio auth in locale.
+- Cookie di sessione: da `http://` in LAN servono `COOKIE_SECURE=false`
+  (default in sviluppo); con HTTPS davanti al pannello, `COOKIE_SECURE=true`.
+- Lo stesso kiosk (`VITE_KIOSK_DEVICE_ID`) può essere aperto da più browser:
+  il login non revoca le sessioni già attive, ma le azioni protette chiedono
+  comunque il PIN.
+
 Al primo avvio il servizio applica `server/schema.sql` (idempotente) e fa il seed
 del database con stanze, dispositivi, scenari e due profili:
 
@@ -344,7 +362,8 @@ Le restrizioni sono solo UI: ogni endpoint riapplica il ruolo lato server. Il
 client accetta anche `Authorization: Bearer <access>` per script di automazione,
 ma il pannello usa esclusivamente i cookie HttpOnly (`SameSite=Strict`, `Secure`
 attivabile con `COOKIE_SECURE=true`). Le richieste mutanti con un `Origin`
-non in `CORS_ORIGINS` vengono rifiutate prima di arrivare alle route.
+che non coincide con l'`Host` e non è in `CORS_ORIGINS` vengono rifiutate
+prima di arrivare alle route (protezione CSRF same-origin + allowlist).
 
 Il PIN viaggia in JSON solo sul canale TLS: un hash calcolato nel browser non
 sarebbe un controllo di sicurezza (il client può essere manomesso) e non
@@ -649,9 +668,37 @@ un impianto reale:
 
 ## 7. Verifiche eseguite
 
+### Suite Vitest, copertura e CI
+- `vitest.config.ts`: jsdom, alias `@`, setup globale (`jest-dom` + cleanup
+  RTL), coverage V8 con report `text`/`html`/`lcov` in `coverage/` (in
+  `.gitignore`).
+- Soglie per il contratto IoT (`src/mqtt/adapters/**`): statement 95%, righe
+  95%, funzioni 100%, rami 80%. I payload reali dei firmware stanno in
+  `src/test/fixtures/mqtt.ts` (JSON validi, numeri come stringa, payload vuoti
+  e malformati).
+- Adapter: 78 test su Zigbee2MQTT, Shelly Gen2, Tasmota e custom JSON, con
+  decode, edge-case e encoding dei comandi (`Switch.Set`, `/POWER`, `/Dimmer`,
+  `cmd.*`).
+- Widget: `PowerCard` copre stato iniziale normalizzato, tap, offline (ultime
+  metriche note) e patch successive senza rimontaggio; `LightCard` copre dimmer,
+  preset colore e stato spento.
+- CI GitHub Actions (`.github/workflows/ci.yml`): `npm ci`, typecheck,
+  coverage con soglie, test server, build e artifact `coverage/`.
+
+```bash
+npm test               # una passata
+npm run test:watch     # TDD
+npm run test:coverage  # report + soglie
+npm run test:ui        # interfaccia Vitest
+npm run test:server    # Fastify + PGlite
+npm run test:all       # frontend + server
+```
+
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- `npm test` → 34 file, 204 test frontend (jsdom).
+- `npm test` → 37 file, 258 test frontend (jsdom).
+- `npm run test:coverage` → adapters: 96.7% statement, 99.2% righe, 100%
+  funzioni, 82.4% rami (sopra le soglie).
 - i18n: parità chiavi `it`/`en` per tutti i namespace, cambio lingua a caldo con
   persistenza in `localStorage` e `document.documentElement.lang`, fallback
   italiano e test a compile time sulle chiavi tipizzate.
@@ -667,7 +714,7 @@ un impianto reale:
 - Rate limiting PIN: 13 test sul modulo (soglia 3–5, backoff 30→60→120→tetto,
   persistenza per profilo, reset al PIN corretto, lockout server più lungo) e 4
   test sul dialog (shake, tastierino e tastiera bloccati, riapertura, countdown).
-- `npm run test:server` → 35 test Fastify/PostgreSQL (PGlite, PostgreSQL WASM
+- `npm run test:server` → 37 test Fastify/PostgreSQL (PGlite, PostgreSQL WASM
   con lo schema reale):
   - configurazione `.env`: `DATABASE_URL` o `DB_*`, URL/porta/database/utente/
     password mancanti o incoerenti, pool e timeout malformati → avvio bloccato;
@@ -679,7 +726,8 @@ un impianto reale:
   - riuso del refresh → revoca dell'intera famiglia;
   - RBAC su elenco/modifica profili, self-disable vietato, switch kiosk→family
     con refresh che riporta al kiosk;
-  - `Origin` non consentita → 403;
+  - `Origin` cross-site non consentita → 403, mentre il pannello aperto da un
+    altro IP della LAN (Origin == Host) accede; porta diversa → 403;
   - `GET /api/topology` protetta, con stanze/device/scenari ricostruiti dal DB;
   - CRUD admin con validazione (slug, stanza inesistente, stanza popolata, passi
     scenario), 403 per kiosk/family su rooms/devices/scenarios, 404 su PATCH e
@@ -709,6 +757,13 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 - Lo stato runtime dei device non è persistito nel database: al reload si
   riparte dallo stato del seed finché il broker non ripubblica. Per impianti
   reali conviene `retain: true` sui topic di stato o un cache layer locale.
+- L'adapter `shelly` copre solo Gen2 (`output`, `apower`, `aenergy.total`):
+  una Shelly Gen1 (`ison`, `power`) viene parsata ma non produce campi
+  normalizzati. Un test caratterizza il payload Gen1; per supportarlo serve un
+  fallback dedicato (o un adapter separato).
+- La disponibilità per-device (`availability`) è nello store ma non è mostrata
+  nei widget: l'header espone solo lo stato del broker. Il test widget verifica
+  che un device `offline` continui a renderizzare le ultime metriche note.
 - La UI di amministrazione non gestisce ancora `metadata` (discovery e stato
   iniziale): per adapter complessi si interviene con SQL o col seed.
 - L'editor dei passi non blocca l'eliminazione di un device citato da uno

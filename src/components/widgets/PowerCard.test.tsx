@@ -58,6 +58,40 @@ describe('PowerCard', () => {
     expect(onToggleFavorite).toHaveBeenCalledOnce();
   });
 
+  it('mostra le ultime metriche note senza rompersi se il device è offline', () => {
+    const offline = {
+      ...device,
+      availability: 'offline' as const,
+      lastSeen: Date.now() - 120_000,
+    };
+
+    render(<PowerCard device={offline} onAction={vi.fn()} />);
+
+    // Il widget resta un'istantanea dell'ultimo stato normalizzato: la
+    // raggiungibilità del broker è mostrata da ConnectionBadge, non qui.
+    expect(screen.getByText('1,18 kW')).toBeInTheDocument();
+    expect(screen.getByText('231 V · 5.1 A')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: `Alimenta ${offline.name}` })).toBeChecked();
+  });
+
+  it('riflette una nuova patch normalizzata senza rimontare il widget', () => {
+    const { rerender } = render(<PowerCard device={device} onAction={vi.fn()} />);
+
+    rerender(
+      <PowerCard
+        device={{
+          ...device,
+          state: { ...device.state, on: false, watts: 0, current: 0 },
+        }}
+        onAction={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('switch', { name: `Alimenta ${device.name}` })).not.toBeChecked();
+    expect(screen.getByText('0 W')).toBeInTheDocument();
+    expect(screen.getByText('0% di 2,2 kW')).toBeInTheDocument();
+  });
+
   it('mostra l’indicatore di sincronizzazione solo con un comando in coda', () => {
     const { rerender } = render(<PowerCard device={device} onAction={vi.fn()} />);
 

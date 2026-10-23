@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { zigbee2mqttAdapter } from '@/mqtt/adapters/zigbee2mqtt';
 import { deviceOf } from '@/test/fixtures';
+import { ZIGBEE2MQTT_PAYLOADS } from '@/test/fixtures/mqtt';
 import type { Device } from '@/types/device';
 
 const light = deviceOf('light-living-main', 'light');
@@ -29,6 +30,37 @@ describe('adapter zigbee2mqtt · decode', () => {
       kind: 'light',
       state: { on: true, brightness: 50, colorTemp: 2703 },
     });
+  });
+
+  it('normalizza il payload standard 254 → 100% e 300 mired → 3333 K', () => {
+    const decoded = zigbee2mqttAdapter.decode({
+      device: light,
+      topic: light.topics.state,
+      payload: ZIGBEE2MQTT_PAYLOADS.lightOn,
+    });
+
+    expect(decoded).toEqual({
+      kind: 'light',
+      state: { on: true, brightness: 100, colorTemp: 3333 },
+    });
+  });
+
+  it('accetta luminosità e temperatura colore serializzate come stringa', () => {
+    expect(
+      zigbee2mqttAdapter.decode({
+        device: light,
+        topic: light.topics.state,
+        payload: ZIGBEE2MQTT_PAYLOADS.lightNumericStrings,
+      }),
+    ).toEqual({ kind: 'light', state: { on: true, brightness: 100, colorTemp: 3333 } });
+  });
+
+  it('ignora payload vuoti, JSON malformati, scalari e array', () => {
+    for (const payload of [ZIGBEE2MQTT_PAYLOADS.empty, ZIGBEE2MQTT_PAYLOADS.invalidJson, '42', 'null', '[]']) {
+      expect(
+        zigbee2mqttAdapter.decode({ device: light, topic: light.topics.state, payload }),
+      ).toBeNull();
+    }
   });
 
   it('preferisce color_temp_kelvin al mired quando il firmware manda entrambi', () => {
@@ -135,6 +167,77 @@ describe('adapter zigbee2mqtt · decode', () => {
         payload: JSON.stringify({ smoke: true }),
       }),
     ).toBeNull();
+  });
+
+  it('espone solo la metrica del sensore: linkquality, battery e voltage sono ignorati', () => {
+    expect(
+      zigbee2mqttAdapter.decode({
+        device: sensor,
+        topic: sensor.topics.state,
+        payload: ZIGBEE2MQTT_PAYLOADS.sensorClimate,
+      }),
+    ).toEqual({ kind: 'sensor', state: { value: 21.4 } });
+
+    const humidity = asZigbee(sensor, { type: 'humidity' });
+    expect(
+      zigbee2mqttAdapter.decode({
+        device: humidity,
+        topic: humidity.topics.state,
+        payload: ZIGBEE2MQTT_PAYLOADS.sensorClimate,
+      }),
+    ).toEqual({ kind: 'sensor', state: { value: 48 } });
+  });
+
+  it('mappa co2 e illuminamento dei sensori ambientali', () => {
+    for (const [type, payload, value] of [
+      ['co2', { co2: 684 }, 684],
+      ['illuminance', { illuminance: 320 }, 320],
+    ] as const) {
+      const device = asZigbee(sensor, { type });
+      expect(
+        zigbee2mqttAdapter.decode({
+          device,
+          topic: device.topics.state,
+          payload: JSON.stringify(payload),
+        }),
+      ).toEqual({ kind: 'sensor', state: { value } });
+    }
+  });
+
+  it('traduce running_state in azione del clima, anche per cool/fan/idle', () => {
+    for (const [running, action] of [
+      ['cool', 'cooling'],
+      ['fan_only', 'fan'],
+      ['idle', 'idle'],
+      ['unknown', undefined],
+    ] as const) {
+      const decoded = zigbee2mqttAdapter.decode({
+        device: climate,
+        topic: climate.topics.state,
+        payload: JSON.stringify({ running_state: running }),
+      });
+      expect(decoded).toEqual({ kind: 'climate', state: action ? { action } : {} });
+    }
+  });
+
+  it('legge il volume dei media e lo limita a 0-100', () => {
+    const media = asZigbee(deviceOf('media-living-tv', 'media'));
+
+    expect(
+      zigbee2mqttAdapter.decode({
+        device: media,
+        topic: media.topics.state,
+        payload: JSON.stringify({ volume: 130 }),
+      }),
+    ).toEqual({ kind: 'media', state: { volume: 100 } });
+
+    expect(
+      zigbee2mqttAdapter.decode({
+        device: media,
+        topic: media.topics.state,
+        payload: '{}',
+      }),
+    ).toEqual({ kind: 'media', state: {} });
   });
 
   it('legge i misuratori di potenza', () => {

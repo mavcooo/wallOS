@@ -121,6 +121,49 @@ describe('ha-discovery · decode', () => {
     ).toBeNull();
   });
 
+  it('legge temperatura corrente e setpoint del clima', () => {
+    expect(
+      haDiscoveryAdapter.decode({ device: climate, topic: 'casa/termo/current', payload: '19.8' }),
+    ).toEqual({ kind: 'climate', state: { currentTemp: 19.8 } });
+
+    expect(
+      haDiscoveryAdapter.decode({ device: climate, topic: 'casa/termo/target', payload: '21.5' }),
+    ).toEqual({ kind: 'climate', state: { targetTemp: 21.5 } });
+  });
+
+  it('porta il clima su off con azione idle', () => {
+    expect(
+      haDiscoveryAdapter.decode({ device: climate, topic: 'casa/termo/mode', payload: 'off' }),
+    ).toEqual({ kind: 'climate', state: { mode: 'off', action: 'idle' } });
+  });
+
+  it('converte i sensori numerici e scarta i valori non numerici', () => {
+    const plain = deviceFrom('homeassistant/sensor/temp2/config', {
+      stat_t: 'casa/temp2',
+      dev_cla: 'temperature',
+      unit_of_meas: '°C',
+    });
+
+    expect(
+      haDiscoveryAdapter.decode({ device: plain, topic: 'casa/temp2', payload: '21.7' }),
+    ).toEqual({ kind: 'sensor', state: { value: 21.7 } });
+
+    expect(
+      haDiscoveryAdapter.decode({ device: plain, topic: 'casa/temp2', payload: 'n/d' }),
+    ).toBeNull();
+  });
+
+  it('scarta i binary_sensor con payload sconosciuto', () => {
+    const door = deviceFrom('homeassistant/binary_sensor/finestra/config', {
+      stat_t: 'casa/finestra',
+      dev_cla: 'window',
+    });
+
+    expect(
+      haDiscoveryAdapter.decode({ device: door, topic: 'casa/finestra', payload: 'unknown' }),
+    ).toBeNull();
+  });
+
   it('ignora topic non dichiarati nell’annuncio', () => {
     expect(
       haDiscoveryAdapter.decode({ device: light, topic: 'z2m/pianta/sconosciuto', payload: '1' }),

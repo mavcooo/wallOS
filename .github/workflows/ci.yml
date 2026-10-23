@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Un push sullo stesso branch annulla il run precedente: il feedback più recente
+# è l'unico che conta.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24: il servizio auth usa `process.loadEnvFile()`.
+          node-version: 24
+          cache: npm
+
+      - name: Installa le dipendenze
+        run: npm ci
+
+      - name: Typecheck (strict)
+        run: npm run typecheck
+
+      - name: Unit test + coverage
+        # Include le soglie per src/mqtt/adapters/**: sotto soglia il job fallisce.
+        run: npm run test:coverage
+
+      - name: Test server (Fastify + PostgreSQL WASM)
+        # PGlite: nessun servizio PostgreSQL esterno nel runner.
+        run: npm run test:server
+
+      - name: Build di produzione
+        run: npm run build
+
+      - name: Salva il report di coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 7

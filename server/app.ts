@@ -1,7 +1,7 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
-import Fastify, { type FastifyInstance } from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 
 import { loadConfig } from './config.js';
 import { Database, shortVersion } from './db.js';
@@ -25,6 +25,26 @@ export interface BuiltApp {
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/**
+ * Vero quando `Origin` coincide con l'`Host` della richiesta, cioè quando il
+ * pannello chiama la propria stessa origine (anche via proxy Vite). È il caso
+ * del tablet che apre `http://192.168.0.20:3000`: non è cross-site, quindi non
+ * va elencato in `CORS_ORIGINS`, che resta per origini *diverse* (reverse
+ * proxy, domini aggiuntivi). Il confronto Origin/Host è la difesa CSRF
+ * standard e non si fida del solo header `Origin`.
+ */
+function isSameOriginRequest(request: FastifyRequest): boolean {
+  const { origin, host } = request.headers;
+  if (typeof origin !== 'string' || typeof host !== 'string' || origin === 'null') {
+    return false;
+  }
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Crea l'istanza Fastify (usata anche dai test con `inject`).
@@ -95,8 +115,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     if (SAFE_METHODS.has(request.method)) return;
     const origin = request.headers.origin;
     if (typeof origin !== 'string') return;
-    if (!config.corsOrigins.includes(origin)) {
-      throw new HttpError(403, 'ORIGIN_NOT_ALLOWED', 'Origin non consentita');
+    if (!config.corsOrigins.includes(origin) && !isSameOriginRequest(request)) {
+      throw new HttpError(
+        403,
+        'ORIGIN_NOT_ALLOWED',
+        'Origin non consentita: aggiungi l’indirizzo del pannello a CORS_ORIGINS',
+      );
     }
   });
 

@@ -2,6 +2,9 @@ node_modules/
 dist/
 dist-ssr/
 
+# Report di coverage (rigenerabili con npm run test:coverage)
+coverage/
+
 # Screenshot generate dai test di verifica (non versionate)
 artifacts/
 
