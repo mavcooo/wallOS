@@ -217,7 +217,8 @@ function isFulfilled(command: QueuedCommand, decoded: DecodedState): boolean {
 function rollbackCommand(command: QueuedCommand, reason: 'expired' | 'failed'): boolean {
   if (!useOfflineQueue.getState().remove(command.id, command.revision)) return false;
 
-  const device = useHomeStore.getState().devices[command.deviceId];
+  // Rollback sul solo runtime del device: i metadati non servono alla coda.
+  const device = useHomeStore.getState().deviceStates[command.deviceId];
   const patch = device
     ? rollbackState(device, command.optimistic, command.rollback)
     : null;

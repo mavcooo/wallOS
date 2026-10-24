@@ -8,6 +8,12 @@ function powerPayload(action: boolean) {
   return action ? 'ON' : 'OFF';
 }
 
+/** Tasmota espone `POWER`, `POWER1`, `POWER2`… per i relè multipli. */
+function powerField(device: { fieldMap?: Record<string, string> }): string {
+  const relay = Number.parseInt(device.fieldMap?.['relay'] ?? '1', 10);
+  return Number.isFinite(relay) && relay > 1 ? `POWER${relay}` : 'POWER';
+}
+
 export const tasmotaAdapter: DeviceAdapter = {
   label: 'Tasmota',
   decode({ device, payload }) {
@@ -29,7 +35,7 @@ export const tasmotaAdapter: DeviceAdapter = {
     switch (device.kind) {
       case 'light': {
         const state: { on?: boolean; brightness?: number; colorTemp?: number } = {};
-        const on = isOn(data['POWER'] ?? data['POWER1']);
+        const on = isOn(data[powerField(device)] ?? data['POWER'] ?? data['POWER1']);
         if (on !== undefined) state.on = on;
         const dimmer = num(data['Dimmer']);
         if (dimmer !== undefined) {
@@ -49,7 +55,7 @@ export const tasmotaAdapter: DeviceAdapter = {
           energyTodayKwh?: number;
           energyTotalKwh?: number;
         } = {};
-        const on = isOn(data['POWER'] ?? data['POWER1']);
+        const on = isOn(data[powerField(device)] ?? data['POWER'] ?? data['POWER1']);
         if (on !== undefined) state.on = on;
         const energy = data['ENERGY'];
         if (typeof energy === 'object' && energy !== null) {
@@ -112,7 +118,7 @@ export const tasmotaAdapter: DeviceAdapter = {
     const base = device.topics.command ?? '';
     switch (action.type) {
       case 'power':
-        return { topic: `${base}/POWER`, payload: powerPayload(action.on), qos: 0 };
+        return { topic: `${base}/${powerField(device)}`, payload: powerPayload(action.on), qos: 0 };
       case 'brightness':
         return {
           topic: `${base}/Dimmer`,

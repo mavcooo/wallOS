@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/components/kiosk/PinProvider', () => ({
@@ -13,6 +13,7 @@ const { RoomsPage } = await import('@/pages/RoomsPage');
 const { useAuthStore } = await import('@/store/authStore');
 const { useHomeStore } = await import('@/store/homeStore');
 const { SEED_TOPOLOGY } = await import('@/test/fixtures');
+const { renderWithTopology } = await import('@/test/query');
 
 function gesture(target: Element, fromX: number, toX: number): void {
   fireEvent.touchStart(target, {
@@ -26,7 +27,6 @@ function gesture(target: Element, fromX: number, toX: number): void {
 
 beforeEach(() => {
   localStorage.clear();
-  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
   useHomeStore.getState().setRoom('living');
   useAuthStore.setState({
     status: 'authenticated',
@@ -40,6 +40,7 @@ beforeEach(() => {
       allowedRooms: null,
       active: true,
       isKioskDevice: false,
+      kioskDeviceId: null,
       lastAccess: null,
       pinLength: 4,
     },
@@ -48,8 +49,8 @@ beforeEach(() => {
 
 describe('RoomsPage · swipe tra stanze', () => {
   it('lo swipe a sinistra passa alla stanza successiva e aggiorna lo store', () => {
-    render(<RoomsPage />);
-    const rooms = useHomeStore.getState().rooms;
+    renderWithTopology(<RoomsPage />, { topology: SEED_TOPOLOGY });
+    const rooms = SEED_TOPOLOGY.rooms;
     const surface = screen.getByTestId('rooms-swipe-surface');
 
     gesture(surface, 240, 100);
@@ -58,8 +59,8 @@ describe('RoomsPage · swipe tra stanze', () => {
   });
 
   it('alla prima stanza fa bounce senza cambiare pagina né stanza', () => {
-    render(<RoomsPage />);
-    const first = useHomeStore.getState().rooms[0];
+    renderWithTopology(<RoomsPage />, { topology: SEED_TOPOLOGY });
+    const first = SEED_TOPOLOGY.rooms[0];
     expect(first).toBeDefined();
     const surface = screen.getByTestId('rooms-swipe-surface');
 
@@ -70,7 +71,7 @@ describe('RoomsPage · swipe tra stanze', () => {
   });
 
   it('uno swipe che parte da uno slider non cambia stanza', () => {
-    const { container } = render(<RoomsPage />);
+    const { container } = renderWithTopology(<RoomsPage />, { topology: SEED_TOPOLOGY });
     const surface = screen.getByTestId('rooms-swipe-surface');
     const ignored = container.querySelector('.ignore-swipe');
     expect(ignored).not.toBeNull();

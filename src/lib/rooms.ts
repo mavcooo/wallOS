@@ -14,8 +14,8 @@ export const UNASSIGNED_ROOM_ID = 'unassigned';
 
 /**
  * Le stanze arrivano da PostgreSQL (`GET /api/topology`). Discovery HA può
- * aggiungerne altre a runtime (`ensureRoom` nello store): qui restano solo le
- * funzioni pure condivise da store, header e widget.
+ * aggiungerne altre a runtime nella cache della topologia (`lib/discovery.ts`):
+ * qui restano solo le funzioni pure condivise da hook, header e widget.
  */
 
 /** `Soggiorno` → `soggiorno`, `Bagno 2° piano` → `bagno-2-piano`. */

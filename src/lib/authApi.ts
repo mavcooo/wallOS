@@ -2,6 +2,8 @@ import i18n from '@/i18n';
 import type {
   SessionEnvelope,
   SessionUser,
+  UserCreateInput,
+  UserUpdateInput,
   VerifyPinResult,
 } from '@/types/user';
 
@@ -102,7 +104,8 @@ function canRefreshOn401(path: string): boolean {
     path === '/auth/verify-pin' ||
     path === '/auth/pin' ||
     path === '/auth/switch-profile' ||
-    path.startsWith('/auth/users')
+    path.startsWith('/auth/users') ||
+    path.startsWith('/users')
   );
 }
 
@@ -167,11 +170,26 @@ export const authApi = {
   },
 
   listUsers(): Promise<{ users: SessionUser[] }> {
-    return request('/auth/users');
+    return request('/users');
+  },
+
+  createUser(input: UserCreateInput): Promise<{ user: SessionUser }> {
+    return request('/users', { method: 'POST', body: input });
+  },
+
+  updateUser(userId: string, input: UserUpdateInput): Promise<{ user: SessionUser }> {
+    return request(`/users/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: input,
+    });
+  },
+
+  deleteUser(userId: string): Promise<void> {
+    return request(`/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
   },
 
   setUserActive(userId: string, active: boolean): Promise<{ user: SessionUser }> {
-    return request(`/auth/users/${encodeURIComponent(userId)}`, {
+    return request(`/users/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
       body: { active },
     });

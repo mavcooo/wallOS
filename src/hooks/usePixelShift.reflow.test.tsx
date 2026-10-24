@@ -7,6 +7,8 @@ import { AppShell } from '@/components/layout/AppShell';
 import { usePixelShift } from '@/hooks/usePixelShift';
 import { useAuthStore } from '@/store/authStore';
 import { useHomeStore } from '@/store/homeStore';
+import { SEED_TOPOLOGY } from '@/test/fixtures';
+import { renderWithTopology } from '@/test/query';
 import type { BurnInMode } from '@/types/kiosk';
 
 /**
@@ -193,17 +195,20 @@ describe('usePixelShift · assenza di reflow', () => {
         allowedRooms: null,
         active: true,
         isKioskDevice: false,
+        kioskDeviceId: null,
         lastAccess: null,
         pinLength: 4,
       },
       elevated: false,
     });
-    render(
+    // L'header legge le stanze da TanStack Query: serve la cache popolata.
+    renderWithTopology(
       <PinProvider>
         <AppShell>
           <div>contenuto</div>
         </AppShell>
       </PinProvider>,
+      { topology: SEED_TOPOLOGY },
     );
 
     const shifted = document.querySelector<HTMLElement>('[style*="translate3d"]');

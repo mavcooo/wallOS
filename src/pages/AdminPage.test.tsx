@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -23,19 +23,18 @@ vi.mock('@/lib/topologyApi', () => ({
 const { AdminPage } = await import('@/pages/AdminPage');
 const { adminApi } = await import('@/lib/adminApi');
 const { fetchTopology } = await import('@/lib/topologyApi');
-const { useHomeStore } = await import('@/store/homeStore');
 const { SEED_TOPOLOGY } = await import('@/test/fixtures');
+const { renderWithTopology } = await import('@/test/query');
 
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
-  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
   vi.mocked(fetchTopology).mockResolvedValue(SEED_TOPOLOGY);
 });
 
 describe('AdminPage · gestione topologia', () => {
   it('elenca stanze, dispositivi e scenari letti dal database', async () => {
-    render(<AdminPage />);
+    renderWithTopology(<AdminPage />, { topology: SEED_TOPOLOGY });
 
     expect(screen.getByText('Soggiorno')).toBeInTheDocument();
     expect(screen.getByText(/living · \d+ dispositivi/)).toBeInTheDocument();
@@ -53,7 +52,7 @@ describe('AdminPage · gestione topologia', () => {
       room: { id: 'garage', label: 'Garage', shortLabel: 'Garage', icon: 'home', displayOrder: 0 },
     });
 
-    render(<AdminPage />);
+    renderWithTopology(<AdminPage />, { topology: SEED_TOPOLOGY });
     await userEvent.click(screen.getByRole('button', { name: 'Nuova stanza' }));
 
     const name = await screen.findByLabelText('Nome');
@@ -87,7 +86,7 @@ describe('AdminPage · gestione topologia', () => {
       },
     });
 
-    render(<AdminPage />);
+    renderWithTopology(<AdminPage />, { topology: SEED_TOPOLOGY });
     await userEvent.click(screen.getByRole('tab', { name: /Scenari/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Nuovo scenario' }));
 
@@ -124,7 +123,7 @@ describe('AdminPage · gestione topologia', () => {
       new Error('La stanza contiene 3 dispositivi: spostali o eliminali prima'),
     );
 
-    render(<AdminPage />);
+    renderWithTopology(<AdminPage />, { topology: SEED_TOPOLOGY });
     await userEvent.click(screen.getByRole('button', { name: 'Elimina Soggiorno' }));
     await userEvent.click(screen.getByRole('button', { name: 'Elimina' }));
 

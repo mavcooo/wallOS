@@ -1,16 +1,26 @@
-import { Check, KeyRound, Lock, ShieldCheck, UserRound } from 'lucide-react';
-import { useEffect } from 'react';
+import { Check, KeyRound, Lock, Pencil, Plus, ShieldCheck, Trash2, UserRound } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { roomLabel } from '@/lib/rooms';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
+import { UserFormDialog } from '@/components/users/UserFormDialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useRooms } from '@/hooks/useTopologyQuery';
+import { useDeleteUser, useUpdateUser, useUsers } from '@/hooks/useUsers';
 import { ROLE_TONE, restrictionsFor, type Restrictions } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/authStore';
-import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
 import type { SessionUser } from '@/types/user';
 
@@ -42,31 +52,53 @@ function RestrictionChips({ restrictions }: { restrictions: Restrictions }) {
 
 export function UsersPage() {
   const { t } = useTranslation('settings');
-  const { t: tCommon } = useTranslation('common');
+  const { t: tCommon } = useTranslation();
   const current = useCurrentUser();
-  const users = useAuthStore((state) => state.users);
-  const loadUsers = useAuthStore((state) => state.loadUsers);
-  const setUserActive = useAuthStore((state) => state.setUserActive);
+  const usersQuery = useUsers();
+  const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
+  const users = usersQuery.data ?? [];
   const switchUser = useAuthStore((state) => state.switchUser);
   const temporary = useAuthStore((state) => state.temporary);
-  const rooms = useHomeStore((state) => state.rooms);
+  const rooms = useRooms();
   const requestPin = usePinGuard();
   const pushToast = useToastStore((state) => state.push);
 
+  const [form, setForm] = useState<{ user?: SessionUser } | null>(null);
+  const [deleting, setDeleting] = useState<SessionUser | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   useEffect(() => {
-    void loadUsers().catch(() => {
-      pushToast({
-        title: t('users.toasts.loadFailedTitle'),
-        description: t('users.toasts.loadFailedDescription'),
-        tone: 'error',
-      });
+    if (!usersQuery.isError) return;
+    pushToast({
+      title: t('users.toasts.loadFailedTitle'),
+      description: t('users.toasts.loadFailedDescription'),
+      tone: 'error',
     });
-  }, [loadUsers, pushToast, t]);
+  }, [usersQuery.isError, pushToast, t]);
 
   const canSwitch = current.role === 'admin' || (current.role === 'kiosk' && current.elevated);
   const canManage = current.role === 'admin';
 
   const roleLabel = (role: SessionUser['role']) => tCommon(`roles.${role}`);
+
+  /**
+   * Le operazioni che modificano account o topologia chiedono il PIN quando la
+   * sessione non è già elevata: il dialog è unico (PinProvider) e la verifica
+   * resta server-side.
+   */
+  const guard = (run: () => void) => {
+    if (current.elevated) {
+      run();
+      return;
+    }
+    requestPin({
+      title: t('users.pin.title'),
+      description: t('users.pin.description'),
+      action: t('users.pin.action'),
+      onConfirm: run,
+    });
+  };
 
   const activateProfile = (user: SessionUser) => {
     if (user.id === current.id) return;
@@ -112,23 +144,56 @@ export function UsersPage() {
 
   const toggleActive = (user: SessionUser, active: boolean) => {
     if (!canManage) return;
-    void setUserActive(user.id, active)
-      .then(() => {
-        pushToast({
-          title: active
-            ? t('users.toasts.activated', { name: user.name })
-            : t('users.toasts.deactivated', { name: user.name }),
-          tone: 'success',
-        });
-      })
-      .catch((error: unknown) => {
-        pushToast({
-          title: t('users.toasts.updateFailedTitle'),
-          description:
-            error instanceof Error ? error.message : t('users.toasts.updateFailedDescription'),
-          tone: 'error',
-        });
+    updateUser.mutate(
+      { id: user.id, input: { active } },
+      {
+        onSuccess: () => {
+          pushToast({
+            title: active
+              ? t('users.toasts.activated', { name: user.name })
+              : t('users.toasts.deactivated', { name: user.name }),
+            tone: 'success',
+          });
+        },
+        onError: (error) => {
+          pushToast({
+            title: t('users.toasts.updateFailedTitle'),
+            description: error.message || t('users.toasts.updateFailedDescription'),
+            tone: 'error',
+          });
+        },
+      },
+    );
+  };
+
+  const openDelete = (user: SessionUser) => {
+    if (user.id === current.id) {
+      pushToast({
+        title: t('users.delete.selfTitle'),
+        description: t('users.delete.selfDescription'),
+        tone: 'error',
       });
+      return;
+    }
+    guard(() => {
+      setDeleteError(null);
+      setDeleting(user);
+    });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleting) return;
+    setDeleteError(null);
+    try {
+      await deleteUser.mutateAsync(deleting.id);
+      pushToast({
+        title: t('users.delete.deleted', { name: deleting.name }),
+        tone: 'success',
+      });
+      setDeleting(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('users.delete.failed'));
+    }
   };
 
   return (
@@ -248,69 +313,174 @@ export function UsersPage() {
           })}
           {users.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[11px] text-fg-subtle">
-              {t('users.loading')}
+              {usersQuery.isLoading ? t('users.loading') : t('users.empty')}
             </p>
           ) : null}
         </div>
       </section>
 
       <section className="overflow-hidden rounded-[var(--radius-card)] border border-line bg-panel">
-        <div className="flex items-center justify-between border-b border-line px-4 py-3">
-          <h2 className="text-sm font-semibold text-fg">{t('users.listTitle')}</h2>
-          <span className="text-[10px] text-fg-subtle">
-            {t('users.listCount', { count: users.length })}
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold text-fg">{t('users.listTitle')}</h2>
+            <span className="text-[10px] text-fg-subtle">
+              {t('users.listCount', { count: users.length })}
+            </span>
+          </div>
+          {canManage ? (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() => guard(() => setForm({}))}
+            >
+              <Plus className="size-4" /> {t('users.create')}
+            </Button>
+          ) : null}
         </div>
         <ul className="divide-y divide-line">
-          {users.map((user) => (
-            <li
-              key={user.id}
-              className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center"
-            >
-              <div className="flex min-w-0 flex-1 items-center gap-3">
-                <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-panel-2 text-[11px] font-semibold text-fg">
-                  {user.initials}
-                </span>
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 truncate text-sm font-medium text-fg">
-                    {user.name}
-                    <Badge variant={ROLE_TONE[user.role]} className="shrink-0">
-                      {roleLabel(user.role)}
-                    </Badge>
-                  </p>
-                  <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
-                    {user.allowedRooms === null
-                      ? t('users.allRooms')
-                      : user.allowedRooms.map((room) => roomLabel(rooms, room)).join(' · ')}
-                    {' · '}
-                    {user.lastAccess ?? t('users.neverAccess')}
-                  </p>
+          {users.map((user) => {
+            const self = user.id === current.id;
+            return (
+              <li
+                key={user.id}
+                className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center"
+              >
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="flex size-10 shrink-0 items-center justify-center rounded-full border border-line bg-panel-2 text-[11px] font-semibold text-fg">
+                    {user.initials}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
+                      <span className="truncate">{user.name}</span>
+                      <Badge variant={ROLE_TONE[user.role]} className="shrink-0">
+                        {roleLabel(user.role)}
+                      </Badge>
+                      {user.isKioskDevice ? (
+                        <Badge variant="outline" className="shrink-0">
+                          {t('users.kioskBadge')}
+                        </Badge>
+                      ) : null}
+                      <Badge variant="success" className="shrink-0">
+                        {t('users.pinConfigured', { length: user.pinLength })}
+                      </Badge>
+                    </p>
+                    <p className="mt-0.5 truncate text-[10px] text-fg-subtle">
+                      @{user.username}
+                      {' · '}
+                      {user.allowedRooms === null
+                        ? t('users.allRooms')
+                        : user.allowedRooms.map((room) => roomLabel(rooms, room)).join(' · ')}
+                      {' · '}
+                      {user.lastAccess ?? t('users.neverAccess')}
+                    </p>
+                  </div>
                 </div>
-              </div>
 
-              <div className="hidden shrink-0 lg:block">
-                <RestrictionChips restrictions={restrictionsFor(user.role, false)} />
-              </div>
+                <div className="hidden shrink-0 lg:block">
+                  <RestrictionChips restrictions={restrictionsFor(user.role, false)} />
+                </div>
 
-              <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
-                <span className="text-[10px] text-fg-subtle">
-                  {user.active ? t('users.active') : t('users.inactive')}
-                </span>
-                <Switch
-                  checked={user.active}
-                  onCheckedChange={(active) => toggleActive(user, active)}
-                  disabled={!canManage || user.id === current.id}
-                  aria-label={t('users.toggleAria', { name: user.name })}
-                />
-              </div>
-            </li>
-          ))}
+                <div className="flex shrink-0 items-center justify-between gap-2 sm:justify-end">
+                  <span className="text-[10px] text-fg-subtle">
+                    {user.active ? t('users.active') : t('users.inactive')}
+                  </span>
+                  <Switch
+                    checked={user.active}
+                    onCheckedChange={(active) => toggleActive(user, active)}
+                    disabled={!canManage || self || updateUser.isPending}
+                    aria-label={t('users.toggleAria', { name: user.name })}
+                  />
+                  {canManage ? (
+                    <div className="flex items-center">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={t('users.editAria', { name: user.name })}
+                        title={t('users.editAria', { name: user.name })}
+                        onClick={() => guard(() => setForm({ user }))}
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="text-danger hover:bg-danger/10 hover:text-danger"
+                        disabled={self || deleteUser.isPending}
+                        aria-label={t('users.deleteAria', { name: user.name })}
+                        title={
+                          self
+                            ? t('users.delete.selfDescription')
+                            : t('users.deleteAria', { name: user.name })
+                        }
+                        onClick={() => openDelete(user)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       </section>
 
       <p className="rounded-xl border border-line bg-panel/60 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">
         {t('users.note')}
       </p>
+
+      <UserFormDialog
+        open={form !== null}
+        onOpenChange={(open) => {
+          if (!open) setForm(null);
+        }}
+        user={form?.user}
+      />
+
+      <Dialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleteUser.isPending) setDeleting(null);
+        }}
+      >
+        {deleting ? (
+          <DialogContent className="w-[min(92vw,26rem)]">
+            <DialogHeader>
+              <DialogTitle>{t('users.delete.title', { name: deleting.name })}</DialogTitle>
+              <DialogDescription>{t('users.delete.description')}</DialogDescription>
+            </DialogHeader>
+            {deleteError ? (
+              <p
+                role="alert"
+                className="mt-3 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-[11px] text-danger"
+              >
+                {deleteError}
+              </p>
+            ) : null}
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setDeleting(null)}
+                disabled={deleteUser.isPending}
+              >
+                {t('users.delete.cancel')}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onClick={() => void confirmDelete()}
+                disabled={deleteUser.isPending}
+              >
+                {deleteUser.isPending ? t('users.delete.busy') : t('users.delete.confirm')}
+              </Button>
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </div>
   );
 }

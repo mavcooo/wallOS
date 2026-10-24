@@ -1,9 +1,13 @@
 import { Activity, BatteryCharging, Gauge, PlugZap, Zap } from 'lucide-react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { LivePowerCard } from '@/components/widgets/LivePowerCard';
 import { SummaryCard } from '@/components/widgets/SummaryCard';
+import { useDevices } from '@/hooks/useTopologyQuery';
+import { combineDevice } from '@/lib/deviceState';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn, formatKwh, formatWatts, percent } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
@@ -14,14 +18,28 @@ const ENERGY_PRICE_EUR_KWH = 0.28;
 
 export function EnergyPage() {
   const { t } = useTranslation('energy');
-  const devices = useHomeStore((state) => state.devices);
-  const requestPin = usePinGuard();
   const { sendAction } = useMqttApi();
-
-  const allSockets = Object.values(devices).filter(
-    (device): device is PowerDevice => device.kind === 'power',
+  const requestPin = usePinGuard();
+  // Anagrafica da TanStack Query; le prese sono l'unico sottoinsieme di cui
+  // questa pagina osserva la telemetria.
+  const devices = useDevices();
+  const powerDevices = useMemo(
+    () => devices.filter((device) => device.kind === 'power'),
+    [devices],
   );
-  const sockets = [...allSockets].sort((a, b) => b.state.watts - a.state.watts);
+  const rows = useHomeStore(
+    useShallow((state) => powerDevices.map((device) => state.deviceStates[device.id])),
+  );
+  const sockets = useMemo(
+    () =>
+      powerDevices
+        .flatMap((metadata, index) => {
+          const device = combineDevice(metadata, rows[index]);
+          return device?.kind === 'power' ? [device] : [];
+        })
+        .sort((a, b) => b.state.watts - a.state.watts),
+    [powerDevices, rows],
+  );
 
   const instantaneous = sockets.reduce((sum, socket) => sum + socket.state.watts, 0);
   const todayKwh = sockets.reduce((sum, socket) => sum + socket.state.energyTodayKwh, 0);
@@ -75,7 +93,7 @@ export function EnergyPage() {
         />
       </section>
 
-      {allSockets.length > 0 ? (
+      {sockets.length > 0 ? (
         <section aria-labelledby="live-power-title" className="flex flex-col gap-3">
           <div>
             <h2 id="live-power-title" className="text-sm font-semibold text-fg">
@@ -84,7 +102,7 @@ export function EnergyPage() {
             <p className="mt-0.5 text-[11px] text-fg-subtle">{t('live.hint')}</p>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
-            {allSockets.map((socket) => (
+            {sockets.map((socket) => (
               <LivePowerCard key={socket.id} deviceId={socket.id} />
             ))}
           </div>

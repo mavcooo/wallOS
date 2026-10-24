@@ -60,6 +60,9 @@
     "lastError": "Ultimo errore: {{error}}",
     "invalidTitle": "Configurazione non valida",
     "invalidDescription": "Host e porta sono obbligatori.",
+    "pinTitle": "Conferma PIN",
+    "pinDescription": "La modifica della connessione al broker richiede una sessione elevata.",
+    "pinAction": "Inserisci il PIN per applicare le impostazioni.",
     "updatedTitle": "Broker aggiornato",
     "updatedDescription": "Riconnessione in corso con i nuovi parametri."
   },
@@ -155,6 +158,196 @@
       "deactivated": "{{name}} disattivato",
       "updateFailedTitle": "Aggiornamento non riuscito",
       "updateFailedDescription": "Operazione rifiutata."
+    },
+    "pin": {
+      "title": "Conferma PIN",
+      "description": "La gestione dei profili richiede una sessione elevata.",
+      "action": "Inserisci il PIN per continuare."
+    },
+    "create": "Nuovo profilo",
+    "empty": "Nessun profilo nel database.",
+    "kioskBadge": "Kiosk",
+    "pinConfigured": "PIN · {{length}} cifre",
+    "editAria": "Modifica {{name}}",
+    "deleteAria": "Elimina {{name}}",
+    "delete": {
+      "title": "Eliminare il profilo {{name}}?",
+      "description": "Il profilo e le sue sessioni vengono rimossi da PostgreSQL. I comandi già inviati restano validi, ma l’utente non potrà più accedere.",
+      "confirm": "Elimina profilo",
+      "cancel": "Annulla",
+      "busy": "Eliminazione…",
+      "deleted": "Profilo {{name}} eliminato",
+      "failed": "Eliminazione non riuscita",
+      "selfTitle": "Profilo corrente",
+      "selfDescription": "Non puoi eliminare il profilo con cui stai usando il pannello."
+    },
+    "form": {
+      "createTitle": "Nuovo profilo",
+      "editTitle": "Modifica {{name}}",
+      "description": "Credenziali, ruolo e PIN sono verificati dal server. Gli hash non lasciano mai PostgreSQL.",
+      "username": "Username",
+      "displayName": "Nome visualizzato",
+      "displayNamePlaceholder": "Mario Rossi",
+      "role": "Ruolo",
+      "kiosk": "Dispositivo kiosk",
+      "kioskHint": "Abilita l’accesso con device id + PIN, senza password.",
+      "kioskDeviceId": "Device id kiosk",
+      "kioskDeviceHint": "Identificativo del pannello; se vuoto usa lo username.",
+      "pinSection": "PIN touch",
+      "pin": "PIN iniziale",
+      "pinNew": "Nuovo PIN",
+      "pinConfirm": "Conferma PIN",
+      "pinHint": "Da 4 a 6 cifre. Il PIN viene usato per elevare la sessione e per le azioni protette.",
+      "pinKeep": "Lascia vuoto per mantenere il PIN attuale. Se lo cambi, la lunghezza si aggiorna.",
+      "password": "Password iniziale",
+      "passwordNew": "Nuova password",
+      "passwordOptional": "Opzionale per il kiosk",
+      "passwordHint": "Almeno 8 caratteri. Per un kiosk può restare vuota.",
+      "passwordKeep": "Lascia vuoto per mantenere la password attuale.",
+      "active": "Profilo attivo",
+      "activeHint": "Un profilo disattivato non può accedere.",
+      "securityNote": "PIN e password salvati solo come hash bcrypt.",
+      "cancel": "Annulla",
+      "saving": "Salvataggio…",
+      "save": "Salva profilo",
+      "create": "Crea profilo",
+      "errors": {
+        "username": "Username: 3-32 caratteri, minuscole, cifre, punto, trattino o underscore.",
+        "displayName": "Il nome può avere al massimo 80 caratteri.",
+        "kioskRole": "Il flag kiosk richiede il ruolo kiosk.",
+        "kioskDevice": "Device id: 2-64 caratteri tra lettere, cifre e . _ : -",
+        "pinDigits": "Il PIN deve contenere solo cifre.",
+        "pinLength": "Il PIN deve avere tra {{min}} e {{max}} cifre.",
+        "pinMismatch": "I due PIN non coincidono.",
+        "password": "La password deve avere almeno 8 caratteri.",
+        "invalid": "Controlla i campi del profilo.",
+        "save": "Salvataggio non riuscito"
+      },
+      "toasts": {
+        "created": "Profilo creato",
+        "updated": "Profilo aggiornato"
+      }
+    }
+  },
+  "topology": {
+    "title": "Dispositivi e stanze",
+    "description": "Anagrafica su PostgreSQL. Ogni salvataggio invalida la topologia, aggiorna l’interfaccia e riallinea le sottoscrizioni MQTT senza ricaricare il browser.",
+    "addDevice": "Nuovo dispositivo",
+    "addRoom": "Nuova stanza",
+    "tabs": {
+      "devices": "Dispositivi ({{count}})",
+      "rooms": "Stanze ({{count}})"
+    },
+    "filters": {
+      "room": "Filtra per stanza",
+      "allRooms": "Tutte le stanze",
+      "adapter": "Filtra per adapter",
+      "allAdapters": "Tutti gli adapter",
+      "count": "{{count}} visibili"
+    },
+    "availability": {
+      "online": "Online",
+      "offline": "Offline",
+      "unknown": "Sconosciuto"
+    },
+    "table": {
+      "device": "Dispositivo",
+      "topics": "Topic",
+      "status": "Stato",
+      "actions": "Azioni"
+    },
+    "noCommand": "nessun comando",
+    "actions": {
+      "test": "Testa topic",
+      "edit": "Modifica {{name}}",
+      "delete": "Elimina {{name}}",
+      "editRoom": "Modifica stanza {{name}}",
+      "deleteRoom": "Elimina stanza {{name}}"
+    },
+    "empty": {
+      "devices": "Nessun dispositivo con questi filtri. Creane uno o allarga la ricerca.",
+      "rooms": "Nessuna stanza. Creane una per iniziare."
+    },
+    "roomMeta": "{{id}} · {{count}} dispositivi",
+    "deleteDialog": {
+      "title": "Eliminare {{label}}?",
+      "deviceDescription": "Il topic viene annullato subito e i comandi in coda per questo dispositivo non verranno più inviati. L’operazione è definitiva.",
+      "roomDescription": "La stanza può essere eliminata solo se è vuota: sposta prima i dispositivi che contiene.",
+      "busy": "Eliminazione…",
+      "confirm": "Elimina"
+    },
+    "pin": {
+      "title": "Conferma PIN",
+      "description": "Le modifiche a dispositivi, stanze e utenti richiedono una sessione elevata.",
+      "action": "Inserisci il PIN per continuare."
+    },
+    "deleted": {
+      "title": "{{label}} eliminato",
+      "failed": "Eliminazione non riuscita"
+    },
+    "test": {
+      "title": "Test topic · {{name}}",
+      "description": "Pubblica un payload sul broker come farebbe il dispositivo, per verificare adapter e sottoscrizioni.",
+      "topic": "Topic",
+      "payload": "Payload",
+      "note": "La pubblicazione usa il base topic configurato nel broker. Il messaggio compare anche nel log raw qui sotto.",
+      "publish": "Pubblica",
+      "published": "Payload pubblicato"
+    },
+    "deviceDialog": {
+      "createTitle": "Nuovo dispositivo",
+      "editTitle": "Modifica dispositivo",
+      "description": "Configura anagrafica, adapter e topic. La modalità sniffer ascolta il broker e compila i campi dal traffico reale.",
+      "manualTab": "Configurazione manuale",
+      "snifferTab": "Ascolta e cattura",
+      "newRoom": "Nuova stanza",
+      "createRoom": "Crea",
+      "channel": "Canale Shelly",
+      "channelHint": "Indice del canale relè (0 = primo canale).",
+      "relay": "Indice relè Tasmota",
+      "relayHint": "1 = POWER, 2 = POWER2, ecc.",
+      "errors": {
+        "id": "L’id deve essere uno slug: minuscole, cifre, - _ : e iniziare con lettera o cifra.",
+        "order": "L’ordine deve essere un intero tra 0 e 9999.",
+        "topic": "Topic non valido: niente spazi o wildcard + / #.",
+        "invalid": "Controlla i campi evidenziati."
+      },
+      "toasts": {
+        "created": "Dispositivo creato",
+        "updated": "Dispositivo aggiornato"
+      }
+    },
+    "sniffer": {
+      "listening": "In ascolto sul broker",
+      "idle": "Sniffer in pausa",
+      "removeFilter": "Rimuovi filtro",
+      "filterPlaceholder": "es. casa/#",
+      "addFilter": "Aggiungi filtro",
+      "clear": "Pulisci",
+      "hint": "Premi il pulsante fisico del dispositivo o attiva il sensore: i messaggi RAW compaiono qui. Scegli “Usa questo topic” per compilare adapter e topic.",
+      "empty": "Nessun messaggio: verifica la connessione e premi il pulsante del dispositivo.",
+      "useTopic": "Usa questo topic",
+      "detected": "Adapter rilevato: {{adapter}}"
+    },
+    "roomDialog": {
+      "createTitle": "Nuova stanza",
+      "editTitle": "Modifica stanza",
+      "description": "La stanza compare nella panoramica, nella navigazione e nei filtri.",
+      "namePlaceholder": "Garage",
+      "idHint": "L’id viene generato dal nome e non cambia dopo la creazione.",
+      "errors": {
+        "name": "Il nome della stanza è obbligatorio.",
+        "order": "L’ordine deve essere un intero tra 0 e 9999.",
+        "invalid": "Controlla i campi."
+      },
+      "save": "Salva stanza",
+      "create": "Crea stanza",
+      "saving": "Salvataggio…",
+      "created": "Stanza {{name}} creata",
+      "toasts": {
+        "created": "Stanza creata",
+        "updated": "Stanza aggiornata"
+      }
     }
   }
 }

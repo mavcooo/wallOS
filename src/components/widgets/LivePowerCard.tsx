@@ -5,6 +5,7 @@ import { useShallow } from 'zustand/react/shallow';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { Switch } from '@/components/ui/switch';
+import { useDeviceMetadata } from '@/hooks/useTopologyQuery';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn, formatKwh, formatWatts, percent } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
@@ -29,21 +30,23 @@ export const LivePowerCard = memo(function LivePowerCard({
 }: LivePowerCardProps) {
   const { t } = useTranslation('devices');
   const { t: tEnergy } = useTranslation('energy');
+  // Metadati stabili da TanStack Query, telemetria dalla sola riga del device.
+  const metadata = useDeviceMetadata(deviceId);
   const metrics = useHomeStore(
     useShallow((state) => {
-      const device = state.devices[deviceId];
-      if (!device || device.kind !== 'power') return null;
+      const row = state.deviceStates[deviceId];
+      if (!row || row.kind !== 'power' || !metadata) return null;
       return {
-        name: device.name,
-        on: device.state.on,
+        name: metadata.name,
+        on: row.state.on,
         // Metriche già arrotondate a ciò che l'UI mostra: niente render per
         // variazioni invisibili sotto l'unità.
-        watts: Math.round(device.state.watts),
-        volts: Math.round(device.state.voltage),
-        todayKwh: Number(device.state.energyTodayKwh.toFixed(2)),
-        maxWatts: device.state.maxWatts,
-        load: percent(device.state.watts, device.state.maxWatts),
-        protected: device.protected,
+        watts: Math.round(row.state.watts),
+        volts: Math.round(row.state.voltage),
+        todayKwh: Number(row.state.energyTodayKwh.toFixed(2)),
+        maxWatts: row.state.maxWatts,
+        load: percent(row.state.watts, row.state.maxWatts),
+        protected: metadata.protected,
       };
     }),
   );

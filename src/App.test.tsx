@@ -46,12 +46,10 @@ vi.mock('@/mqtt/MqttProvider', () => ({
 const { default: App } = await import('@/App');
 const { useAuthStore } = await import('@/store/authStore');
 const { useHomeStore } = await import('@/store/homeStore');
-const { SEED_TOPOLOGY } = await import('@/test/fixtures');
 
 beforeEach(() => {
   localStorage.clear();
   useAuthStore.setState({ status: 'loading', user: null, elevated: false });
-  useHomeStore.setState({ topologyStatus: 'idle', topologyError: null });
 });
 
 describe('App', () => {
@@ -75,11 +73,11 @@ describe('App', () => {
         allowedRooms: null,
         active: true,
         isKioskDevice: false,
+        kioskDeviceId: null,
         lastAccess: null,
         pinLength: 4,
       },
     });
-    useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
 
     render(<App />);
     expect(

@@ -104,6 +104,8 @@ export interface PublicUser {
   allowedRooms: string[] | null;
   active: boolean;
   isKioskDevice: boolean;
+  /** Identificativo del pannello per l'accesso kiosk (pubblico, non segreto). */
+  kioskDeviceId: string | null;
   lastAccess: string | null;
   pinLength: 4 | 5 | 6;
 }

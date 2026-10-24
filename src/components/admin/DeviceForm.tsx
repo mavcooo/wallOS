@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { adminApi, type DevicePayload } from '@/lib/adminApi';
 import { roomIdFromLabel, type RoomConfig } from '@/lib/rooms';
-import type { AdapterId, Device, DeviceKind } from '@/types/device';
+import type { AdapterId, DeviceKind, DeviceMetadata } from '@/types/device';
 
 const TYPES: readonly DeviceKind[] = ['light', 'climate', 'power', 'media', 'sensor'];
 
@@ -24,7 +24,7 @@ export function DeviceForm({
   onSaved,
   onCancel,
 }: {
-  device?: Device;
+  device?: DeviceMetadata;
   rooms: readonly RoomConfig[];
   onSaved: () => void;
   onCancel: () => void;

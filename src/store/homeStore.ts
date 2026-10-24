@@ -3,24 +3,22 @@ import { persist } from 'zustand/middleware';
 
 import { DEFAULT_BROKER, KIOSK_DEFAULTS } from '@/config/app.config';
 import { normalizeBurnInSettings } from '@/lib/burnIn';
-import { UNASSIGNED_ROOM_ID, roomIdFromLabel, type RoomConfig } from '@/lib/rooms';
+import { mergeDecodedRealtime, seedDeviceRealtimeState } from '@/lib/deviceState';
 import { normalizeTelemetrySettings } from '@/lib/telemetry';
-import { fetchTopology, type Topology } from '@/lib/topologyApi';
 import type { BurnInSettings } from '@/types/kiosk';
 import type {
   DecodedState,
   Device,
   DeviceAvailability,
+  DeviceRealtimePatch,
+  DeviceRealtimeState,
   RoomId,
-  Scenario,
 } from '@/types/device';
 import type { BrokerSettings, ConnectionMetrics, ConnectionStatus } from '@/types/mqtt';
 import type { RawMqttMessage } from '@/types/mqtt';
 import type { TelemetrySettings, TelemetryUpdate } from '@/types/telemetry';
 
 export type ViewId = 'overview' | 'rooms' | 'energy' | 'settings' | 'users' | 'admin';
-
-export type TopologyStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface UiState {
   view: ViewId;
@@ -30,11 +28,27 @@ export interface UiState {
   lastActionAt: number;
 }
 
-type DeviceMap = Record<string, Device>;
+/** Mappa indicizzata: letture e patch di un device costano O(1). */
+type DeviceStateMap = Record<string, DeviceRealtimeState>;
 
+/**
+ * Stato client effimero. La topologia (stanze, anagrafica device, scenari) vive
+ * in TanStack Query; qui restano solo telemetria, connessione, log e
+ * preferenze. In questo modo un payload MQTT non può invalidare i metadati.
+ */
 export interface HomeState {
-  // ── Entità ───────────────────────────────────────────────────────────────
-  devices: DeviceMap;
+  // ── Telemetria volatile ──────────────────────────────────────────────────
+  deviceStates: DeviceStateMap;
+  /**
+   * Allinea la mappa ai metadati ricevuti: crea le righe mancanti dallo
+   * snapshot del server, conserva quelle esistenti, elimina i device spariti.
+   * Va chiamata al bootstrap e a ogni refetch/discovery, non a ogni messaggio.
+   */
+  syncDeviceStates(seeds: readonly Device[]): void;
+  /** Patch O(1) di una singola riga (availability, favorite, flag ottimistici). */
+  updateDeviceState(id: string, patch: DeviceRealtimePatch): void;
+  /** Inserimento/aggiornamento massivo: una sola `set` per l'intero batch. */
+  setBulkDeviceStates(states: DeviceStateMap): void;
   /** Percorso critico: applica subito la patch (on/off, mode, allarmi, comandi). */
   applyDecoded(deviceId: string, decoded: DecodedState): void;
   /**
@@ -48,28 +62,6 @@ export interface HomeState {
   toggleFavorite(deviceId: string): void;
   /** Tick del simulatore locale (solo modalità demo). */
   simulateTelemetry(): void;
-
-  // ── Topologia (dal database) ─────────────────────────────────────────────
-  /** Stanze da `GET /api/topology` + aree scoperte via HA Discovery. */
-  rooms: RoomConfig[];
-  /** Scenari rapidi, anch'essi serviti dal database. */
-  scenarios: Scenario[];
-  topologyStatus: TopologyStatus;
-  topologyError: string | null;
-  /** Bootstrap autenticato: stanze, dispositivi e scenari dal server. */
-  loadTopology(): Promise<void>;
-  /** Ricarica dopo una mutazione admin senza smontare la UI (nessuno splash). */
-  reloadTopology(): Promise<void>;
-  /** Applica un payload già pronto (refresh, retry, test). */
-  hydrateTopology(topology: Topology): void;
-  /** Crea (o riusa, se l'etichetta coincide) la stanza di un'area HA. */
-  ensureRoom(label?: string): RoomId;
-
-  // ── Discovery Home Assistant ─────────────────────────────────────────────
-  /** Inserisce o aggiorna un device annunciato; la discovery vince sul seed. */
-  applyDiscoveryUpsert(device: Device): void;
-  /** Ritira l'entità: il widget sparisce, nessun orfano in UI. */
-  applyDiscoveryRemove(entityId: string): void;
 
   // ── Connessione ──────────────────────────────────────────────────────────
   connection: ConnectionMetrics;
@@ -117,192 +109,92 @@ const initialUi: UiState = {
   lastActionAt: Date.now(),
 };
 
-/** Le stanze del server hanno la precedenza; quelle scoperte si aggiungono. */
-function mergeRooms(
-  seed: readonly RoomConfig[],
-  saved?: readonly RoomConfig[],
-): RoomConfig[] {
-  const merged = [...seed];
-  for (const room of saved ?? []) {
-    if (!room?.id || !room.label) continue;
-    if (!merged.some((existing) => existing.id === room.id)) merged.push(room);
-  }
-  return merged;
-}
-
-/** Applica una patch solo se il discriminante coincide con il tipo di device. */
-function mergeDecoded(device: Device, decoded: DecodedState): Device {
-  if (device.kind !== decoded.kind) return device;
-  switch (device.kind) {
-    case 'light':
-      return decoded.kind === 'light'
-        ? { ...device, state: { ...device.state, ...decoded.state } }
-        : device;
-    case 'climate':
-      return decoded.kind === 'climate'
-        ? { ...device, state: { ...device.state, ...decoded.state } }
-        : device;
-    case 'power':
-      return decoded.kind === 'power'
-        ? { ...device, state: { ...device.state, ...decoded.state } }
-        : device;
-    case 'media':
-      return decoded.kind === 'media'
-        ? { ...device, state: { ...device.state, ...decoded.state } }
-        : device;
-    case 'sensor':
-      return decoded.kind === 'sensor'
-        ? { ...device, state: { ...device.state, ...decoded.state } }
-        : device;
-  }
+/**
+ * Applica una patch decodificata alla riga del device.
+ * `optimistic` distingue l'intenzione locale dalla telemetria del broker.
+ */
+function mergeRow(
+  current: DeviceRealtimeState | undefined,
+  decoded: DecodedState,
+  optimistic: boolean,
+): DeviceRealtimeState | null {
+  if (!current || current.kind !== decoded.kind) return null;
+  return {
+    ...current,
+    state: { ...current.state, ...decoded.state },
+    isOptimistic: optimistic,
+    lastUpdated: Date.now(),
+  } as DeviceRealtimeState;
 }
 
 function jitter(value: number, amplitude: number, min: number): number {
   return Math.max(min, value + (Math.random() - 0.5) * amplitude);
 }
 
-type PersistedHome = Pick<
-  HomeState,
-  'broker' | 'ui' | 'telemetry' | 'rooms' | 'burnIn'
-> & {
-  /** Solo i device scoperti: quelli statici tornano dal seed a ogni avvio. */
-  discovered: Device[];
-};
+type PersistedHome = Pick<HomeState, 'broker' | 'ui' | 'telemetry' | 'burnIn'>;
 
 export const useHomeStore = create<HomeState>()(
   persist(
     (set, get) => ({
-      devices: {},
-      rooms: [],
-      scenarios: [],
-      topologyStatus: 'idle',
-      topologyError: null,
+      deviceStates: {},
 
-      async loadTopology() {
-        set({ topologyStatus: 'loading', topologyError: null });
-        try {
-          const topology = await fetchTopology();
-          get().hydrateTopology(topology);
-        } catch (error) {
-          set({
-            topologyStatus: 'error',
-            topologyError:
-              error instanceof Error ? error.message : 'Topologia non disponibile',
-          });
-        }
-      },
-
-      async reloadTopology() {
-        try {
-          get().hydrateTopology(await fetchTopology());
-        } catch {
-          // La mutazione è già andata a buon fine: se il reload fallisce la UI
-          // resta coerente con l'ultima topologia nota, senza splash d'errore.
-        }
-      },
-
-      hydrateTopology(topology) {
+      syncDeviceStates(seeds) {
         set((state) => {
-          // Solo i device scoperti restano dalla cache: i seed arrivano dal DB.
-          const discovered = Object.values(state.devices).filter(
-            (device) => device.discovery !== undefined,
-          );
-          const rooms = mergeRooms(topology.rooms, state.rooms);
+          const next: DeviceStateMap = {};
+          for (const seed of seeds) {
+            const existing = state.deviceStates[seed.id];
+            next[seed.id] =
+              existing && existing.kind === seed.kind
+                ? existing
+                : seedDeviceRealtimeState(seed);
+          }
+
+          const nextIds = Object.keys(next);
+          const sameSize = nextIds.length === Object.keys(state.deviceStates).length;
+          if (sameSize && nextIds.every((id) => next[id] === state.deviceStates[id])) {
+            return state;
+          }
+          return { deviceStates: next };
+        });
+      },
+
+      updateDeviceState(id, patch) {
+        set((state) => {
+          const current = state.deviceStates[id];
+          if (!current) return state;
           return {
-            rooms,
-            devices: {
-              ...Object.fromEntries(topology.devices.map((device) => [device.id, device])),
-              ...Object.fromEntries(discovered.map((device) => [device.id, device])),
-            },
-            scenarios: topology.scenarios,
-            topologyStatus: 'ready',
-            topologyError: null,
-            ui: {
-              ...state.ui,
-              room: rooms.some((room) => room.id === state.ui.room)
-                ? state.ui.room
-                : (topology.rooms[0]?.id ?? UNASSIGNED_ROOM_ID),
+            deviceStates: {
+              ...state.deviceStates,
+              [id]: {
+                ...current,
+                ...patch,
+                lastUpdated: Date.now(),
+              } as DeviceRealtimeState,
             },
           };
         });
       },
 
-      ensureRoom(label) {
-        const clean = label?.trim();
-        if (!clean) return UNASSIGNED_ROOM_ID;
-
-        const { rooms } = get();
-        const byLabel = rooms.find(
-          (room) => room.label.toLowerCase() === clean.toLowerCase(),
-        );
-        if (byLabel) return byLabel.id;
-
-        const id = roomIdFromLabel(clean);
-        if (rooms.some((room) => room.id === id)) return id;
-
-        set({
-          rooms: [
-            ...rooms,
-            {
-              id,
-              label: clean,
-              shortLabel: clean.length > 12 ? `${clean.slice(0, 11)}…` : clean,
-            },
-          ],
-        });
-        return id;
-      },
-
-      applyDiscoveryUpsert(device) {
-        const room = get().ensureRoom(device.discovery?.area);
-        set((state) => {
-          const existing = state.devices[device.id];
-          // Su un re-annuncio (retained all'avvio) i metadati si aggiornano ma
-          // stato, disponibilità e preferito già noti non vengono azzerati.
-          const runtime =
-            existing && existing.kind === device.kind
-              ? {
-                  favorite: existing.favorite,
-                  availability: existing.availability,
-                  lastSeen: existing.lastSeen,
-                  // I default dell'annuncio non devono cancellare lo stato già
-                  // ricevuto dal broker.
-                  state: { ...device.state, ...existing.state },
-                }
-              : { favorite: existing?.favorite ?? device.favorite };
-
-          return {
-            devices: {
-              ...state.devices,
-              [device.id]: { ...device, room, ...runtime } as Device,
-            },
-          };
-        });
-      },
-
-      applyDiscoveryRemove(entityId) {
-        set((state) => {
-          const ids = Object.values(state.devices)
-            .filter((device) => device.discovery?.entityId === entityId)
-            .map((device) => device.id);
-          if (ids.length === 0) return state;
-
-          const devices = { ...state.devices };
-          for (const id of ids) delete devices[id];
-          return { devices };
-        });
+      setBulkDeviceStates(states) {
+        const entries = Object.keys(states);
+        if (entries.length === 0) return;
+        set((state) => ({
+          deviceStates: { ...state.deviceStates, ...states },
+        }));
       },
 
       applyDecoded(deviceId, decoded) {
         set((state) => {
-          const device = state.devices[deviceId];
-          if (!device) return state;
-          const next = mergeDecoded(device, decoded);
-          if (next === device) return state;
+          const next = mergeRow(state.deviceStates[deviceId], decoded, false);
+          if (!next) return state;
           return {
-            devices: {
-              ...state.devices,
-              [deviceId]: { ...next, availability: 'online', lastSeen: Date.now() },
+            deviceStates: {
+              ...state.deviceStates,
+              [deviceId]: {
+                ...next,
+                availability: 'online',
+                lastSeen: Date.now(),
+              },
             },
           };
         });
@@ -310,12 +202,10 @@ export const useHomeStore = create<HomeState>()(
 
       applyOptimistic(deviceId, decoded) {
         set((state) => {
-          const device = state.devices[deviceId];
-          if (!device) return state;
-          const next = mergeDecoded(device, decoded);
-          if (next === device) return state;
+          const next = mergeRow(state.deviceStates[deviceId], decoded, true);
+          if (!next) return state;
           return {
-            devices: { ...state.devices, [deviceId]: next },
+            deviceStates: { ...state.deviceStates, [deviceId]: next },
           };
         });
       },
@@ -325,43 +215,48 @@ export const useHomeStore = create<HomeState>()(
         set((state) => {
           // Una sola copia della mappa e una sola `set` per l'intero batch:
           // i device non toccati conservano lo stesso riferimento in memoria.
-          const devices: DeviceMap = { ...state.devices };
+          const deviceStates: DeviceStateMap = { ...state.deviceStates };
           let changed = false;
           for (const update of updates) {
-            const device = devices[update.deviceId];
-            if (!device) continue;
-            const merged = mergeDecoded(device, update.decoded);
-            if (merged === device) continue;
-            devices[update.deviceId] = {
+            const current = deviceStates[update.deviceId];
+            const merged = mergeDecodedRealtime(current, update.decoded);
+            if (!merged || !current) continue;
+            deviceStates[update.deviceId] = {
               ...merged,
-              availability: 'online',
               // Timestamp di arrivo, mai regressioni anche con flush fuori ordine.
-              lastSeen: Math.max(device.lastSeen ?? 0, update.at),
+              lastSeen: Math.max(current.lastSeen ?? 0, update.at),
             };
             changed = true;
           }
-          return changed ? { devices } : state;
+          return changed ? { deviceStates } : state;
         });
       },
 
       setAvailability(deviceId, availability) {
         set((state) => {
-          const device = state.devices[deviceId];
-          if (!device) return state;
+          const current = state.deviceStates[deviceId];
+          if (!current) return state;
           return {
-            devices: { ...state.devices, [deviceId]: { ...device, availability } },
+            deviceStates: {
+              ...state.deviceStates,
+              [deviceId]: { ...current, availability, lastUpdated: Date.now() },
+            },
           };
         });
       },
 
       toggleFavorite(deviceId) {
         set((state) => {
-          const device = state.devices[deviceId];
-          if (!device) return state;
+          const current = state.deviceStates[deviceId];
+          if (!current) return state;
           return {
-            devices: {
-              ...state.devices,
-              [deviceId]: { ...device, favorite: !device.favorite },
+            deviceStates: {
+              ...state.deviceStates,
+              [deviceId]: {
+                ...current,
+                favorite: !current.favorite,
+                lastUpdated: Date.now(),
+              },
             },
           };
         });
@@ -370,36 +265,38 @@ export const useHomeStore = create<HomeState>()(
       simulateTelemetry() {
         set((state) => {
           const now = Date.now();
-          const devices: DeviceMap = { ...state.devices };
-          for (const [id, device] of Object.entries(state.devices)) {
-            if (device.kind === 'power') {
-              const base = device.state.on ? Math.max(5, device.state.watts) : 0;
-              const watts = Math.round(jitter(base, device.state.on ? 40 : 0, 0));
-              devices[id] = {
-                ...device,
+          const deviceStates: DeviceStateMap = { ...state.deviceStates };
+          for (const [id, row] of Object.entries(state.deviceStates)) {
+            if (row.kind === 'power') {
+              const base = row.state.on ? Math.max(5, row.state.watts) : 0;
+              const watts = Math.round(jitter(base, row.state.on ? 40 : 0, 0));
+              deviceStates[id] = {
+                ...row,
+                lastUpdated: now,
                 lastSeen: now,
                 state: {
-                  ...device.state,
+                  ...row.state,
                   watts,
                   voltage: Math.round(jitter(230, 4, 215)),
                   current: Number((watts / 230).toFixed(2)),
                   energyTodayKwh: Number(
-                    (device.state.energyTodayKwh + watts / 3_600_000 * 3).toFixed(3),
+                    (row.state.energyTodayKwh + (watts / 3_600_000) * 3).toFixed(3),
                   ),
                   energyTotalKwh: Number(
-                    (device.state.energyTotalKwh + watts / 3_600_000 * 3).toFixed(3),
+                    (row.state.energyTotalKwh + (watts / 3_600_000) * 3).toFixed(3),
                   ),
                 },
               };
-            } else if (device.kind === 'climate') {
-              const { state: climate } = device;
+            } else if (row.kind === 'climate') {
+              const climate = row.state;
               const active = climate.mode !== 'off';
               const delta = active ? climate.targetTemp - climate.currentTemp : 0;
               const currentTemp = Number(
                 (climate.currentTemp + Math.max(-0.1, Math.min(0.1, delta * 0.05))).toFixed(1),
               );
-              devices[id] = {
-                ...device,
+              deviceStates[id] = {
+                ...row,
+                lastUpdated: now,
                 lastSeen: now,
                 state: {
                   ...climate,
@@ -417,19 +314,20 @@ export const useHomeStore = create<HomeState>()(
                     : 'idle',
                 },
               };
-            } else if (device.kind === 'sensor' && typeof device.state.value === 'number') {
-              const amp = device.state.type === 'co2' ? 30 : 0.4;
-              devices[id] = {
-                ...device,
+            } else if (row.kind === 'sensor' && typeof row.state.value === 'number') {
+              const amp = row.state.type === 'co2' ? 30 : 0.4;
+              deviceStates[id] = {
+                ...row,
+                lastUpdated: now,
                 lastSeen: now,
                 state: {
-                  ...device.state,
-                  value: Number(jitter(device.state.value, amp, 0).toFixed(1)),
+                  ...row.state,
+                  value: Number(jitter(row.state.value, amp, 0).toFixed(1)),
                 },
               };
             }
           }
-          return { devices };
+          return { deviceStates };
         });
 
         // Le metriche di connessione in demo restano realistiche ma stabili.
@@ -518,49 +416,25 @@ export const useHomeStore = create<HomeState>()(
     }),
     {
       name: 'domus-kiosk-store',
-      version: 4,
+      version: 5,
+      // v5: la topologia non è più persistita nello store (vive in TanStack
+      // Query + cache dedicata); restano solo preferenze e stato UI.
       partialize: (state): PersistedHome => ({
         broker: state.broker,
         ui: { ...state.ui, screenDimmed: false },
         telemetry: state.telemetry,
         burnIn: state.burnIn,
-        rooms: state.rooms,
-        // Cache dell'albero scoperto: i widget compaiono prima che il broker
-        // consegni i retained. I device statici tornano dal seed.
-        discovered: Object.values(state.devices).filter(
-          (device) => device.discovery !== undefined,
-        ),
       }),
-      // v4 toglie la topologia seed dal bundle: stanze e device arrivano dal
-      // server, il persist conserva solo preferenze e aree scoperte.
       migrate: (persisted) => persisted as PersistedHome,
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedHome> | undefined;
         if (!saved) return current;
-        const discovered = (saved.discovered ?? []).filter(
-          (device): device is Device =>
-            typeof device?.id === 'string' && device.discovery !== undefined,
-        );
         return {
           ...current,
           broker: { ...current.broker, ...(saved.broker ?? {}) },
           ui: { ...current.ui, ...(saved.ui ?? {}), screenDimmed: false },
           telemetry: normalizeTelemetrySettings(saved.telemetry ?? current.telemetry),
           burnIn: normalizeBurnInSettings(saved.burnIn ?? current.burnIn),
-          // Le stanze del server arrivano dopo il bootstrap; qui si conservano
-          // solo quelle scoperte nella sessione precedente.
-          rooms: mergeRooms([], saved.rooms),
-          devices: {
-            ...current.devices,
-            ...Object.fromEntries(
-              discovered.map((device) => [
-                device.id,
-                // La disponibilità salvata è di una sessione fa: si riparte da
-                // `unknown` finché availability/stat non arrivano dal broker.
-                { ...device, availability: 'unknown' as const },
-              ]),
-            ),
-          },
         };
       },
     },
@@ -568,12 +442,13 @@ export const useHomeStore = create<HomeState>()(
 );
 
 // ── Selettori atomici (evitano re-render inutili su update di latenza/log) ──
-export const selectDevices = (state: HomeState) => state.devices;
-/** Selettore mirato: un widget osserva solo il proprio device, non la mappa. */
-export const selectDevice =
+/** Solo la mappa: da evitare nei componenti, serve a pochi aggregatori. */
+export const selectDeviceStates = (state: HomeState) => state.deviceStates;
+/** Selettore mirato: un widget osserva solo la propria riga, non la mappa. */
+export const selectDeviceState =
   (deviceId: string) =>
-  (state: HomeState): Device | undefined =>
-    state.devices[deviceId];
+  (state: HomeState): DeviceRealtimeState | undefined =>
+    state.deviceStates[deviceId];
 export const selectTelemetrySettings = (state: HomeState) => state.telemetry;
 export const selectConnection = (state: HomeState) => state.connection;
 export const selectBroker = (state: HomeState) => state.broker;

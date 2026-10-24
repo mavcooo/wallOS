@@ -2,8 +2,6 @@ import { Lightbulb, Star } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { roomLabel } from '@/lib/rooms';
-import { useHomeStore } from '@/store/homeStore';
 import { cn } from '@/lib/utils';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
@@ -12,6 +10,8 @@ import { SyncIndicator } from './SyncIndicator';
 
 interface LightCardProps {
   device: LightDevice;
+  /** Etichetta stanza risolta dal parent: il widget non legge la topologia. */
+  roomName: string;
   onAction: (action: ControlAction) => void;
   onToggleFavorite?: () => void;
   /** Comando in coda, in attesa di conferma dal broker. */
@@ -27,6 +27,7 @@ const PRESETS = [
 
 export function LightCard({
   device,
+  roomName,
   onAction,
   onToggleFavorite,
   pending = false,
@@ -35,7 +36,6 @@ export function LightCard({
   const { t } = useTranslation('devices');
   const { t: tCommon } = useTranslation('common');
   const { state, capabilities } = device;
-  const rooms = useHomeStore((store) => store.rooms);
   const [brightness, setBrightness] = useState(state.brightness);
 
   useEffect(() => {
@@ -70,7 +70,7 @@ export function LightCard({
               <SyncIndicator pending={pending} />
             </p>
             <p className="truncate text-[11px] text-fg-subtle">
-              {roomLabel(rooms, device.room)}
+              {roomName}
               {active ? ` · ${brightness}%` : ` · ${t('light.off')}`}
             </p>
           </div>

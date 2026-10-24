@@ -7,6 +7,7 @@ import {
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -23,17 +24,18 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useDevices, useRooms, useScenarios } from '@/hooks/useTopologyQuery';
 import { adminApi } from '@/lib/adminApi';
+import { TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
 import { roomLabel, type RoomConfig } from '@/lib/rooms';
-import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
-import type { Device, Scenario } from '@/types/device';
+import type { DeviceMetadata, Scenario } from '@/types/device';
 
 type Tab = 'rooms' | 'devices' | 'scenarios';
 
 type Editing =
   | { kind: 'room'; item?: RoomConfig }
-  | { kind: 'device'; item?: Device }
+  | { kind: 'device'; item?: DeviceMetadata }
   | { kind: 'scenario'; item?: Scenario };
 
 interface PendingDelete {
@@ -57,11 +59,16 @@ const ENTITY_KEY: Record<Tab, 'room' | 'device' | 'scenario'> = {
 
 export function AdminPage() {
   const { t } = useTranslation();
-  const rooms = useHomeStore((state) => state.rooms);
-  const devices = useHomeStore((state) => state.devices);
-  const scenarios = useHomeStore((state) => state.scenarios);
-  const reloadTopology = useHomeStore((state) => state.reloadTopology);
+  // La topologia è server-state: dopo una mutazione si invalida la query e
+  // TopologyGate riallinea le righe realtime dei device nuovi/rimossi.
+  const rooms = useRooms();
+  const devices = useDevices();
+  const scenarios = useScenarios();
+  const queryClient = useQueryClient();
   const pushToast = useToastStore((state) => state.push);
+
+  const reloadTopology = () =>
+    queryClient.invalidateQueries({ queryKey: TOPOLOGY_QUERY_KEY });
 
   const [tab, setTab] = useState<Tab>('rooms');
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -69,7 +76,7 @@ export function AdminPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
-  const deviceList = Object.values(devices);
+  const deviceList = devices;
 
   const finishEdit = async (message: string) => {
     setEditing(null);

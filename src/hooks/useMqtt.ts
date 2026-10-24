@@ -1,9 +1,19 @@
 // Il bundle browser di mqtt.js espone solo il default export (namespace).
+import { useQueryClient } from '@tanstack/react-query';
 import mqtt, { type IClientOptions, type MqttClient } from 'mqtt';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { DISCOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import i18n from '@/i18n';
+import { combineDevice, seedDeviceRealtimeState } from '@/lib/deviceState';
+import {
+  forgetDiscoveredDevice,
+  rememberDiscoveredDevice,
+  withDiscoveredDevice,
+  withoutDiscoveredDevice,
+} from '@/lib/discovery';
+import { TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
+import type { Topology } from '@/lib/topologyApi';
 import { getAdapter } from '@/mqtt/adapters';
 import {
   createHaDiscoveryBridge,
@@ -22,11 +32,19 @@ import {
   useOfflineQueue,
   type QueuedCommand,
 } from '@/mqtt/offlineQueue';
-import { buildBrokerUrl, stateTopics, stripBaseTopic, withBaseTopic } from '@/mqtt/topics';
+import { isValidTopicFilter } from '@/mqtt/sniffer';
+import { buildBrokerUrl, stripBaseTopic, withBaseTopic } from '@/mqtt/topics';
+import { buildTopicIndex } from '@/mqtt/topicIndex';
 import { TelemetryUpdateBuffer } from '@/mqtt/updateBuffer';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
-import type { ControlAction, Device, Scenario, ScenarioId } from '@/types/device';
+import type {
+  ControlAction,
+  Device,
+  DeviceMetadata,
+  Scenario,
+  ScenarioId,
+} from '@/types/device';
 import type { BrokerSettings, PublishOptions, RawDirection, RawMqttMessage } from '@/types/mqtt';
 
 const PROBE_TOPIC = 'domus/kiosk/ping';
@@ -59,38 +77,6 @@ function logRaw(
   if (direction !== 'system') store.countMessage(direction);
 }
 
-/** I device scoperti usano topic assoluti decisi dall'annuncio HA. */
-/**
- * Impronta dei topic dichiarati dai device. `devices` cambia identità a ogni
- * patch di stato: confrontare l'oggetto farebbe risottoscrivere a ogni
- * messaggio, questa stringa cambia solo quando entra o esce un device.
- */
-function subscriptionSignature(devices: Record<string, Device>): string {
-  return Object.values(devices)
-    .map(
-      (device) =>
-        `${device.id}:${stateTopics(device).join(',')}:${device.topics.availability ?? ''}`,
-    )
-    .join('|');
-}
-
-function findDiscoveryDeviceByTopic(devices: Record<string, Device>, topic: string): Device | null {
-  for (const device of Object.values(devices)) {
-    if (!device.discovery) continue;
-    if (stateTopics(device).includes(topic)) return device;
-  }
-  return null;
-}
-
-/** I device statici vivono sotto l'eventuale `baseTopic`. */
-function findDeviceByTopic(devices: Record<string, Device>, topic: string): Device | null {
-  for (const device of Object.values(devices)) {
-    if (device.discovery) continue;
-    if (stateTopics(device).includes(topic)) return device;
-  }
-  return null;
-}
-
 function brokerKey(broker: BrokerSettings): string {
   return [
     broker.host,
@@ -112,24 +98,49 @@ export interface MqttApi {
   publishRaw(topic: string, payload: string, options?: PublishOptions): void;
   runScenario(id: ScenarioId): Promise<void>;
   reconnect(): void;
+  /** Forza la riconciliazione dei topic (post-mutazione topologia). */
+  refreshSubscriptions(): void;
+  /** Ascolto temporaneo di filtri wildcard; il cleanup annulla ciò che non serve più. */
+  subscribeSniffer(filters: readonly string[]): () => void;
 }
 
 /**
  * Unica connessione MQTT dell'app.
  *
- * - sottoscrive i topic `stat` + `availability` dei device caricati dal server
- * - decodifica con l'adapter associato al device e applica il patch allo store
+ * - i metadati arrivano da TanStack Query (`devices`): qui non viene copiata
+ *   nessuna topologia nello store
+ * - i topic sono indicizzati: lookup O(1) per messaggio
+ * - decodifica con l'adapter associato e patch O(1) della riga realtime
  * - riconnessione manuale con backoff esponenziale + jitter (no reconnectPeriod)
  * - latenza reale via topic di echo (fallback: PINGREQ/PINGRESP)
  * - in `demoMode` alimenta lo store con un simulatore locale, senza socket
  */
-export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
+export function useMqtt(
+  scenarios: readonly Scenario[],
+  devices: readonly DeviceMetadata[],
+): MqttApi {
+  const queryClient = useQueryClient();
   const broker = useHomeStore((state) => state.broker);
   const telemetrySettings = useHomeStore((state) => state.telemetry);
   const key = useMemo(() => brokerKey(broker), [broker]);
   const publishRef = useRef<PublishFn | null>(null);
   const reconnectRef = useRef<(() => void) | null>(null);
   const bufferRef = useRef<TelemetryUpdateBuffer | null>(null);
+  const clientRef = useRef<MqttClient | null>(null);
+  const subscribeAllRef = useRef<((instance: MqttClient) => void) | null>(null);
+  // Filtri dello sniffer con conteggio: più dialog aperti non si annullano a vicenda.
+  const snifferFiltersRef = useRef<Map<string, number>>(new Map());
+  // Topic effettivamente sottoscritti sul socket corrente: condiviso con lo
+  // sniffer, così una cancellazione non lascia la mappa "già iscritta".
+  const subscribedTopicsRef = useRef<Set<string>>(new Set());
+
+  const deviceIndex = useMemo(
+    () => new Map(devices.map((device) => [device.id, device] as const)),
+    [devices],
+  );
+  const topicIndex = useMemo(() => buildTopicIndex(devices, broker), [devices, broker]);
+  const deviceIndexRef = useRef(deviceIndex);
+  const topicIndexRef = useRef(topicIndex);
 
   // La finestra è tarabile a runtime senza riaprire la connessione MQTT.
   useEffect(() => {
@@ -149,6 +160,18 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
   }, []);
 
   useEffect(() => {
+    deviceIndexRef.current = deviceIndex;
+  }, [deviceIndex]);
+
+  // Refetch/discovery: aggiorna l'indice e, se il socket è già connesso,
+  // sottoscrive i nuovi topic senza riaprire la connessione.
+  useEffect(() => {
+    topicIndexRef.current = topicIndex;
+    const client = clientRef.current;
+    if (client?.connected) subscribeAllRef.current?.(client);
+  }, [topicIndex]);
+
+  useEffect(() => {
     const settings = useHomeStore.getState().broker;
     const store = useHomeStore.getState();
     const { patchConnection, setAvailability, setStatus } = store;
@@ -158,7 +181,6 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
     // nessun campione della sessione precedente può finire in quella nuova.
     const buffer = new TelemetryUpdateBuffer(
       {
-        getDevice: (deviceId) => useHomeStore.getState().devices[deviceId] ?? null,
         applyCritical: (deviceId, decoded) =>
           useHomeStore.getState().applyDecoded(deviceId, decoded),
         applyTelemetry: (updates) => useHomeStore.getState().applyTelemetryBatch(updates),
@@ -182,6 +204,7 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
 
     function closeClient() {
       detachQueueRuntime();
+      clientRef.current = null;
       if (!client) return;
       client.removeAllListeners();
       client.end(true);
@@ -240,17 +263,12 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       }, wait);
     }
 
-    const subscribedTopics = new Set<string>();
-
-    /** Un device scoperto dichiara topic assoluti; gli statici vivono sotto `baseTopic`. */
-    function wireTopic(device: Device, topic: string): string {
-      return device.discovery ? topic : base(topic);
-    }
+    const subscribedTopics = subscribedTopicsRef.current;
 
     /**
-     * Sottoscrive i topic mancanti: discovery, probe e canali di ogni device.
-     * Gira al connect e dopo ogni entità scoperta, così la sottoscrizione è
-     * immediata senza riaprire il socket.
+     * Riconcilia le sottoscrizioni: aggiunge i topic mancanti e annulla quelli
+     * rimasti orfani dopo una cancellazione o un cambio di `state_topic`.
+     * Lo sniffer contribuisce con i propri filtri finché è aperto.
      */
     function subscribeAll(instance: MqttClient) {
       const desired = new Set<string>([base(PROBE_TOPIC)]);
@@ -259,8 +277,14 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
         desired.add(`${prefix}/+/+/config`);
         desired.add(`${prefix}/+/+/+/config`);
       }
-      for (const device of Object.values(useHomeStore.getState().devices)) {
-        for (const topic of stateTopics(device)) desired.add(wireTopic(device, topic));
+      for (const topic of topicIndexRef.current.keys()) desired.add(topic);
+      for (const filter of snifferFiltersRef.current.keys()) desired.add(filter);
+
+      const stale = [...subscribedTopics].filter((topic) => !desired.has(topic));
+      if (stale.length > 0) {
+        for (const topic of stale) subscribedTopics.delete(topic);
+        instance.unsubscribe(stale);
+        logRaw('system', 'unsubscribe', `${stale.length} topic rimossi`);
       }
 
       const missing = [...desired].filter((topic) => !subscribedTopics.has(topic));
@@ -297,14 +321,30 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       // Se lo `stat` conferma un comando in coda, il comando è già applicato.
       reconcileQueuedCommands(device.id, decoded);
       // Il buffer separa campi critici (flush immediato) da telemetria
-      // (coalescing + finestra configurabile).
-      buffer.push(device.id, decoded);
+      // (coalescing + finestra configurabile). Riusa lo snapshot già composto
+      // per il decode: nessuna seconda composizione lungo il percorso caldo.
+      buffer.push(device, decoded);
     }
 
     const discoveryBridge: HaDiscoveryBridge = createHaDiscoveryBridge({
       prefixes: DISCOVERY.prefixes,
-      onUpsert: (device) => {
-        useHomeStore.getState().applyDiscoveryUpsert(device);
+      onUpsert: (announced) => {
+        // I metadati scoperti estendono la topologia in cache: nessun dato
+        // strutturale entra in homeStore.
+        const current = queryClient.getQueryData<Topology>(TOPOLOGY_QUERY_KEY);
+        const { topology, device, room } = withDiscoveredDevice(
+          current ?? { rooms: [], devices: [], scenarios: [] },
+          announced,
+        );
+        if (current) queryClient.setQueryData(TOPOLOGY_QUERY_KEY, topology);
+        rememberDiscoveredDevice(device, room);
+        // Riga realtime immediata: lo stato retained può arrivare prima che
+        // TopologyGate sincronizzi la mappa.
+        if (!useHomeStore.getState().deviceStates[device.id]) {
+          useHomeStore.getState().setBulkDeviceStates({
+            [device.id]: seedDeviceRealtimeState(device),
+          });
+        }
         logRaw(
           'system',
           'discovery',
@@ -314,7 +354,14 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
         if (client?.connected) subscribeAll(client);
       },
       onRemove: (entityId) => {
-        useHomeStore.getState().applyDiscoveryRemove(entityId);
+        const current = queryClient.getQueryData<Topology>(TOPOLOGY_QUERY_KEY);
+        if (current) {
+          queryClient.setQueryData(
+            TOPOLOGY_QUERY_KEY,
+            withoutDiscoveredDevice(current, entityId),
+          );
+        }
+        forgetDiscoveredDevice(entityId);
         logRaw('system', 'discovery', `− ${entityId}`);
       },
     });
@@ -344,6 +391,7 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
         scheduleReconnect(error instanceof Error ? error.message : 'Connessione non avviata');
         return;
       }
+      clientRef.current = client;
 
       publishRef.current = (topic, payload, publishOptions) => {
         client?.publish(topic, payload, {
@@ -394,20 +442,21 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
           return;
         }
 
-        const discovered = findDiscoveryDeviceByTopic(
-          useHomeStore.getState().devices,
-          topic,
-        );
-        if (discovered) {
-          logRaw('in', topic, rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
-          handleDeviceMessage(discovered, topic, rawPayload);
+        // Lookup O(1): la mappa è ricostruita solo al cambio di topologia.
+        const metadata = topicIndexRef.current.get(topic);
+        if (!metadata) {
+          logRaw('in', stripBaseTopic(settings, topic), rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
           return;
         }
 
-        const localTopic = stripBaseTopic(settings, topic);
-        const device = findDeviceByTopic(useHomeStore.getState().devices, localTopic);
-        logRaw('in', localTopic, rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
+        const device = combineDevice(
+          metadata,
+          useHomeStore.getState().deviceStates[metadata.id],
+        );
         if (!device) return;
+
+        const localTopic = device.discovery ? topic : stripBaseTopic(settings, topic);
+        logRaw('in', localTopic, rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
         handleDeviceMessage(device, localTopic, rawPayload);
       });
 
@@ -445,22 +494,13 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       });
     }
 
+    subscribeAllRef.current = subscribeAll;
+
     reconnectRef.current = () => {
       window.clearTimeout(reconnectTimer);
       attempts = 0;
       openSocket();
     };
-
-    // La topologia può essere ricaricata mentre il socket è già connesso
-    // (refetch di TanStack Query, CRUD admin): i topic dei nuovi device vanno
-    // sottoscritti senza riaprire la connessione.
-    let subscribedSignature = subscriptionSignature(useHomeStore.getState().devices);
-    const unsubscribeDevices = useHomeStore.subscribe((state) => {
-      const next = subscriptionSignature(state.devices);
-      if (next === subscribedSignature) return;
-      subscribedSignature = next;
-      if (client?.connected) subscribeAll(client);
-    });
 
     if (settings.demoMode) {
       setStatus('connecting');
@@ -501,10 +541,11 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
         publishRef.current = null;
         reconnectRef.current = null;
         bufferRef.current = null;
+        subscribeAllRef.current = null;
+        clientRef.current = null;
         buffer.dispose();
         detachQueueRuntime();
         discoveryBridge.dispose();
-        unsubscribeDevices();
         window.clearTimeout(startTimer);
         window.clearInterval(demoTimer);
       };
@@ -517,15 +558,90 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       publishRef.current = null;
       reconnectRef.current = null;
       bufferRef.current = null;
+      subscribeAllRef.current = null;
       // Flush finale: l'ultimo campione non va perso allo smontaggio.
       buffer.dispose();
       discoveryBridge.dispose();
-      unsubscribeDevices();
       window.clearTimeout(reconnectTimer);
       window.clearInterval(probeTimer);
       closeClient();
     };
-  }, [key]);
+  }, [key, queryClient]);
+
+  const refreshSubscriptions = useCallback(() => {
+    const client = clientRef.current;
+    if (client?.connected) subscribeAllRef.current?.(client);
+  }, []);
+
+  /**
+   * Sniffer: sottoscrive filtri wildcard aggiuntivi. Al cleanup annulla solo i
+   * filtri che non sono più richiesti né dallo sniffer né dalla topologia.
+   */
+  const subscribeSniffer = useCallback((filters: readonly string[]) => {
+    const normalized = [...new Set(filters.map((filter) => filter.trim()))].filter(
+      isValidTopicFilter,
+    );
+    const settings = useHomeStore.getState().broker;
+    const base = settings.baseTopic.trim().replace(/^\/+|\/+$/g, '');
+    // I topic dei device vivono sotto il base topic: anche lo sniffer ascolta
+    // lì, altrimenti `tele/#` non vedrebbe `casa/tele/...`.
+    const entries = normalized.map((filter) => ({
+      local: filter,
+      broker:
+        base && filter !== base && !filter.startsWith(`${base}/`)
+          ? `${base}/${filter}`
+          : filter,
+    }));
+
+    for (const entry of entries) {
+      snifferFiltersRef.current.set(
+        entry.broker,
+        (snifferFiltersRef.current.get(entry.broker) ?? 0) + 1,
+      );
+    }
+
+    const brokerFilters = [...new Set(entries.map((entry) => entry.broker))];
+    const client = clientRef.current;
+    if (client?.connected && brokerFilters.length > 0) {
+      for (const filter of brokerFilters) subscribedTopicsRef.current.add(filter);
+      client.subscribe(brokerFilters, { qos: 0 }, (error) => {
+        logRaw(
+          'system',
+          'sniffer',
+          error ? `Errore: ${error.message}` : `${brokerFilters.length} filtri in ascolto`,
+        );
+      });
+    }
+
+    return () => {
+      const stale: string[] = [];
+      for (const filter of brokerFilters) {
+        const count = (snifferFiltersRef.current.get(filter) ?? 1) - 1;
+        if (count > 0) {
+          snifferFiltersRef.current.set(filter, count);
+          continue;
+        }
+        snifferFiltersRef.current.delete(filter);
+        const topologyTopic =
+          filter === withBaseTopic(settings, PROBE_TOPIC) ||
+          DISCOVERY.prefixes.some(
+            (prefix) =>
+              filter === `${prefix}/+/+/config` || filter === `${prefix}/+/+/+/config`,
+          ) ||
+          topicIndexRef.current.has(filter);
+        if (!topologyTopic) {
+          stale.push(filter);
+          subscribedTopicsRef.current.delete(filter);
+        }
+      }
+
+      const current = clientRef.current;
+      if (current?.connected && stale.length > 0) {
+        current.unsubscribe(stale);
+        logRaw('system', 'sniffer', `${stale.length} filtri rimossi`);
+      }
+    };
+  }, []);
 
   const publishRaw = useCallback((topic: string, payload: string, options?: PublishOptions) => {
     const settings = useHomeStore.getState().broker;
@@ -534,9 +650,10 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
   }, []);
 
   const sendAction = useCallback((deviceId: string, action: ControlAction) => {
-    const state = useHomeStore.getState();
-    const device = state.devices[deviceId];
-    if (!device) return;
+    const metadata = deviceIndexRef.current.get(deviceId);
+    const realtime = useHomeStore.getState().deviceStates[deviceId];
+    const device = combineDevice(metadata, realtime);
+    if (!device || !realtime) return;
     const encoded = getAdapter(device.adapter).encode(device, action);
     if (!encoded) {
       useToastStore.getState().push({
@@ -546,13 +663,13 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       });
       return;
     }
-    const optimistic = optimisticState(device, action);
+    const optimistic = optimisticState(realtime, action);
     // Lo stato "prima" va letto prima di applicare la patch ottimistica: serve
     // al rollback se il TTL scade o il broker non conferma mai il comando.
-    const rollback = captureRollback(device, optimistic);
+    const rollback = captureRollback(realtime, optimistic);
     // `applyOptimistic` non marca il device come online: durante un blackout
     // il comando è solo intenzione locale, non telemetria ricevuta.
-    if (optimistic) state.applyOptimistic(deviceId, optimistic);
+    if (optimistic) useHomeStore.getState().applyOptimistic(deviceId, optimistic);
 
     useOfflineQueue.getState().enqueue({
       deviceId,
@@ -601,5 +718,12 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
     [scenarios, sendAction],
   );
 
-  return { sendAction, publishRaw, runScenario, reconnect: () => reconnectRef.current?.() };
+  return {
+    sendAction,
+    publishRaw,
+    runScenario,
+    reconnect: () => reconnectRef.current?.(),
+    refreshSubscriptions,
+    subscribeSniffer,
+  };
 }

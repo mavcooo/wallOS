@@ -2,12 +2,18 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/components/settings/TopologyManager', () => ({
+  TopologyManager: () => null,
+}));
+
 vi.mock('@/mqtt/MqttProvider', () => ({
   useMqttApi: () => ({
     sendAction: vi.fn(),
     publishRaw: vi.fn(),
     runScenario: vi.fn(),
     reconnect: vi.fn(),
+    refreshSubscriptions: vi.fn(),
+    subscribeSniffer: vi.fn(() => vi.fn()),
   }),
 }));
 
@@ -27,9 +33,13 @@ beforeEach(() => {
   });
 });
 
+function renderPage() {
+  return render(<SettingsPage />);
+}
+
 describe('SettingsPage · protezione burn-in', () => {
   it('cambia modalità, intervallo e opacità dell’orologio', async () => {
-    render(<SettingsPage />);
+    renderPage();
 
     const float = screen.getByRole('button', { name: /Orologio flottante/ });
     expect(float).toHaveAttribute('aria-pressed', 'true');
@@ -53,7 +63,7 @@ describe('SettingsPage · protezione burn-in', () => {
   it('mostra il riepilogo allineato alle impostazioni correnti', () => {
     useHomeStore.getState().setBurnInSettings({ mode: 'subtle-shift', shiftIntervalMs: 30_000 });
 
-    render(<SettingsPage />);
+    renderPage();
 
     expect(screen.getByText(/micro-shift della dashboard/)).toBeInTheDocument();
     expect(screen.getByText(/ogni 30 s/)).toBeInTheDocument();

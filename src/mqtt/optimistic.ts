@@ -1,4 +1,4 @@
-import type { ControlAction, DecodedState, Device } from '@/types/device';
+import type { ControlAction, DecodedState, DeviceRealtimeState } from '@/types/device';
 
 /**
  * Gli stati sono union di interfacce senza index signature: per leggerli come
@@ -12,7 +12,10 @@ function asRecord(state: DecodedState['state']): Record<string, unknown> {
  * Patch ottimistica applicata subito dopo il publish: la UI risponde in <16ms
  * e viene riconciliata dal messaggio `stat` reale quando arriva dal broker.
  */
-export function optimisticState(device: Device, action: ControlAction): DecodedState | null {
+export function optimisticState(
+  device: DeviceRealtimeState,
+  action: ControlAction,
+): DecodedState | null {
   switch (device.kind) {
     case 'light':
       switch (action.type) {
@@ -65,7 +68,7 @@ export function optimisticState(device: Device, action: ControlAction): DecodedS
  * un publish fallito può ripristinare esattamente quei campi.
  */
 export function captureRollback(
-  device: Device,
+  device: DeviceRealtimeState,
   optimistic: DecodedState | null,
 ): DecodedState | null {
   if (!optimistic || optimistic.kind !== device.kind) return null;
@@ -84,7 +87,7 @@ export function captureRollback(
  * frattempo (stat del broker, altro client) ha sempre la precedenza.
  */
 export function rollbackState(
-  device: Device,
+  device: DeviceRealtimeState,
   optimistic: DecodedState | null,
   previous: DecodedState | null,
 ): DecodedState | null {

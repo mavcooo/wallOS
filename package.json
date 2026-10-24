@@ -20,6 +20,7 @@
     "test:server": "vitest run --config vitest.config.server.ts",
     "db:check": "tsx server/db-check.ts",
     "test:all": "npm run test && npm run test:server",
+    "bench:mqtt": "vitest run --mode benchmark src/perf/mqttPipeline.bench.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -49,6 +50,7 @@
     "react-i18next": "^17.1.5",
     "react-swipeable": "^7.0.2",
     "tailwind-merge": "^3.3.1",
+    "zod": "^4.6.7",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

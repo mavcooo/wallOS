@@ -171,8 +171,9 @@ availability vengono sottoscritti subito.
   primo inserimento): le entità scoperte hanno id `ha:<component>:<object_id>` e
   non sovrascrivono i device del database.
 - Un annuncio con payload vuoto ritira l'entità: il widget sparisce subito.
-- I device scoperti restano nella cache del persist: al riavvio i widget ci sono
-  già, con disponibilità `unknown` finché il broker non risponde.
+- I metadati dei device scoperti restano in una cache locale dedicata
+  (`domus.discovery.cache`): al riavvio i widget ci sono già, con disponibilità
+  `unknown` finché il broker non risponde. Lo stato volatile non viene salvato.
 
 ### Amministrazione della topologia (solo admin)
 
@@ -181,8 +182,8 @@ stanze, dispositivi, scenari — che legge e scrive direttamente su PostgreSQL.
 
 - Il ruolo `admin` è l'unico autorizzato: le route usano `requireRole`, non basta
   nascondere il link. Un kiosk elevato non può modificare la topologia.
-- Ogni salvataggio aggiorna la topologia nello store senza riavviare il kiosk
-  (`reloadTopology`, nessuno splash di caricamento).
+- Ogni salvataggio invalida la query della topologia e riallinea la UI senza
+  riavviare il kiosk (nessuno splash di caricamento).
 - Validazione server-side: slug per gli id (`^[a-z0-9][a-z0-9:_-]{0,63}$`),
   stanza esistente per un device, topic obbligatorio di stato, enum per tipo e
   adapter, passi di scenario tipizzati (power, brightness, targetTemp, …).
@@ -210,20 +211,26 @@ Il client non importa nessun `*.config.ts` di stanze/device/utenti: la casa
 arriva da `GET /api/topology`, la sessione da `/api/auth/*`.
 
 - **TanStack Query** con un `QueryClient` per albero (`src/lib/queryClient.ts`):
-  `staleTime` 5 min, `gcTime` 30 min, `retry` 3 con backoff 0,8→1,6→3,2 s,
-  `refetchOnWindowFocus: false` (kiosk) e refetch al ritorno della rete.
-- `useTopologyQuery` (`src/hooks/useTopologyQuery.ts`) espone la query e l'ultima
+  `gcTime` 30 min, `retry` 3 con backoff 0,8→1,6→3,2 s, `refetchOnWindowFocus:
+  false` (kiosk) e refetch al ritorno della rete. La topologia usa `staleTime`
+  15 min: stanze, anagrafica e scenari cambiano solo dall'amministrazione.
+- **Separazione Server-State / Client-State**: TanStack Query è l'unica fonte di
+  stanze, device (metadati), scenari e utenti. Zustand (`homeStore`) conserva
+  solo telemetria volatile, connessione MQTT, log e preferenze. La mappa
+  `deviceStates: Record<DeviceId, DeviceRealtimeState>` è indicizzata, quindi
+  ogni payload aggiorna la propria riga in O(1).
+- `useTopologyQuery` (`src/hooks/useTopologyQuery.ts`) espone la query, l'ultima
   topologia salvata in `localStorage` (`domus.topology.cache`, scadenza 30
-  giorni). La cache è validata con `parseTopology`: un payload corrotto non
-  idrata mai lo store.
+  giorni) e i selettori `useDevices`/`useRooms`/`useScenarios`/`useDeviceMetadata`.
+  La cache è validata con `parseTopology`: un payload corrotto non idrata mai la UI.
 - `TopologyGate`: splash brandizzato durante il caricamento; in errore schermata
   con **Riprova** e, se esiste una cache, **Avvia con i dati salvati** (i comandi
-  riprendono quando il broker torna raggiungibile). All'arrivo dei dati idrata
-  Zustand; `MqttProvider` è montato **dopo**, quindi le sottoscrizioni ai topic
-  partono già complete. Un refetch con device nuovi sottoscrive i topic mancanti
-  senza riaprire il socket.
-- Le mutazioni admin continuano a usare `reloadTopology`, che aggiorna lo store
-  senza splash; TanStack Query resta la fonte del primo bootstrap.
+  riprendono quando il broker torna raggiungibile). All'arrivo dei dati crea le
+  righe realtime mancanti; `MqttProvider` è montato **dopo**, quindi le
+  sottoscrizioni ai topic partono già complete. Il socket usa un indice
+  topic→device: lookup O(1) per messaggio, ricostruito solo al cambio topologia.
+- Le widget card ricevono solo `deviceId` e selezionano la propria riga: un
+  messaggio MQTT non ridisegna `OverviewPage`, `RoomsPage` né le card vicine.
 
 Non esiste uno script `migrate-configs-to-db.ts` perché i vecchi `*.config.ts`
 non sono più nel repository: la migrazione è già il seed PostgreSQL

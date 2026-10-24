@@ -22,8 +22,6 @@ import type {
 const MIN_EARLY_FLUSH_MS = 250;
 
 export interface TelemetryBufferSinks {
-  /** Stato committed del device (usato per no-op e soglia di significatività). */
-  getDevice(deviceId: string): Device | null;
   /** Percorso critico: una sola `set` Zustand, nessun buffer. */
   applyCritical(deviceId: string, decoded: DecodedState): void;
   /** Percorso telemetria: una sola `set` per tutti i device del flush. */
@@ -33,6 +31,9 @@ export interface TelemetryBufferSinks {
 /**
  * Buffer single-producer tra `useMqtt` e lo store.
  *
+ * - Il chiamante passa lo snapshot del device già composto (metadati Query +
+ *   riga realtime): il buffer non ricostruisce il view-model né rilegge lo
+ *   store per ogni patch, una sola composizione per messaggio.
  * - Un solo timer per l'intera applicazione, non uno per device.
  * - Accumula l'ultimo campione per device (coalescing O(1), nessuna crescita
  *   illimitata della coda).
@@ -75,15 +76,22 @@ export class TelemetryUpdateBuffer {
     this.reschedule();
   }
 
-  /** Instrada una patch decodificata sul percorso corretto. */
-  push(deviceId: string, decoded: DecodedState, observedAt = Date.now()): TelemetryUpdateKind {
+  /**
+   * Instrada una patch decodificata sul percorso corretto.
+   * `device` è lo snapshot già usato per il decode: niente seconda composizione
+   * né lookup nella mappa realtime dentro il buffer.
+   */
+  push(
+    device: Device,
+    decoded: DecodedState,
+    observedAt = Date.now(),
+  ): TelemetryUpdateKind {
     if (this.disposed) return 'ignored';
-    const device = this.sinks.getDevice(deviceId);
-    if (!device || device.kind !== decoded.kind) return 'ignored';
+    if (device.kind !== decoded.kind) return 'ignored';
 
     const { critical, telemetry } = splitDecoded(device, decoded);
-    if (critical) this.commitCritical(deviceId, critical);
-    if (telemetry) this.enqueue(deviceId, telemetry, observedAt);
+    if (critical) this.commitCritical(device.id, critical);
+    if (telemetry) this.enqueue(device, telemetry, observedAt);
     return critical ? 'critical' : telemetry ? 'telemetry' : 'ignored';
   }
 
@@ -127,10 +135,8 @@ export class TelemetryUpdateBuffer {
 
   // ── Percorso telemetria ────────────────────────────────────────────────────
 
-  private enqueue(deviceId: string, decoded: DecodedState, observedAt: number): void {
-    const device = this.sinks.getDevice(deviceId);
-    if (!device || device.kind !== decoded.kind) return;
-
+  private enqueue(device: Device, decoded: DecodedState, observedAt: number): void {
+    const deviceId = device.id;
     const pending = this.pending.get(deviceId);
     const merged = pending ? mergeDecodedState(pending.decoded, decoded) : decoded;
 

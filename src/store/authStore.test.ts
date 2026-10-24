@@ -50,6 +50,7 @@ const ADMIN: SessionUser = {
   allowedRooms: null,
   active: true,
   isKioskDevice: false,
+  kioskDeviceId: null,
   lastAccess: 'adesso',
   pinLength: 4,
 };
@@ -63,6 +64,7 @@ const FAMILY: SessionUser = {
   allowedRooms: ['living'],
   active: true,
   isKioskDevice: false,
+  kioskDeviceId: null,
   lastAccess: 'ieri',
   pinLength: 4,
 };

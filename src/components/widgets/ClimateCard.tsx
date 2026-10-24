@@ -11,9 +11,7 @@ import {
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { roomLabel } from '@/lib/rooms';
 import { clamp, cn, formatTemp } from '@/lib/utils';
-import { useHomeStore } from '@/store/homeStore';
 import type {
   ClimateAction,
   ClimateDevice,
@@ -25,6 +23,8 @@ import { SyncIndicator } from './SyncIndicator';
 
 interface ClimateCardProps {
   device: ClimateDevice;
+  /** Etichetta stanza risolta dal parent: il widget non legge la topologia. */
+  roomName: string;
   onAction: (action: ControlAction) => void;
   onToggleFavorite?: () => void;
   /** Comando in coda, in attesa di conferma dal broker. */
@@ -54,6 +54,7 @@ function accentFor(action: ClimateAction): string {
 
 export function ClimateCard({
   device,
+  roomName,
   onAction,
   onToggleFavorite,
   pending = false,
@@ -62,7 +63,6 @@ export function ClimateCard({
   const { t } = useTranslation('devices');
   const { t: tCommon } = useTranslation('common');
   const { state } = device;
-  const rooms = useHomeStore((store) => store.rooms);
   const [draft, setDraft] = useState(state.targetTemp);
   const [dragging, setDragging] = useState(false);
   const draggingRef = useRef(false);
@@ -136,7 +136,7 @@ export function ClimateCard({
             ) : null}
           </p>
           <p className="truncate text-[11px] text-fg-subtle">
-            {roomLabel(rooms, device.room)} · {t('climate.humidity', { value: state.humidity ?? '—' })}
+            {roomName} · {t('climate.humidity', { value: state.humidity ?? '—' })}
           </p>
         </div>
         <span

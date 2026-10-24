@@ -8,8 +8,8 @@
 
 /**
  * Le stanze non sono un'unione chiusa: arrivano dal database (`/api/topology`)
- * e la discovery Home Assistant può crearne di nuove a runtime
- * (`homeStore.rooms`, con `ensureRoom`).
+ * e la discovery Home Assistant può crearne di nuove a runtime, estendendo la
+ * topologia in cache (TanStack Query). Non vivono in `homeStore`.
  */
 export type RoomId = string;
 
@@ -212,6 +212,55 @@ export interface SensorDevice extends DeviceBase {
 export type Device = LightDevice | ClimateDevice | PowerDevice | MediaDevice | SensorDevice;
 
 export type AnyDeviceState = Device['state'];
+
+/**
+ * Omit distributivo: `Omit<union, K>` collasserebbe l'union in un unico tipo
+ * con le sole chiavi comuni, perdendo la discriminazione su `kind`.
+ */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/**
+ * Topologia strutturale: ciò che arriva dal database e cambia solo tramite
+ * configurazione. `state`, `availability` e `lastSeen` sono esclusi perché
+ * vengono aggiornati dal broker (Zustand) e non devono invalidare la cache.
+ * `favorite` resta qui: è una preferenza persistita, non telemetria.
+ */
+export type DeviceMetadata = DistributiveOmit<
+  Device,
+  'state' | 'availability' | 'lastSeen'
+>;
+
+/** Campi runtime condivisi da ogni tipo di device. */
+export interface DeviceRealtimeBase {
+  id: string;
+  availability: DeviceAvailability;
+  lastSeen: number | null;
+  /** Override locale del preferito: il valore del server resta nei metadati. */
+  favorite: boolean;
+  /** true quando l'ultima patch è un'intenzione locale in attesa del broker. */
+  isOptimistic: boolean;
+  /** Epoch ms dell'ultima scrittura nella mappa realtime. */
+  lastUpdated: number;
+}
+
+/**
+ * Telemetria volatile indicizzata per id: unica cosa che vive in homeStore.
+ * Il discriminante `kind` replica quello dei metadati per validare le patch
+ * decodificate senza dover consultare la cache della topologia.
+ */
+export type DeviceRealtimeState =
+  | (DeviceRealtimeBase & { kind: 'light'; state: LightState })
+  | (DeviceRealtimeBase & { kind: 'climate'; state: ClimateState })
+  | (DeviceRealtimeBase & { kind: 'power'; state: PowerState })
+  | (DeviceRealtimeBase & { kind: 'media'; state: MediaState })
+  | (DeviceRealtimeBase & { kind: 'sensor'; state: SensorState });
+
+export type DeviceState = DeviceRealtimeState['state'];
+
+/** Patch parziale della riga realtime (mai di soli metadati). */
+export type DeviceRealtimePatch = Partial<Omit<DeviceRealtimeBase, 'id' | 'lastUpdated'>> & {
+  state?: DeviceState;
+};
 
 /**
  * Azioni astratte che l'UI può inviare. Gli adapter traducono questa union

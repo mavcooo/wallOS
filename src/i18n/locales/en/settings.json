@@ -60,6 +60,9 @@
     "lastError": "Last error: {{error}}",
     "invalidTitle": "Invalid configuration",
     "invalidDescription": "Host and port are required.",
+    "pinTitle": "Confirm PIN",
+    "pinDescription": "Changing the broker connection requires an elevated session.",
+    "pinAction": "Enter your PIN to apply the settings.",
     "updatedTitle": "Broker updated",
     "updatedDescription": "Reconnecting with the new parameters."
   },
@@ -155,6 +158,196 @@
       "deactivated": "{{name}} disabled",
       "updateFailedTitle": "Update failed",
       "updateFailedDescription": "Operation rejected."
+    },
+    "pin": {
+      "title": "Confirm PIN",
+      "description": "Managing profiles requires an elevated session.",
+      "action": "Enter your PIN to continue."
+    },
+    "create": "New profile",
+    "empty": "No profiles in the database.",
+    "kioskBadge": "Kiosk",
+    "pinConfigured": "PIN · {{length}} digits",
+    "editAria": "Edit {{name}}",
+    "deleteAria": "Delete {{name}}",
+    "delete": {
+      "title": "Delete profile {{name}}?",
+      "description": "The profile and its sessions are removed from PostgreSQL. Commands already sent remain valid, but the account can no longer sign in.",
+      "confirm": "Delete profile",
+      "cancel": "Cancel",
+      "busy": "Deleting…",
+      "deleted": "Profile {{name}} deleted",
+      "failed": "Delete failed",
+      "selfTitle": "Current profile",
+      "selfDescription": "You cannot delete the profile you are using on this panel."
+    },
+    "form": {
+      "createTitle": "New profile",
+      "editTitle": "Edit {{name}}",
+      "description": "Credentials, role and PIN are verified by the server. Hashes never leave PostgreSQL.",
+      "username": "Username",
+      "displayName": "Display name",
+      "displayNamePlaceholder": "Mario Rossi",
+      "role": "Role",
+      "kiosk": "Kiosk device",
+      "kioskHint": "Enables sign-in with device id + PIN, without a password.",
+      "kioskDeviceId": "Kiosk device id",
+      "kioskDeviceHint": "Panel identifier; defaults to the username when empty.",
+      "pinSection": "Touch PIN",
+      "pin": "Initial PIN",
+      "pinNew": "New PIN",
+      "pinConfirm": "Confirm PIN",
+      "pinHint": "4 to 6 digits. The PIN elevates the session and authorises protected actions.",
+      "pinKeep": "Leave empty to keep the current PIN. Changing it updates the stored length.",
+      "password": "Initial password",
+      "passwordNew": "New password",
+      "passwordOptional": "Optional for a kiosk",
+      "passwordHint": "At least 8 characters. It may stay empty for a kiosk.",
+      "passwordKeep": "Leave empty to keep the current password.",
+      "active": "Active profile",
+      "activeHint": "A disabled profile cannot sign in.",
+      "securityNote": "PIN and password are stored only as bcrypt hashes.",
+      "cancel": "Cancel",
+      "saving": "Saving…",
+      "save": "Save profile",
+      "create": "Create profile",
+      "errors": {
+        "username": "Username: 3-32 chars, lowercase letters, digits, dot, dash or underscore.",
+        "displayName": "Display name can be at most 80 characters.",
+        "kioskRole": "The kiosk flag requires the kiosk role.",
+        "kioskDevice": "Device id: 2-64 chars among letters, digits and . _ : -",
+        "pinDigits": "The PIN must contain digits only.",
+        "pinLength": "The PIN must be {{min}}-{{max}} digits.",
+        "pinMismatch": "The two PINs do not match.",
+        "password": "The password must be at least 8 characters.",
+        "invalid": "Check the profile fields.",
+        "save": "Save failed"
+      },
+      "toasts": {
+        "created": "Profile created",
+        "updated": "Profile updated"
+      }
+    }
+  },
+  "topology": {
+    "title": "Devices and rooms",
+    "description": "PostgreSQL records. Every save invalidates the topology, updates the UI and realigns MQTT subscriptions without reloading the browser.",
+    "addDevice": "New device",
+    "addRoom": "New room",
+    "tabs": {
+      "devices": "Devices ({{count}})",
+      "rooms": "Rooms ({{count}})"
+    },
+    "filters": {
+      "room": "Filter by room",
+      "allRooms": "All rooms",
+      "adapter": "Filter by adapter",
+      "allAdapters": "All adapters",
+      "count": "{{count}} shown"
+    },
+    "availability": {
+      "online": "Online",
+      "offline": "Offline",
+      "unknown": "Unknown"
+    },
+    "table": {
+      "device": "Device",
+      "topics": "Topics",
+      "status": "Status",
+      "actions": "Actions"
+    },
+    "noCommand": "no command",
+    "actions": {
+      "test": "Test topic",
+      "edit": "Edit {{name}}",
+      "delete": "Delete {{name}}",
+      "editRoom": "Edit room {{name}}",
+      "deleteRoom": "Delete room {{name}}"
+    },
+    "empty": {
+      "devices": "No devices match these filters. Create one or widen the search.",
+      "rooms": "No rooms yet. Create one to get started."
+    },
+    "roomMeta": "{{id}} · {{count}} devices",
+    "deleteDialog": {
+      "title": "Delete {{label}}?",
+      "deviceDescription": "Its subscription is removed immediately and queued commands for this device will no longer be sent. This cannot be undone.",
+      "roomDescription": "A room can only be deleted when empty: move its devices first.",
+      "busy": "Deleting…",
+      "confirm": "Delete"
+    },
+    "pin": {
+      "title": "Confirm PIN",
+      "description": "Changes to devices, rooms and users require an elevated session.",
+      "action": "Enter your PIN to continue."
+    },
+    "deleted": {
+      "title": "{{label}} deleted",
+      "failed": "Delete failed"
+    },
+    "test": {
+      "title": "Test topic · {{name}}",
+      "description": "Publish a payload to the broker as the device would, to verify adapter and subscriptions.",
+      "topic": "Topic",
+      "payload": "Payload",
+      "note": "Publishing uses the broker base topic. The message also appears in the raw log below.",
+      "publish": "Publish",
+      "published": "Payload published"
+    },
+    "deviceDialog": {
+      "createTitle": "New device",
+      "editTitle": "Edit device",
+      "description": "Configure identity, adapter and topics. Sniffer mode listens to the broker and fills the fields from real traffic.",
+      "manualTab": "Manual setup",
+      "snifferTab": "Listen and capture",
+      "newRoom": "New room",
+      "createRoom": "Create",
+      "channel": "Shelly channel",
+      "channelHint": "Relay channel index (0 = first channel).",
+      "relay": "Tasmota relay index",
+      "relayHint": "1 = POWER, 2 = POWER2, etc.",
+      "errors": {
+        "id": "The id must be a slug: lowercase, digits, - _ : and start with a letter or digit.",
+        "order": "Order must be an integer between 0 and 9999.",
+        "topic": "Invalid topic: no spaces or + / # wildcards.",
+        "invalid": "Check the highlighted fields."
+      },
+      "toasts": {
+        "created": "Device created",
+        "updated": "Device updated"
+      }
+    },
+    "sniffer": {
+      "listening": "Listening to the broker",
+      "idle": "Sniffer paused",
+      "removeFilter": "Remove filter",
+      "filterPlaceholder": "e.g. home/#",
+      "addFilter": "Add filter",
+      "clear": "Clear",
+      "hint": "Press the physical button on the device or trigger the sensor: raw messages appear here. Choose “Use this topic” to fill adapter and topics.",
+      "empty": "No messages yet: check the connection and press the device button.",
+      "useTopic": "Use this topic",
+      "detected": "Detected adapter: {{adapter}}"
+    },
+    "roomDialog": {
+      "createTitle": "New room",
+      "editTitle": "Edit room",
+      "description": "The room appears in the overview, navigation and filters.",
+      "namePlaceholder": "Garage",
+      "idHint": "The id is generated from the name and cannot change after creation.",
+      "errors": {
+        "name": "Room name is required.",
+        "order": "Order must be an integer between 0 and 9999.",
+        "invalid": "Check the fields."
+      },
+      "save": "Save room",
+      "create": "Create room",
+      "saving": "Saving…",
+      "created": "Room {{name}} created",
+      "toasts": {
+        "created": "Room created",
+        "updated": "Room updated"
+      }
     }
   }
 }

@@ -10,7 +10,7 @@ import { roomIdFromLabel } from '@/lib/rooms';
 import type {
   ClimateMode,
   ControlAction,
-  Device,
+  DeviceMetadata,
   FanSpeed,
   Scenario,
   ScenarioStep,
@@ -208,7 +208,7 @@ export function ScenarioForm({
   onCancel,
 }: {
   scenario?: Scenario;
-  devices: readonly Device[];
+  devices: readonly DeviceMetadata[];
   onSaved: () => void;
   onCancel: () => void;
 }) {

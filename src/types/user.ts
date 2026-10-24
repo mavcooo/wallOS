@@ -14,8 +14,30 @@ export interface SessionUser {
   allowedRooms: RoomId[] | null;
   active: boolean;
   isKioskDevice: boolean;
+  kioskDeviceId: string | null;
   lastAccess: string | null;
   pinLength: 4 | 5 | 6;
+}
+
+export interface UserCreateInput {
+  username: string;
+  displayName?: string;
+  role: UserRole;
+  isKioskDevice: boolean;
+  kioskDeviceId?: string | null;
+  pin: string;
+  password?: string;
+}
+
+export interface UserUpdateInput {
+  username?: string;
+  displayName?: string;
+  role?: UserRole;
+  isKioskDevice?: boolean;
+  kioskDeviceId?: string | null;
+  pin?: string;
+  password?: string;
+  active?: boolean;
 }
 
 export interface PinPolicy {

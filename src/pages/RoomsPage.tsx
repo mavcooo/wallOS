@@ -1,17 +1,19 @@
 import { Lightbulb, Power, RadioTower } from 'lucide-react';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useShallow } from 'zustand/react/shallow';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { DeviceCard } from '@/components/widgets/DeviceCard';
 import { CarouselDots } from '@/components/ui/carousel-dots';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
+import { useDevices, useRooms } from '@/hooks/useTopologyQuery';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { Device, RoomId } from '@/types/device';
+import type { DeviceMetadata, RoomId } from '@/types/device';
 
 function Group({
   title,
@@ -37,7 +39,7 @@ function Group({
   );
 }
 
-function groupByKind(devices: Device[]) {
+function groupByKind(devices: readonly DeviceMetadata[]) {
   return {
     lights: devices.filter((device) => device.kind === 'light'),
     climates: devices.filter((device) => device.kind === 'climate'),
@@ -47,22 +49,98 @@ function groupByKind(devices: Device[]) {
   };
 }
 
+/** Contatore online isolato: la pagina non osserva la disponibilità dei device. */
+const RoomOnlineBadge = memo(function RoomOnlineBadge({
+  deviceIds,
+}: {
+  deviceIds: readonly string[];
+}) {
+  const { t } = useTranslation();
+  const online = useHomeStore(
+    useShallow((state) => {
+      let count = 0;
+      for (const id of deviceIds) {
+        if (state.deviceStates[id]?.availability === 'online') count += 1;
+      }
+      return count;
+    }),
+  );
+
+  return (
+    <span className="rounded-full border border-line bg-panel px-2.5 py-1 text-[10px] text-fg-subtle">
+      {t('rooms.online', { online, total: deviceIds.length })}
+    </span>
+  );
+});
+
+/** Spegnimento gruppo: osserva solo le luci della stanza attiva. */
+const RoomLightsButton = memo(function RoomLightsButton({
+  lights,
+  roomLabel,
+}: {
+  lights: readonly DeviceMetadata[];
+  roomLabel: string;
+}) {
+  const { t } = useTranslation();
+  const { sendAction } = useMqttApi();
+  const requestPin = usePinGuard();
+  const lightsOn = useHomeStore(
+    useShallow((state) => {
+      let count = 0;
+      for (const light of lights) {
+        const row = state.deviceStates[light.id];
+        if (row?.kind === 'light' && row.state.on) count += 1;
+      }
+      return count;
+    }),
+  );
+
+  const turnOffLights = () => {
+    for (const light of lights) sendAction(light.id, { type: 'power', on: false });
+  };
+
+  const guardAndTurnOff = () => {
+    if (lights.some((light) => light.protected)) {
+      requestPin({
+        title: t('rooms.guardTitle'),
+        description: t('rooms.guardDescription', { room: roomLabel }),
+        onConfirm: turnOffLights,
+      });
+      return;
+    }
+    turnOffLights();
+  };
+
+  if (lights.length === 0) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={guardAndTurnOff}
+      disabled={lightsOn === 0}
+      className="flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-[11px] font-medium text-fg-muted transition-colors hover:text-fg disabled:opacity-40"
+    >
+      <Lightbulb className="size-3.5" />
+      {t('rooms.turnOff')}
+    </button>
+  );
+});
+
 export function RoomsPage() {
   const { t } = useTranslation();
   const room = useHomeStore((state) => state.ui.room);
   const setRoom = useHomeStore((state) => state.setRoom);
-  const devices = useHomeStore((state) => state.devices);
-  const requestPin = usePinGuard();
-  const { sendAction } = useMqttApi();
+  // Metadati e stanze sono server-state: la pagina non si ridisegna con la
+  // telemetria, solo le card e i contatori isolati lo fanno.
+  const devices = useDevices();
+  const allRooms = useRooms();
   const user = useCurrentUser();
 
-  // Stanze dinamiche: seed statico + aree scoperte via HA Discovery.
-  const allRooms = useHomeStore((state) => state.rooms);
   const rooms = user.allowedRooms
     ? allRooms.filter((candidate) => user.allowedRooms?.includes(candidate.id))
     : allRooms;
   const active = rooms.find((candidate) => candidate.id === room) ?? rooms[0];
-  const roomIds = rooms.map((candidate) => candidate.id);
+  const roomIds = useMemo(() => rooms.map((candidate) => candidate.id), [rooms]);
   const activeIndex = active ? rooms.findIndex((candidate) => candidate.id === active.id) : -1;
 
   // Direzione dell'ultimo swipe: decide da quale lato entra il contenuto.
@@ -91,6 +169,16 @@ export function RoomsPage() {
     [],
   );
 
+  const roomDevices = useMemo(
+    () => (active ? devices.filter((device) => device.room === active.id) : []),
+    [devices, active?.id],
+  );
+  const groups = useMemo(() => groupByKind(roomDevices), [roomDevices]);
+  const roomDeviceIds = useMemo(
+    () => roomDevices.map((device) => device.id),
+    [roomDevices],
+  );
+
   if (!active) {
     return (
       <p className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-fg-muted">
@@ -98,28 +186,6 @@ export function RoomsPage() {
       </p>
     );
   }
-
-  const roomDevices = Object.values(devices).filter((device) => device.room === active.id);
-  const { lights, climates, powers, media, sensors } = groupByKind(roomDevices);
-  const online = roomDevices.filter((device) => device.availability === 'online').length;
-
-  const turnOffLights = () => {
-    for (const light of lights) sendAction(light.id, { type: 'power', on: false });
-  };
-
-  const guardAndTurnOff = () => {
-    if (lights.some((light) => light.protected)) {
-      requestPin({
-        title: t('rooms.guardTitle'),
-        description: t('rooms.guardDescription', { room: active.label }),
-        onConfirm: turnOffLights,
-      });
-      return;
-    }
-    turnOffLights();
-  };
-
-  const lightsOn = lights.filter((light) => light.kind === 'light' && light.state.on).length;
 
   return (
     <div
@@ -151,20 +217,8 @@ export function RoomsPage() {
         </Tabs>
 
         <div className="flex items-center gap-2">
-          <span className="rounded-full border border-line bg-panel px-2.5 py-1 text-[10px] text-fg-subtle">
-            {t('rooms.online', { online, total: roomDevices.length })}
-          </span>
-          {lights.length > 0 ? (
-            <button
-              type="button"
-              onClick={guardAndTurnOff}
-              disabled={lightsOn === 0}
-              className="flex h-10 items-center gap-2 rounded-xl border border-line bg-panel px-3 text-[11px] font-medium text-fg-muted transition-colors hover:text-fg disabled:opacity-40"
-            >
-              <Lightbulb className="size-3.5" />
-              {t('rooms.turnOff')}
-            </button>
-          ) : null}
+          <RoomOnlineBadge deviceIds={roomDeviceIds} />
+          <RoomLightsButton lights={groups.lights} roomLabel={active.label} />
         </div>
       </div>
 
@@ -195,51 +249,51 @@ export function RoomsPage() {
           </p>
         ) : null}
 
-        {climates.length > 0 ? (
-          <Group title={t('rooms.groups.climate')} count={climates.length}>
+        {groups.climates.length > 0 ? (
+          <Group title={t('rooms.groups.climate')} count={groups.climates.length}>
             <div className="grid grid-cols-1 gap-3 2xl:grid-cols-2">
-              {climates.map((device) => (
-                <DeviceCard key={device.id} device={device} showFavorite />
+              {groups.climates.map((device) => (
+                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
               ))}
             </div>
           </Group>
         ) : null}
 
-        {lights.length > 0 ? (
-          <Group title={t('rooms.groups.lights')} count={lights.length}>
+        {groups.lights.length > 0 ? (
+          <Group title={t('rooms.groups.lights')} count={groups.lights.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-              {lights.map((device) => (
-                <DeviceCard key={device.id} device={device} showFavorite />
+              {groups.lights.map((device) => (
+                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
               ))}
             </div>
           </Group>
         ) : null}
 
-        {powers.length > 0 ? (
-          <Group title={t('rooms.groups.powers')} count={powers.length}>
+        {groups.powers.length > 0 ? (
+          <Group title={t('rooms.groups.powers')} count={groups.powers.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-              {powers.map((device) => (
-                <DeviceCard key={device.id} device={device} showFavorite />
+              {groups.powers.map((device) => (
+                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
               ))}
             </div>
           </Group>
         ) : null}
 
-        {media.length > 0 ? (
-          <Group title={t('rooms.groups.media')} count={media.length}>
+        {groups.media.length > 0 ? (
+          <Group title={t('rooms.groups.media')} count={groups.media.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {media.map((device) => (
-                <DeviceCard key={device.id} device={device} showFavorite />
+              {groups.media.map((device) => (
+                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
               ))}
             </div>
           </Group>
         ) : null}
 
-        {sensors.length > 0 ? (
-          <Group title={t('rooms.groups.sensors')} count={sensors.length}>
+        {groups.sensors.length > 0 ? (
+          <Group title={t('rooms.groups.sensors')} count={groups.sensors.length}>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {sensors.map((device) => (
-                <DeviceCard key={device.id} device={device} />
+              {groups.sensors.map((device) => (
+                <DeviceCard key={device.id} deviceId={device.id} />
               ))}
             </div>
           </Group>

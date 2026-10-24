@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next';
 
 import { LanguageSwitcher } from '@/components/settings/LanguageSwitcher';
 import { SunlightModeCard } from '@/components/settings/SunlightModeCard';
+import { TopologyManager } from '@/components/settings/TopologyManager';
 import { KIOSK_DEFAULTS } from '@/config/app.config';
 import { BURN_IN_INTERVAL_OPTIONS, BURN_IN_LIMITS } from '@/lib/burnIn';
 import { ADAPTERS } from '@/mqtt/adapters';
@@ -79,6 +80,8 @@ export function SettingsPage() {
   const burnIn = useHomeStore((state) => state.burnIn);
   const setBurnInSettings = useHomeStore((state) => state.setBurnInSettings);
   const changePin = useAuthStore((state) => state.changePin);
+  const elevated = useAuthStore((state) => state.elevated);
+  const role = useAuthStore((state) => state.user?.role);
   const { publishRaw, reconnect } = useMqttApi();
   const requestPin = usePinGuard();
   const pushToast = useToastStore((state) => state.push);
@@ -106,12 +109,28 @@ export function SettingsPage() {
       });
       return;
     }
-    updateBroker(draft);
-    pushToast({
-      title: t('broker.updatedTitle'),
-      description: t('broker.updatedDescription'),
-      tone: 'success',
-    });
+
+    const apply = () => {
+      updateBroker(draft);
+      pushToast({
+        title: t('broker.updatedTitle'),
+        description: t('broker.updatedDescription'),
+        tone: 'success',
+      });
+    };
+
+    // Connessione e credenziali del broker sono un'azione sensibile: senza
+    // elevazione PIN si apre l'unico PinProtectionDialog dell'app.
+    if (!elevated) {
+      requestPin({
+        title: t('broker.pinTitle'),
+        description: t('broker.pinDescription'),
+        action: t('broker.pinAction'),
+        onConfirm: apply,
+      });
+      return;
+    }
+    apply();
   };
 
   const regenerateClientId = () => {
@@ -497,6 +516,8 @@ export function SettingsPage() {
           </Card>
         </div>
       </div>
+
+      {role === 'admin' ? <TopologyManager /> : null}
 
       {/* Test topic */}
       <Card>

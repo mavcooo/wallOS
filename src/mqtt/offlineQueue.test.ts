@@ -23,18 +23,25 @@ afterEach(() => {
 async function setup() {
   vi.resetModules();
   const { useHomeStore } = await import('@/store/homeStore');
-  const { SEED_TOPOLOGY } = await import('@/test/fixtures');
-  // La topologia vive nel DB: il test la inietta come farebbe il bootstrap.
-  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
+  const { SEED_TOPOLOGY, deviceOf } = await import('@/test/fixtures');
+  // La topologia vive in TanStack Query: il test inietta le righe realtime
+  // come farebbe TopologyGate dopo il bootstrap.
+  useHomeStore.getState().syncDeviceStates(SEED_TOPOLOGY.devices);
   const queue = await import('@/mqtt/offlineQueue');
   const { useToastStore } = await import('@/store/toastStore');
-  return { useHomeStore, useToastStore, ...queue };
+  return {
+    useHomeStore,
+    useToastStore,
+    lightName: deviceOf(LIGHT_ID, 'light').name,
+    ...queue,
+  };
 }
 
 type Context = Awaited<ReturnType<typeof setup>>;
 
+/** La coda lavora sul runtime del device, non sui metadati. */
 function lightOf(ctx: Context) {
-  const device = ctx.useHomeStore.getState().devices[LIGHT_ID];
+  const device = ctx.useHomeStore.getState().deviceStates[LIGHT_ID];
   if (!device || device.kind !== 'light') throw new Error(`device ${LIGHT_ID} non trovato`);
   return device;
 }
@@ -52,7 +59,7 @@ function enqueueBrightness(ctx: Context, brightness: number, timeoutMs = TTL_MS)
 
   return ctx.useOfflineQueue.getState().enqueue({
     deviceId: LIGHT_ID,
-    deviceName: device.name,
+    deviceName: ctx.lightName,
     topic: COMMAND_TOPIC,
     payload: JSON.stringify({ brightness }),
     qos: 1,
@@ -93,7 +100,7 @@ describe('coda offline: TTL', () => {
     expect(ctx.useOfflineQueue.getState().commands).toHaveLength(0);
     expect(brightnessOf(ctx)).toBe(original);
     expect(lastToast(ctx)).toMatchObject({ title: 'Comando scaduto', tone: 'info' });
-    expect(lastToast(ctx)?.description).toContain(lightOf(ctx).name);
+    expect(lastToast(ctx)?.description).toContain(ctx.lightName);
   });
 
   it('il rollback non sovrascrive un valore arrivato nel frattempo dal broker', async () => {

@@ -34,17 +34,11 @@ function renderGate() {
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(fetchTopology).mockReset();
-  useHomeStore.setState({
-    topologyStatus: 'idle',
-    topologyError: null,
-    devices: {},
-    rooms: [],
-    scenarios: [],
-  });
+  useHomeStore.setState({ deviceStates: {} });
 });
 
 describe('TopologyGate · bootstrap asincrono', () => {
-  it('mostra lo splash brandizzato finché la topologia non arriva, poi idrata', async () => {
+  it('mostra lo splash brandizzato finché la topologia non arriva, poi allinea le righe realtime', async () => {
     let resolveFetch!: (topology: Topology) => void;
     vi.mocked(fetchTopology).mockImplementation(
       () =>
@@ -64,8 +58,8 @@ describe('TopologyGate · bootstrap asincrono', () => {
     });
 
     expect(await screen.findByText('casa pronta')).toBeInTheDocument();
-    expect(useHomeStore.getState().topologyStatus).toBe('ready');
-    expect(Object.keys(useHomeStore.getState().devices)).toHaveLength(
+    // La topologia resta in TanStack Query; lo store riceve solo il runtime.
+    expect(Object.keys(useHomeStore.getState().deviceStates)).toHaveLength(
       SEED_TOPOLOGY.devices.length,
     );
     // La risposta valida alimenta la cache per il prossimo avvio offline.
@@ -98,8 +92,6 @@ describe('TopologyGate · bootstrap asincrono', () => {
     await userEvent.click(useCache);
 
     expect(await screen.findByText('casa pronta')).toBeInTheDocument();
-    expect(useHomeStore.getState().topologyStatus).toBe('ready');
-    expect(useHomeStore.getState().rooms).toHaveLength(SEED_TOPOLOGY.rooms.length);
-    expect(useHomeStore.getState().devices['light-living-main']).toBeDefined();
+    expect(useHomeStore.getState().deviceStates['light-living-main']).toBeDefined();
   });
 });

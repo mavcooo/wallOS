@@ -1,14 +1,15 @@
 import { createContext, useContext, type ReactNode } from 'react';
 
 import { useMqtt, type MqttApi } from '@/hooks/useMqtt';
-import { useHomeStore } from '@/store/homeStore';
+import { useDevices, useScenarios } from '@/hooks/useTopologyQuery';
 
 const MqttContext = createContext<MqttApi | null>(null);
 
 export function MqttProvider({ children }: { children: ReactNode }) {
-  // Gli scenari possono arrivare dopo il connect: lo store li idrata dal DB.
-  const scenarios = useHomeStore((state) => state.scenarios);
-  const api = useMqtt(scenarios);
+  // Topologia e scenari sono server-state: nessuna copia in homeStore.
+  const devices = useDevices();
+  const scenarios = useScenarios();
+  const api = useMqtt(scenarios, devices);
   return <MqttContext.Provider value={api}>{children}</MqttContext.Provider>;
 }
 

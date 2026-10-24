@@ -5,6 +5,7 @@ import { roomLabel } from '@/lib/rooms';
 import { ContrastToggle } from '@/components/settings/ContrastToggle';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useRooms } from '@/hooks/useTopologyQuery';
 import { useAuthStore } from '@/store/authStore';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
@@ -16,7 +17,7 @@ export function Header({ onStandby }: { onStandby: () => void }) {
   const { t } = useTranslation();
   const view = useHomeStore((state) => state.ui.view);
   const room = useHomeStore((state) => state.ui.room);
-  const rooms = useHomeStore((state) => state.rooms);
+  const rooms = useRooms();
   const setView = useHomeStore((state) => state.setView);
   const logout = useAuthStore((state) => state.logout);
   const user = useCurrentUser();

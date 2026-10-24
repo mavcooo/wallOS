@@ -1,4 +1,4 @@
-import type { Device } from '@/types/device';
+import type { DeviceMetadata } from '@/types/device';
 import type { BrokerSettings } from '@/types/mqtt';
 
 /** Applica il prefisso ambiente/tenant ai topic dichiarati nel config. */
@@ -24,7 +24,7 @@ export function buildBrokerUrl(settings: BrokerSettings): string {
  * Topic da sottoscrivere per un device: quelli dichiarati nel seed più, per le
  * entità scoperte, tutti i canali di stato e di availability dell'annuncio.
  */
-export function stateTopics(device: Device): string[] {
+export function stateTopics(device: DeviceMetadata): string[] {
   const topics = new Set<string>();
   if (device.topics.state) topics.add(device.topics.state);
   if (device.topics.availability) topics.add(device.topics.availability);

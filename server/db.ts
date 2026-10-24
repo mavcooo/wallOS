@@ -53,6 +53,19 @@ export interface NewUser {
   allowedRooms: string[] | null;
 }
 
+export interface UserFields {
+  username?: string;
+  displayName?: string;
+  passwordHash?: string | null;
+  role?: UserRole;
+  pinHash?: string;
+  pinLength?: 4 | 5 | 6;
+  isKioskDevice?: boolean;
+  kioskDeviceId?: string | null;
+  allowedRooms?: string[] | null;
+  active?: boolean;
+}
+
 export interface NewRefreshToken {
   id: string;
   userId: string;
@@ -448,6 +461,56 @@ export class Database {
         user.allowedRooms === null ? null : JSON.stringify(user.allowedRooms),
       ],
     );
+  }
+
+  /** Aggiornamento parziale: solo i campi presenti nell'oggetto vengono scritti. */
+  async updateUser(id: string, fields: UserFields): Promise<void> {
+    const columns: string[] = [];
+    const values: unknown[] = [id];
+
+    const push = (column: string, value: unknown, cast = ''): void => {
+      values.push(value);
+      columns.push(`${column} = $${values.length}${cast}`);
+    };
+
+    if (fields.username !== undefined) push('username', fields.username.toLowerCase());
+    if (fields.displayName !== undefined) push('display_name', fields.displayName);
+    if (fields.passwordHash !== undefined) push('password_hash', fields.passwordHash);
+    if (fields.role !== undefined) push('role', fields.role);
+    if (fields.pinHash !== undefined) push('pin_hash', fields.pinHash);
+    if (fields.pinLength !== undefined) push('pin_length', fields.pinLength);
+    if (fields.isKioskDevice !== undefined) push('is_kiosk_device', fields.isKioskDevice);
+    if (fields.kioskDeviceId !== undefined) push('kiosk_device_id', fields.kioskDeviceId);
+    if (fields.allowedRooms !== undefined) {
+      push(
+        'allowed_rooms',
+        fields.allowedRooms === null ? null : JSON.stringify(fields.allowedRooms),
+        '::jsonb',
+      );
+    }
+    if (fields.active !== undefined) push('active', fields.active);
+
+    if (columns.length === 0) return;
+    columns.push('updated_at = now()');
+    await this.client.query(
+      `UPDATE users SET ${columns.join(', ')} WHERE id = $1::uuid`,
+      values,
+    );
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    await this.client.query('DELETE FROM users WHERE id = $1::uuid', [id]);
+  }
+
+  /** Admin attivi rimasti, escluso un utente: guardia anti-lockout. */
+  async countActiveAdmins(excludeId?: string): Promise<number> {
+    const { rows } = await this.client.query<{ count: number | string }>(
+      `SELECT count(*)::int AS count FROM users
+       WHERE role = 'admin' AND active = TRUE
+         AND ($1::uuid IS NULL OR id <> $1::uuid)`,
+      [excludeId ?? null],
+    );
+    return Number(rows[0]?.count ?? 0);
   }
 
   async setUserActive(id: string, active: boolean): Promise<void> {

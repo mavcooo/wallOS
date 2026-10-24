@@ -1,8 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useTopologyQuery } from '@/hooks/useTopologyQuery';
+import { TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
 import { formatTime } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
@@ -31,27 +33,36 @@ function StartupSplash() {
 
 /**
  * La casa arriva dal gateway (PostgreSQL via `GET /api/topology`), non da file
- * compilati. TanStack Query gestisce cache, retry e stato; questa gate idrata
- * lo store solo a risposta valida e, se il backend non risponde, offre il
- * retry oppure l'avvio con l'ultima topologia salvata sul dispositivo.
+ * compilati. TanStack Query è l'unica fonte dei metadati: questa gate attende
+ * la risposta, allinea la mappa realtime di Zustand e solo allora monta
+ * MqttProvider, così le sottoscrizioni partono con l'elenco corretto.
  *
- * MqttProvider è montato solo dopo l'idratazione: le sottoscrizioni ai topic
- * dei device partono quindi già con l'elenco corretto.
+ * Se il backend non risponde, l'ultima topologia salvata può avviare il
+ * pannello: viene reinserita nella cache Query e il flusso è identico.
  */
 export function TopologyGate({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
-  const status = useHomeStore((state) => state.topologyStatus);
-  const hydrateTopology = useHomeStore((state) => state.hydrateTopology);
+  const syncDeviceStates = useHomeStore((state) => state.syncDeviceStates);
   const pushToast = useToastStore((state) => state.push);
+  const queryClient = useQueryClient();
   const { data, isError, error, refetch, isFetching, cached } = useTopologyQuery();
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (data) hydrateTopology(data);
-  }, [data, hydrateTopology]);
+    if (!data) return;
+    // Metadati → righe realtime: preserva quelle già aggiornate dal broker.
+    syncDeviceStates(data.devices);
+    // Un refetch può eliminare la stanza attiva (cambio profilo, CRUD admin).
+    const { ui, setRoom } = useHomeStore.getState();
+    if (data.rooms.length > 0 && !data.rooms.some((room) => room.id === ui.room)) {
+      setRoom(data.rooms[0]?.id ?? ui.room);
+    }
+    setReady(true);
+  }, [data, syncDeviceStates]);
 
   const startFromCache = () => {
     if (!cached) return;
-    hydrateTopology(cached.topology);
+    queryClient.setQueryData(TOPOLOGY_QUERY_KEY, cached.topology);
     pushToast({
       title: t('gate.cachedTitle'),
       description: t('gate.cachedDescription', { time: formatTime(new Date(cached.savedAt)) }),
@@ -59,8 +70,7 @@ export function TopologyGate({ children }: { children: ReactNode }) {
     });
   };
 
-  // Già idratata (query precedente, cache o test): nessuno splash superfluo.
-  if (status === 'ready') return <>{children}</>;
+  if (ready && data) return <>{children}</>;
 
   if (isError) {
     const message = error instanceof Error ? error.message : t('gate.topologyError');
@@ -111,6 +121,6 @@ export function TopologyGate({ children }: { children: ReactNode }) {
     );
   }
 
-  // `isPending`, oppure dati arrivati ma store non ancora idratato dall'effect.
+  // `isPending`, oppure dati arrivati ma mappa realtime non ancora allineata.
   return <StartupSplash />;
 }

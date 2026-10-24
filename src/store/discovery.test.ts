@@ -1,24 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  DISCOVERY_CACHE_KEY,
+  forgetDiscoveredDevice,
+  mergeTopologyWithDiscovery,
+  readDiscoverySnapshot,
+  rememberDiscoveredDevice,
+  withDiscoveredDevice,
+  withoutDiscoveredDevice,
+} from '@/lib/discovery';
+import { useHomeStore } from '@/store/homeStore';
 import { normalizeDiscovery, parseDiscoveryTopic } from '@/mqtt/discovery/normalize';
 import { parseDiscoveryPayload } from '@/mqtt/discovery/types';
+import { SEED_TOPOLOGY } from '@/test/fixtures';
 import type { Device } from '@/types/device';
-
-const STORAGE_KEY = 'domus-kiosk-store';
 
 beforeEach(() => {
   localStorage.clear();
+  useHomeStore.setState({ deviceStates: {} });
 });
 
 afterEach(() => {
-  vi.resetModules();
+  vi.restoreAllMocks();
 });
 
 /** Device come lo produrrebbe il bridge a partire dall'annuncio HA. */
-function announced(
-  topic: string,
-  config: Record<string, unknown>,
-): Device {
+function announced(topic: string, config: Record<string, unknown>): Device {
   const ref = parseDiscoveryTopic(topic, ['homeassistant']);
   const parsed = parseDiscoveryPayload(JSON.stringify(config));
   if (!ref || !parsed) throw new Error('annuncio non valido');
@@ -44,41 +51,28 @@ const presaGarage = () =>
     dev: { name: 'Presa', suggested_area: 'Garage' },
   });
 
-async function loadStore() {
-  vi.resetModules();
-  const { useHomeStore } = await import('@/store/homeStore');
-  // Bootstrap come in produzione: la topologia arriva dal server, non da un file.
-  const { SEED_TOPOLOGY } = await import('@/test/fixtures');
-  useHomeStore.getState().hydrateTopology(SEED_TOPOLOGY);
-  return useHomeStore;
-}
+describe('discovery · estensione della topologia in cache', () => {
+  it('un’area che corrisponde a una stanza del server riusa quella stanza', () => {
+    const result = withDiscoveredDevice(SEED_TOPOLOGY, pianta());
 
-describe('store · device scoperti e stanze', () => {
-  it('un’area che corrisponde a una stanza del seed riusa quella stanza', async () => {
-    const store = await loadStore();
-    const device = pianta();
-
-    store.getState().applyDiscoveryUpsert(device);
-
-    const saved = store.getState().devices['ha:light:pianta'];
-    expect(saved?.room).toBe('living');
-    expect(store.getState().rooms).toHaveLength(7); // 6 seed + “Non assegnati”
+    expect(result.device.room).toBe('living');
+    expect(result.topology.devices).toHaveLength(SEED_TOPOLOGY.devices.length + 1);
+    expect(result.topology.rooms).toHaveLength(SEED_TOPOLOGY.rooms.length);
   });
 
-  it('un’area sconosciuta crea una stanza nuova, una volta sola', async () => {
-    const store = await loadStore();
+  it('un’area sconosciuta crea una stanza nuova, una volta sola', () => {
+    let topology = withDiscoveredDevice(SEED_TOPOLOGY, presaGarage()).topology;
+    topology = withDiscoveredDevice(topology, pianta()).topology;
 
-    store.getState().applyDiscoveryUpsert(presaGarage());
-    store.getState().applyDiscoveryUpsert(pianta());
-
-    const garage = store.getState().rooms.find((room) => room.label === 'Garage');
+    const garage = topology.rooms.find((room) => room.label === 'Garage');
     expect(garage).toMatchObject({ id: 'garage', label: 'Garage' });
-    expect(store.getState().devices['ha:switch:presa']?.room).toBe('garage');
-    expect(store.getState().rooms.filter((room) => room.id === 'garage')).toHaveLength(1);
+    expect(topology.devices.find((device) => device.id === 'ha:switch:presa')?.room).toBe(
+      'garage',
+    );
+    expect(topology.rooms.filter((room) => room.id === 'garage')).toHaveLength(1);
   });
 
-  it('senza suggested_area il device finisce in “Non assegnati”', async () => {
-    const store = await loadStore();
+  it('senza suggested_area il device finisce in “Non assegnati”', () => {
     const sensore = announced('homeassistant/sensor/temp/config', {
       name: 'Temperatura',
       stat_t: 'casa/temp',
@@ -86,87 +80,85 @@ describe('store · device scoperti e stanze', () => {
       unit_of_meas: '°C',
     });
 
-    store.getState().applyDiscoveryUpsert(sensore);
+    const result = withDiscoveredDevice(SEED_TOPOLOGY, sensore);
 
-    expect(store.getState().devices['ha:sensor:temp']?.room).toBe('unassigned');
+    expect(result.device.room).toBe('unassigned');
   });
 
-  it('un re-annuncio aggiorna i metadati ma non azzera stato e preferito', async () => {
-    const store = await loadStore();
+  it('un re-annuncio aggiorna i metadati ma non azzera lo stato runtime', () => {
     const device = pianta();
-
-    store.getState().applyDiscoveryUpsert(device);
-    store.getState().toggleFavorite('ha:light:pianta');
-    store.getState().applyDecoded('ha:light:pianta', { kind: 'light', state: { brightness: 88 } });
+    const first = withDiscoveredDevice(SEED_TOPOLOGY, device);
+    useHomeStore.getState().syncDeviceStates(first.topology.devices);
+    useHomeStore.getState().toggleFavorite('ha:light:pianta');
+    useHomeStore
+      .getState()
+      .applyDecoded('ha:light:pianta', { kind: 'light', state: { brightness: 88 } });
 
     // Retained che arriva al reconnect: stessa entità, stessa configurazione.
-    store.getState().applyDiscoveryUpsert(device);
+    const second = withDiscoveredDevice(first.topology, device);
+    useHomeStore.getState().syncDeviceStates(second.topology.devices);
 
-    const saved = store.getState().devices['ha:light:pianta'];
-    expect(saved?.favorite).toBe(true);
-    expect(saved?.kind === 'light' && saved.state.brightness).toBe(88);
+    const row = useHomeStore.getState().deviceStates['ha:light:pianta'];
+    expect(row?.favorite).toBe(true);
+    expect(row?.kind === 'light' && row.state.brightness).toBe(88);
   });
 
-  it('la rimozione elimina solo l’entità ritirata', async () => {
-    const store = await loadStore();
-    store.getState().applyDiscoveryUpsert(pianta());
-    store.getState().applyDiscoveryUpsert(presaGarage());
+  it('la rimozione elimina solo l’entità ritirata e conserva la stanza', () => {
+    let topology = withDiscoveredDevice(SEED_TOPOLOGY, presaGarage()).topology;
+    topology = withDiscoveredDevice(topology, pianta()).topology;
 
-    store.getState().applyDiscoveryRemove('ha:light:pianta');
+    const next = withoutDiscoveredDevice(topology, 'ha:light:pianta');
 
-    expect(store.getState().devices['ha:light:pianta']).toBeUndefined();
-    expect(store.getState().devices['ha:switch:presa']).toBeDefined();
+    expect(next.devices.some((device) => device.id === 'ha:light:pianta')).toBe(false);
+    expect(next.devices.some((device) => device.id === 'ha:switch:presa')).toBe(true);
     // La stanza resta: può ospitare altre entità o essere riusata.
-    expect(store.getState().rooms.some((room) => room.id === 'garage')).toBe(true);
+    expect(next.rooms.some((room) => room.id === 'garage')).toBe(true);
   });
 
-  it('rimuovere un’entità sconosciuta non cambia nulla', async () => {
-    const store = await loadStore();
-    const before = store.getState().devices;
-
-    store.getState().applyDiscoveryRemove('ha:light:inesistente');
-
-    expect(store.getState().devices).toBe(before);
+  it('rimuovere un’entità sconosciuta non cambia la topologia', () => {
+    expect(withoutDiscoveredDevice(SEED_TOPOLOGY, 'ha:light:inesistente')).toBe(
+      SEED_TOPOLOGY,
+    );
   });
 });
 
-describe('store · cache dei device scoperti', () => {
-  it('persiste device e stanze e li rilegge al riavvio', async () => {
-    const first = await loadStore();
-    first.getState().applyDiscoveryUpsert(presaGarage());
+describe('discovery · cache locale delle entità scoperte', () => {
+  it('persiste device e stanze e li riapplica al prossimo bootstrap', () => {
+    const result = withDiscoveredDevice(SEED_TOPOLOGY, presaGarage());
+    rememberDiscoveredDevice(result.device, result.room);
 
-    const raw = localStorage.getItem(STORAGE_KEY);
-    expect(raw).toContain('ha:switch:presa');
+    // Il backend non conosce l'entità: la risposta HTTP viene fusa con la cache.
+    const merged = mergeTopologyWithDiscovery(SEED_TOPOLOGY);
 
-    const reloaded = await loadStore();
-    const cached = reloaded.getState().devices['ha:switch:presa'];
-
-    expect(cached).toBeDefined();
-    // La disponibilità di una sessione fa non vale più finché il broker parla.
-    expect(cached?.availability).toBe('unknown');
-    expect(reloaded.getState().rooms.some((room) => room.id === 'garage')).toBe(true);
+    expect(merged.devices.some((device) => device.id === 'ha:switch:presa')).toBe(true);
+    expect(merged.rooms.some((room) => room.id === 'garage')).toBe(true);
+    expect(readDiscoverySnapshot().devices).toHaveLength(1);
   });
 
-  it('lega i device statici dal seed e non li duplica dalla cache', async () => {
-    const store = await loadStore();
+  it('non scrive i device del server nella cache della discovery', () => {
+    mergeTopologyWithDiscovery(SEED_TOPOLOGY);
 
-    expect(store.getState().devices['light-living-main']?.discovery).toBeUndefined();
-    expect(
-      localStorage.getItem(STORAGE_KEY) ?? '',
-      'il seed non deve finire in cache',
-    ).not.toContain('light-living-main');
+    const raw = localStorage.getItem(DISCOVERY_CACHE_KEY) ?? '';
+    expect(raw).not.toContain('light-living-main');
   });
 
-  it('tollera uno stato persistito della vecchia versione (senza stanze né cache)', async () => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ state: { broker: { host: 'vecchio.casa.lan' } }, version: 1 }),
+  it('forget rimuove l’entità ma lascia la stanza disponibile', () => {
+    const result = withDiscoveredDevice(SEED_TOPOLOGY, presaGarage());
+    rememberDiscoveredDevice(result.device, result.room);
+
+    forgetDiscoveredDevice('ha:switch:presa');
+
+    const snapshot = readDiscoverySnapshot();
+    expect(snapshot.devices).toHaveLength(0);
+    expect(snapshot.rooms.some((room) => room.id === 'garage')).toBe(true);
+  });
+
+  it('tollera una cache corrotta senza bloccare il bootstrap', () => {
+    localStorage.setItem(DISCOVERY_CACHE_KEY, 'non-json');
+
+    expect(readDiscoverySnapshot()).toEqual({ devices: [], rooms: [] });
+    expect(mergeTopologyWithDiscovery(SEED_TOPOLOGY).devices).toHaveLength(
+      SEED_TOPOLOGY.devices.length,
     );
-
-    const store = await loadStore();
-
-    expect(store.getState().broker.host).toBe('vecchio.casa.lan');
-    expect(store.getState().rooms).toHaveLength(7);
-    expect(store.getState().devices['light-living-main']).toBeDefined();
   });
 });

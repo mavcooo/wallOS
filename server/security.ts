@@ -236,6 +236,7 @@ export function toPublicUser(user: UserRow): PublicUser {
     allowedRooms: parseAllowedRooms(user.allowed_rooms),
     active: Boolean(user.active),
     isKioskDevice: Boolean(user.is_kiosk_device),
+    kioskDeviceId: user.kiosk_device_id,
     lastAccess: user.last_access,
     pinLength: user.pin_length === 6 ? 6 : user.pin_length === 5 ? 5 : 4,
   };

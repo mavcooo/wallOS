@@ -379,7 +379,9 @@
       "create": "Crea dispositivo",
       "fieldMapObject": "deve essere un oggetto",
       "fieldMapStrings": "i valori devono essere stringhe",
-      "fieldMapInvalid": "fieldMap non valido: {{reason}}"
+      "fieldMapInvalid": "fieldMap non valido: {{reason}}",
+      "nameRequired": "Il nome è obbligatorio.",
+      "roomRequired": "Scegli una stanza."
     },
     "scenario": {
       "namePlaceholder": "Buonanotte",

@@ -3,10 +3,20 @@ import { QueryClient } from '@tanstack/react-query';
 /** Unica chiave della topologia: invalidarla ricarica stanze e device. */
 export const TOPOLOGY_QUERY_KEY = ['topology'] as const;
 
+/** Elenco profili: gli utenti sono server-state, non uno slice di authStore. */
+export const USERS_QUERY_KEY = ['users'] as const;
+
+/**
+ * I metadati cambiano solo da Amministrazione: 15 minuti di `staleTime`
+ * evitano refetch inutili su un pannello sempre acceso. Le mutazioni admin e il
+ * cambio profilo invalidano la chiave in modo esplicito.
+ */
+export const TOPOLOGY_STALE_TIME = 15 * 60_000;
+
 /**
  * Parametri pensati per un pannello in LAN, sempre acceso:
- * - `staleTime` 5 minuti: la topologia cambia solo da Amministrazione, non a
- *   ogni render; il refetch manuale resta disponibile.
+ * - `staleTime` 5 minuti come default: la topologia usa un override più lungo
+ *   (`TOPOLOGY_STALE_TIME`), il refetch manuale resta disponibile.
  * - `retry` 3 con backoff breve: un riavvio del gateway dura pochi secondi,
  *   un tablet che mostra subito errore reagisce peggio.
  * - niente refetch on focus: sul kiosk la finestra non perde mai il focus, ma
