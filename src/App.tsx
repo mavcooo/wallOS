@@ -1,8 +1,10 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { Lock } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AuthGate } from '@/components/auth/AuthGate';
+import { QuerySessionBoundary } from '@/components/auth/QuerySessionBoundary';
 import { RequireRole } from '@/components/auth/RequireRole';
 import { TopologyGate } from '@/components/auth/TopologyGate';
 import { AppShell } from '@/components/layout/AppShell';
@@ -14,6 +16,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { canView } from '@/lib/permissions';
+import { createQueryClient } from '@/lib/queryClient';
 import { cn } from '@/lib/utils';
 import { MqttProvider } from '@/mqtt/MqttProvider';
 import { AdminPage } from '@/pages/AdminPage';
@@ -166,9 +169,15 @@ export default function App() {
   // Il tema alto contrasto vive a livello applicazione: `data-contrast` su
   // <html> è già attivo sul lock screen, prima che l'utente faccia login.
   useHighContrast();
+  // Un client per albero React: in StrictMode l'initializer viene scartato al
+  // doppio render di sviluppo, senza condividere cache tra test o mount.
+  const [queryClient] = useState(createQueryClient);
 
   return (
-    <>
+    <QueryClientProvider client={queryClient}>
+      {/* Cache della topologia legata alla sessione: cambio profilo → refetch,
+          logout → query eliminata. */}
+      <QuerySessionBoundary />
       {/* Health del database a livello applicazione: notifiche e badge anche
           sul lock screen, prima che la topologia sia caricata. */}
       <DatabaseHealthMonitor />
@@ -182,6 +191,6 @@ export default function App() {
         </TopologyGate>
       </AuthGate>
       <Toaster />
-    </>
+    </QueryClientProvider>
   );
 }

@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.server.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "baseUrl": ".",
+    "paths": { "@/*": ["./src/*"] },
+    "outDir": "./dist-server",
+    "rootDir": ".",
+    "sourceMap": false,
+    "declaration": false,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.build-server.tsbuildinfo"
+  },
+  "include": ["server/**/*.ts", "src/types/**/*.ts"],
+  "exclude": ["server/**/*.test.ts"]
+}

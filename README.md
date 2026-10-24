@@ -130,6 +130,34 @@ In alternativa i valori iniziali del broker arrivano dalle variabili d'ambiente
 `MQTT_*` (elenco e precedenza in `.env.example` / `INFISICAL.md`): se almeno una
 è impostata l'app parte con la modalità demo spenta.
 
+### Docker (API + PostgreSQL + broker MQTT)
+`Dockerfile` è multi-stage su Node 24 Alpine: compila solo il servizio
+(`npm run build:server`), l'immagine finale contiene le dipendenze di produzione,
+gira con l'utente `node` e ha un healthcheck su `/api/health` (503 = unhealthy).
+`docker-compose.yml` avvia `api`, `db` (PostgreSQL 17, volume `wallos-db`) e
+`mqtt` (Mosquitto con 1883 e WebSocket 9001).
+
+```bash
+export POSTGRES_PASSWORD='...'
+export JWT_SECRET='...almeno 32 caratteri...'
+export ADMIN_PASSWORD='...almeno 10 caratteri...'
+export ADMIN_PIN=13579
+export KIOSK_PIN=24680
+docker compose up -d --build
+docker compose logs -f api
+```
+
+- API su `http://<host>:8787`. Il frontend statico (`npm run build` → `dist/`)
+  va servito da nginx/Caddy con `location /api { proxy_pass http://api:8787; }`:
+  il browser resta same-origin e i cookie `SameSite=Strict` continuano a valere.
+- Broker: il pannello usa `ws://<host>:9001` (MQTT WebSocket), i dispositivi
+  `1883`. La configurazione `docker/mosquitto.conf` è **anonima**: abilita
+  `password_file` e ACL per topic prima di esporla fuori dalla LAN.
+- `COOKIE_SECURE=false` solo in HTTP locale; con TLS metti `true` e
+  `AUTH_TRUST_PROXY=true` dietro il reverse proxy.
+- In produzione il servizio rifiuta i PIN demo: `ADMIN_PIN` e `KIOSK_PIN`
+  devono essere espliciti e diversi da `2468`/`1234`.
+
 ### Discovery Home Assistant (opzionale)
 
 Fuori dalla modalità demo il kiosk si sottoscrive a `homeassistant/+/+/config` e
@@ -176,6 +204,32 @@ Endpoint (tutti con sessione valida, mutazioni solo admin):
 | POST/PATCH/DELETE | `/api/devices[/:id]` | CRUD dispositivi |
 | POST/PATCH/DELETE | `/api/scenarios[/:id]` | CRUD scenari |
 
+### Bootstrap asincrono, cache e avvio offline
+
+Il client non importa nessun `*.config.ts` di stanze/device/utenti: la casa
+arriva da `GET /api/topology`, la sessione da `/api/auth/*`.
+
+- **TanStack Query** con un `QueryClient` per albero (`src/lib/queryClient.ts`):
+  `staleTime` 5 min, `gcTime` 30 min, `retry` 3 con backoff 0,8→1,6→3,2 s,
+  `refetchOnWindowFocus: false` (kiosk) e refetch al ritorno della rete.
+- `useTopologyQuery` (`src/hooks/useTopologyQuery.ts`) espone la query e l'ultima
+  topologia salvata in `localStorage` (`domus.topology.cache`, scadenza 30
+  giorni). La cache è validata con `parseTopology`: un payload corrotto non
+  idrata mai lo store.
+- `TopologyGate`: splash brandizzato durante il caricamento; in errore schermata
+  con **Riprova** e, se esiste una cache, **Avvia con i dati salvati** (i comandi
+  riprendono quando il broker torna raggiungibile). All'arrivo dei dati idrata
+  Zustand; `MqttProvider` è montato **dopo**, quindi le sottoscrizioni ai topic
+  partono già complete. Un refetch con device nuovi sottoscrive i topic mancanti
+  senza riaprire il socket.
+- Le mutazioni admin continuano a usare `reloadTopology`, che aggiorna lo store
+  senza splash; TanStack Query resta la fonte del primo bootstrap.
+
+Non esiste uno script `migrate-configs-to-db.ts` perché i vecchi `*.config.ts`
+non sono più nel repository: la migrazione è già il seed PostgreSQL
+(`server/seed.ts` + `server/seed-data/*`), idempotente al primo avvio e
+replicabile su un database esistente con gli endpoint admin.
+
 ---
 
 ## 2. Struttura del progetto
@@ -186,6 +240,9 @@ domus-kiosk/
 ├── vite.config.ts                  # proxy /api -> auth service
 ├── vitest.config.ts / vitest.config.server.ts
 ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.server.json
+├── tsconfig.build-server.json      # emit del servizio per l'immagine Docker
+├── Dockerfile / docker-compose.yml / .dockerignore
+├── docker/mosquitto.conf           # 1883 TCP + 9001 WebSocket (dev/LAN)
 ├── server/                         # API auth + topologia (Node + TypeScript)
 │   ├── index.ts                    # bootstrap, .env, graceful shutdown
 │   ├── app.ts                      # Fastify, cookie, CORS, helmet, CSRF origin
@@ -218,8 +275,10 @@ domus-kiosk/
 │   ├── lib/
 │   │   ├── adminApi.ts             # CRUD stanze/device/scenari (ruolo admin)
 │   │   ├── contrast.ts             # preferenza alto contrasto + guard API
+│   │   ├── queryClient.ts          # TanStack Query: staleTime, retry LAN
 │   │   ├── rooms.ts                # helper puri (slug, etichette), nessun seed
-│   │   └── topologyApi.ts          # GET /api/topology + refresh su 401
+│   │   ├── topologyApi.ts          # GET /api/topology + refresh su 401
+│   │   └── topologyCache.ts        # ultima topologia in localStorage (offline)
 │   │
 │   ├── mqtt/
 │   │   ├── adapters/
@@ -244,6 +303,7 @@ domus-kiosk/
 │   │   ├── useClock.ts             # orologio senza drift
 │   │   ├── useSwipeNavigation.ts   # gesture orizzontali pagine/stanze
 │   │   ├── useHighContrast.ts      # tema, prefers-contrast, sensore di luce
+│   │   ├── useTopologyQuery.ts     # topologia dal gateway + cache offline
 │   │   └── useCurrentUser.ts       # sessione server + restrizioni UI
 │   │
 │   ├── store/
@@ -696,9 +756,14 @@ npm run test:all       # frontend + server
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
 - `npm run build` → build Vite OK.
-- `npm test` → 37 file, 258 test frontend (jsdom).
+- `npm run build:server` → emit ESM in `dist-server/` (stesso comando usato dal
+  Dockerfile).
+- `npm test` → 39 file, 265 test frontend (jsdom).
 - `npm run test:coverage` → adapters: 96.7% statement, 99.2% righe, 100%
   funzioni, 82.4% rami (sopra le soglie).
+- Bootstrap: 3 test RTL su `TopologyGate` (splash brandizzato, retry che
+  rifà la query, avvio dalla cache con store idratato) e 4 sulla cache
+  (`localStorage`, scadenza, JSON corrotto, topologia malformata).
 - i18n: parità chiavi `it`/`en` per tutti i namespace, cambio lingua a caldo con
   persistenza in `localStorage` e `document.documentElement.lang`, fallback
   italiano e test a compile time sulle chiavi tipizzate.
@@ -764,6 +829,16 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 - La disponibilità per-device (`availability`) è nello store ma non è mostrata
   nei widget: l'header espone solo lo stato del broker. Il test widget verifica
   che un device `offline` continui a renderizzare le ultime metriche note.
+- Lo storage è PostgreSQL (PGlite nei test): SQLite non è implementato. Per un
+  driver aggiuntivo va astratto il repository in `server/db.ts`; la URL resta
+  l'unico punto di configurazione (`DATABASE_URL`).
+- Il bootstrap non espone l'elenco profili a tutti i ruoli: `/api/topology`
+  restituisce stanze/device/scenari, mentre utenti e PIN restano dietro
+  `/api/auth/users` (admin o kiosk elevato). È una scelta di sicurezza, non una
+  mancanza: un pannello kiosk non deve leggere username e ruoli della casa.
+- Docker non è installato in questo ambiente: immagine e compose sono stati
+  verificati con `npm run build:server` e revisione statica, non con un
+  `docker compose up` reale.
 - La UI di amministrazione non gestisce ancora `metadata` (discovery e stato
   iniziale): per adapter complessi si interviene con SQL o col seed.
 - L'editor dei passi non blocca l'eliminazione di un device citato da uno

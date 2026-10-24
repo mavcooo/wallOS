@@ -91,7 +91,11 @@
   "gate": {
     "sessionLoading": "Verifica sessione…",
     "topologyLoading": "Carico la casa…",
-    "topologyError": "Configurazione della casa non disponibile"
+    "topologyError": "Configurazione della casa non disponibile",
+    "useCache": "Avvia con i dati salvati",
+    "cacheHint": "Ultima configurazione salvata su questo pannello: {{time}}.",
+    "cachedTitle": "Avvio offline",
+    "cachedDescription": "Uso la configurazione salvata alle {{time}}. I comandi riprenderanno quando il broker torna raggiungibile."
   },
   "swipe": {
     "page": "Pagina",

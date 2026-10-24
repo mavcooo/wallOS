@@ -60,6 +60,20 @@ function logRaw(
 }
 
 /** I device scoperti usano topic assoluti decisi dall'annuncio HA. */
+/**
+ * Impronta dei topic dichiarati dai device. `devices` cambia identità a ogni
+ * patch di stato: confrontare l'oggetto farebbe risottoscrivere a ogni
+ * messaggio, questa stringa cambia solo quando entra o esce un device.
+ */
+function subscriptionSignature(devices: Record<string, Device>): string {
+  return Object.values(devices)
+    .map(
+      (device) =>
+        `${device.id}:${stateTopics(device).join(',')}:${device.topics.availability ?? ''}`,
+    )
+    .join('|');
+}
+
 function findDiscoveryDeviceByTopic(devices: Record<string, Device>, topic: string): Device | null {
   for (const device of Object.values(devices)) {
     if (!device.discovery) continue;
@@ -437,6 +451,17 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       openSocket();
     };
 
+    // La topologia può essere ricaricata mentre il socket è già connesso
+    // (refetch di TanStack Query, CRUD admin): i topic dei nuovi device vanno
+    // sottoscritti senza riaprire la connessione.
+    let subscribedSignature = subscriptionSignature(useHomeStore.getState().devices);
+    const unsubscribeDevices = useHomeStore.subscribe((state) => {
+      const next = subscriptionSignature(state.devices);
+      if (next === subscribedSignature) return;
+      subscribedSignature = next;
+      if (client?.connected) subscribeAll(client);
+    });
+
     if (settings.demoMode) {
       setStatus('connecting');
       publishRef.current = () => {
@@ -479,6 +504,7 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
         buffer.dispose();
         detachQueueRuntime();
         discoveryBridge.dispose();
+        unsubscribeDevices();
         window.clearTimeout(startTimer);
         window.clearInterval(demoTimer);
       };
@@ -494,6 +520,7 @@ export function useMqtt(scenarios: readonly Scenario[]): MqttApi {
       // Flush finale: l'ultimo campione non va perso allo smontaggio.
       buffer.dispose();
       discoveryBridge.dispose();
+      unsubscribeDevices();
       window.clearTimeout(reconnectTimer);
       window.clearInterval(probeTimer);
       closeClient();

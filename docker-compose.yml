@@ -1,0 +1,59 @@
+# Stack minimo per il gateway wallOS: API Fastify + PostgreSQL + broker MQTT.
+# Il frontend (dist/) va servito a parte (nginx, Caddy, ...) con proxy /api su
+# `api:8787`. Richiede le variabili indicate con `:?` (vedi README, "Docker").
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: wallos
+      POSTGRES_USER: wallos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?imposta POSTGRES_PASSWORD}
+    volumes:
+      - wallos-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U wallos -d wallos']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # Nessuna porta pubblicata: il database resta raggiungibile solo dallo stack.
+    expose:
+      - '5432'
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - '1883:1883' # MQTT TCP (dispositivi)
+      - '9001:9001' # MQTT over WebSocket (pannello nel browser)
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      mqtt:
+        condition: service_started
+    ports:
+      - '8787:8787'
+    environment:
+      NODE_ENV: production
+      # In container il servizio deve ascoltare su tutte le interfacce.
+      AUTH_HOST: 0.0.0.0
+      AUTH_PORT: 8787
+      DATABASE_URL: postgres://wallos:${POSTGRES_PASSWORD}@db:5432/wallos
+      JWT_SECRET: ${JWT_SECRET:?imposta JWT_SECRET (>= 32 caratteri)}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?imposta ADMIN_PASSWORD (>= 10 caratteri)}
+      ADMIN_PIN: ${ADMIN_PIN:?imposta ADMIN_PIN (4-6 cifre, diverso dai default)}
+      KIOSK_USERNAME: ${KIOSK_USERNAME:-kiosk}
+      KIOSK_DEVICE_ID: ${KIOSK_DEVICE_ID:-wall-panel-1}
+      KIOSK_PIN: ${KIOSK_PIN:?imposta KIOSK_PIN (4-6 cifre, diverso dai default)}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+
+volumes:
+  wallos-db:

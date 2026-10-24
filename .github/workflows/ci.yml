@@ -31,6 +31,9 @@ jobs:
       - name: Typecheck (strict)
         run: npm run typecheck
 
+      - name: Build del servizio (emit per Docker)
+        run: npm run build:server
+
       - name: Unit test + coverage
         # Include le soglie per src/mqtt/adapters/**: sotto soglia il job fallisce.
         run: npm run test:coverage

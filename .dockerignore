@@ -1,0 +1,13 @@
+node_modules
+dist
+dist-server
+coverage
+artifacts
+.git
+.github
+.env
+.env.*
+!.env.example
+tools
+server/**/*.test.ts
+*.log

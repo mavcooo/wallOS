@@ -41,15 +41,27 @@ export async function fetchTopology(): Promise<Topology> {
     );
   }
 
-  const data = (await response.json()) as Partial<Topology> | null;
+  return parseTopology(await response.json());
+}
+
+/**
+ * Valida il payload una sola volta, sia per la risposta HTTP sia per la cache
+ * locale: una topologia corrotta non deve mai idratare lo store.
+ */
+export function parseTopology(data: unknown): Topology {
+  const candidate = data as Partial<Topology> | null;
   if (
-    !data ||
-    !Array.isArray(data.rooms) ||
-    !Array.isArray(data.devices) ||
-    !Array.isArray(data.scenarios)
+    !candidate ||
+    !Array.isArray(candidate.rooms) ||
+    !Array.isArray(candidate.devices) ||
+    !Array.isArray(candidate.scenarios)
   ) {
     throw new Error('Risposta topologia non valida');
   }
 
-  return { rooms: data.rooms, devices: data.devices, scenarios: data.scenarios };
+  return {
+    rooms: candidate.rooms,
+    devices: candidate.devices,
+    scenarios: candidate.scenarios,
+  };
 }

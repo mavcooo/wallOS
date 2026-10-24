@@ -91,7 +91,11 @@
   "gate": {
     "sessionLoading": "Checking session…",
     "topologyLoading": "Loading the home…",
-    "topologyError": "Home configuration unavailable"
+    "topologyError": "Home configuration unavailable",
+    "useCache": "Start with saved data",
+    "cacheHint": "Last configuration saved on this panel: {{time}}.",
+    "cachedTitle": "Offline start",
+    "cachedDescription": "Using the configuration saved at {{time}}. Commands resume when the broker is reachable again."
   },
   "swipe": {
     "page": "Page",

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-server/
 dist-ssr/
 
 # Report di coverage (rigenerabili con npm run test:coverage)
