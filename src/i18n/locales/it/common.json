@@ -90,6 +90,7 @@
   },
   "gate": {
     "sessionLoading": "Verifica sessione…",
+    "pageLoading": "Carico la pagina…",
     "topologyLoading": "Carico la casa…",
     "topologyError": "Configurazione della casa non disponibile",
     "useCache": "Avvia con i dati salvati",

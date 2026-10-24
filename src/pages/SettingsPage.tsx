@@ -14,6 +14,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { LanguageSwitcher } from '@/components/settings/LanguageSwitcher';
+import { PerformanceModeCard } from '@/components/settings/PerformanceModeCard';
 import { SunlightModeCard } from '@/components/settings/SunlightModeCard';
 import { TopologyManager } from '@/components/settings/TopologyManager';
 import { KIOSK_DEFAULTS } from '@/config/app.config';
@@ -354,6 +355,7 @@ export function SettingsPage() {
         <div className="flex flex-col gap-4">
           <LanguageSwitcher />
           <SunlightModeCard />
+          <PerformanceModeCard />
           <Card>
             <CardHeader>
               <div>

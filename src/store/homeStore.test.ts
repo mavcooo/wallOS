@@ -110,6 +110,17 @@ describe('broker: ambiente e persist', () => {
     });
   });
 
+  it('disattiva la Performance Mode di default e ne persiste l’attivazione', async () => {
+    const store = await loadStore();
+
+    expect(store.getState().ui.performanceMode).toBe(false);
+
+    store.getState().setPerformanceMode(true);
+
+    const reloaded = await loadStore();
+    expect(reloaded.getState().ui.performanceMode).toBe(true);
+  });
+
   it('espone i default della protezione burn-in', async () => {
     const store = await loadStore();
 

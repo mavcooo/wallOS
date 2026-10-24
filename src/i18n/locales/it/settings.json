@@ -32,6 +32,15 @@
       "systemHint": "Il sistema operativo richiede comunque l’alto contrasto."
     }
   },
+  "performance": {
+    "title": "Performance Mode",
+    "description": "Fluidità massima su schermi lenti e Raspberry Pi",
+    "label": "Performance Mode (Schermi Lenti / Raspberry Pi)",
+    "hint": "Disabilita sfocature, trasparenze e ombre pesanti per garantire la massima fluidità su dispositivi poco potenti.",
+    "statusOn": "Attiva",
+    "statusOff": "Disattivata",
+    "note": "Rimuove backdrop blur, ombre e gradienti e riduce le micro-animazioni. La scelta resta salvata su questo dispositivo."
+  },
   "broker": {
     "title": "Broker MQTT",
     "description": "Connessione WebSocket in LAN · parametri applicati al pannello",

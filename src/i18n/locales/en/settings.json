@@ -32,6 +32,15 @@
       "systemHint": "The operating system still requests high contrast."
     }
   },
+  "performance": {
+    "title": "Performance mode",
+    "description": "Maximum smoothness on slow displays and Raspberry Pi",
+    "label": "Performance mode (slow displays / Raspberry Pi)",
+    "hint": "Disables blur, transparency and heavy shadows to keep the panel smooth on low-power hardware.",
+    "statusOn": "On",
+    "statusOff": "Off",
+    "note": "Removes backdrop blur, shadows and gradients and trims micro-animations. The choice stays saved on this device."
+  },
   "broker": {
     "title": "MQTT broker",
     "description": "LAN WebSocket connection · settings applied to the panel",

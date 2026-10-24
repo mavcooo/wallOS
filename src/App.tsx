@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Lock } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Loader2, Lock } from 'lucide-react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { AuthGate } from '@/components/auth/AuthGate';
@@ -14,18 +14,37 @@ import { Toaster } from '@/components/kiosk/Toaster';
 import { CarouselDots } from '@/components/ui/carousel-dots';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHighContrast } from '@/hooks/useHighContrast';
+import { usePerformanceMode } from '@/hooks/usePerformanceMode';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { canView } from '@/lib/permissions';
 import { createQueryClient } from '@/lib/queryClient';
 import { cn } from '@/lib/utils';
 import { MqttProvider } from '@/mqtt/MqttProvider';
-import { AdminPage } from '@/pages/AdminPage';
-import { EnergyPage } from '@/pages/EnergyPage';
-import { OverviewPage } from '@/pages/OverviewPage';
-import { RoomsPage } from '@/pages/RoomsPage';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { UsersPage } from '@/pages/UsersPage';
 import { useHomeStore, type ViewId } from '@/store/homeStore';
+
+/**
+ * Le viste sono chunk separati: l'avvio carica solo la pagina corrente, non
+ * amministrazione, utenti, impostazioni e i loro form. Il service worker le
+ * precarica comunque in background, quindi la navigazione successiva è locale.
+ */
+const OverviewPage = lazy(() =>
+  import('@/pages/OverviewPage').then((module) => ({ default: module.OverviewPage })),
+);
+const RoomsPage = lazy(() =>
+  import('@/pages/RoomsPage').then((module) => ({ default: module.RoomsPage })),
+);
+const EnergyPage = lazy(() =>
+  import('@/pages/EnergyPage').then((module) => ({ default: module.EnergyPage })),
+);
+const SettingsPage = lazy(() =>
+  import('@/pages/SettingsPage').then((module) => ({ default: module.SettingsPage })),
+);
+const UsersPage = lazy(() =>
+  import('@/pages/UsersPage').then((module) => ({ default: module.UsersPage })),
+);
+const AdminPage = lazy(() =>
+  import('@/pages/AdminPage').then((module) => ({ default: module.AdminPage })),
+);
 
 /**
  * Ordine naturale del carosello orizzontale. Le schermate non consentite al
@@ -52,6 +71,20 @@ function AccessDenied({ viewKey }: { viewKey: 'energy' | 'settings' | 'users' | 
       >
         {t('accessDenied.back')}
       </button>
+    </div>
+  );
+}
+
+function PageLoading() {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex min-h-[45vh] flex-col items-center justify-center gap-3 text-fg-subtle"
+    >
+      <Loader2 className="size-5 animate-spin text-accent" aria-hidden />
+      <p className="text-[11px] uppercase tracking-wider">{t('gate.pageLoading')}</p>
     </div>
   );
 }
@@ -143,9 +176,11 @@ function AppNavigation() {
           style: { touchAction: 'pan-y' },
         }}
       >
-        <div key={view} className={cn(viewAnimation, 'motion-reduce:animate-none')}>
-          <CurrentView />
-        </div>
+        <Suspense fallback={<PageLoading />}>
+          <div key={view} className={cn(viewAnimation, 'motion-reduce:animate-none')}>
+            <CurrentView />
+          </div>
+        </Suspense>
       </AppShell>
       {pages.length > 1 && swipe.currentIndex >= 0 ? (
         <div
@@ -169,6 +204,9 @@ export default function App() {
   // Il tema alto contrasto vive a livello applicazione: `data-contrast` su
   // <html> è già attivo sul lock screen, prima che l'utente faccia login.
   useHighContrast();
+  // Modalità a basse prestazioni: l'attributo su <html> è già impostato dallo
+  // script inline in index.html; il hook lo mantiene allineato allo store.
+  usePerformanceMode();
   // Un client per albero React: in StrictMode l'initializer viene scartato al
   // doppio render di sviluppo, senza condividere cache tra test o mount.
   const [queryClient] = useState(createQueryClient);

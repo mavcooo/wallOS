@@ -90,6 +90,7 @@
   },
   "gate": {
     "sessionLoading": "Checking session…",
+    "pageLoading": "Loading page…",
     "topologyLoading": "Loading the home…",
     "topologyError": "Home configuration unavailable",
     "useCache": "Start with saved data",

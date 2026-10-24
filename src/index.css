@@ -102,12 +102,20 @@
   html {
     color-scheme: dark;
     -webkit-text-size-adjust: 100%;
+    /* Kiosk: nessun pinch-zoom, rimbalzo o callout del browser. */
+    touch-action: pan-x pan-y;
+    overscroll-behavior: none;
+    -webkit-touch-callout: none;
   }
 
   body {
     margin: 0;
     overflow: hidden;
     overscroll-behavior: none;
+    touch-action: pan-x pan-y;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
     background-color: var(--color-bg);
     color: var(--color-fg);
     font-family: var(--font-sans);
@@ -321,4 +329,65 @@ html[data-contrast='high']
 /* Indicatori di forma: | per ON, O per OFF, ingranditi per il touch da lontano. */
 html[data-contrast='high'] [data-slot='switch-indicator'] {
   scale: 1.25;
+}
+
+/* ---------------------------------------------------------------------------
+   Performance / Low-Power Mode
+   ---------------------------------------------------------------------------
+   Attivata da `usePerformanceMode` con `<html data-performance-mode="true">`
+   e impostata già prima del primo paint dallo script inline in index.html.
+   Su Raspberry Pi o tablet datati `backdrop-filter`, ombre sfocate e gradienti
+   costano un layer composito e fill-rate: qui diventano superfici piene.
+   Gli override usano `!important` per vincere sulle utility di Tailwind senza
+   toccare i componenti. */
+html[data-performance-mode='true'] :where([class*='backdrop-blur']) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+/* Superfici glass: da trasparenza + blur a tinta unita opaca. */
+html[data-performance-mode='true'] :where([class*='bg-panel/']) {
+  background-color: var(--color-panel) !important;
+}
+html[data-performance-mode='true'] :where([class*='bg-panel-2/']) {
+  background-color: var(--color-panel-2) !important;
+}
+html[data-performance-mode='true'] :where([class*='bg-bg/']) {
+  background-color: var(--color-bg) !important;
+}
+html[data-performance-mode='true'] :where([class*='bg-black/']) {
+  background-color: #000000 !important;
+}
+
+/* Ombre sfocate → nessuna ombra (i bordi da 1px restano già nel markup). */
+html[data-performance-mode='true'] :where([class*='shadow-']) {
+  box-shadow: none !important;
+}
+
+/* Gradienti e animazioni decorative spente: niente ridisegni continui. */
+html[data-performance-mode='true'] :where([class*='bg-gradient'], [class*='bg-linear']) {
+  background-image: none !important;
+}
+html[data-performance-mode='true'] :where([class*='animate-']) {
+  animation: none !important;
+}
+
+/* Micro-transizioni di hover/focus quasi istantanee. Il dimmer non è incluso:
+   il suo fade resta fluido perché usa solo opacity. */
+html[data-performance-mode='true']
+  :where(button, a, [role='button'], [data-slot='switch-track'], [data-slot='switch-thumb']) {
+  transition-duration: 0.01ms !important;
+}
+
+/* Rispetta la preferenza di sistema per chi soffre di motion sickness (e per
+   i kiosk configurati con animazioni ridotte). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

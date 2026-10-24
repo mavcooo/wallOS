@@ -21,9 +21,13 @@ describe('KioskDimmerOverlay · burn-in', () => {
     render(<KioskDimmerOverlay visible={false} />);
 
     const overlay = screen.getByTestId('kiosk-dimmer-overlay');
-    expect(overlay).toHaveClass('pointer-events-none', 'opacity-0');
+    expect(overlay).toHaveClass('pointer-events-none', 'invisible', 'opacity-0');
     expect(overlay).toHaveAttribute('aria-hidden', 'true');
     expect(clock().style.transform).toBe('translate3d(0px, 0px, 0)');
+    // A fade concluso l'overlay esce dal paint; will-change torna ad auto.
+    expect(overlay.style.transitionProperty).toBe('opacity, visibility');
+    expect(overlay.style.transitionDelay).toBe('0ms, 900ms');
+    expect(overlay.style.willChange).toBe('auto');
     // Solo il fade dell'opacità: il ritorno in posizione è istantaneo.
     expect(clock().style.transition).toBe('opacity 900ms ease-out');
   });
@@ -34,6 +38,9 @@ describe('KioskDimmerOverlay · burn-in', () => {
     const overlay = screen.getByTestId('kiosk-dimmer-overlay');
     expect(overlay).toHaveClass('opacity-100');
     expect(overlay).toHaveAttribute('aria-hidden', 'false');
+    expect(overlay.style.transitionDelay).toBe('0ms, 0ms');
+    expect(overlay.style.willChange).toBe('opacity');
+    expect(clock().style.willChange).toBe('transform, opacity');
     expect(clock().style.opacity).toBe('0.35');
     // jsdom: 1024×768, margine 32 → centro.
     expect(clock().style.transform).toBe('translate3d(512px, 384px, 0)');

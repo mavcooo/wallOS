@@ -25,6 +25,11 @@ export interface UiState {
   room: RoomId;
   dimmerTimeoutMs: number;
   screenDimmed: boolean;
+  /**
+   * Modalità prestazioni: disattiva blur, ombre e animazioni non essenziali
+   * su pannelli con CPU/GPU limitate. Persistita con il resto delle preferenze.
+   */
+  performanceMode: boolean;
   lastActionAt: number;
 }
 
@@ -88,6 +93,7 @@ export interface HomeState {
   setRoom(room: RoomId): void;
   setDimmerTimeout(ms: number): void;
   setScreenDimmed(dimmed: boolean): void;
+  setPerformanceMode(enabled: boolean): void;
   touchActivity(): void;
 }
 
@@ -106,6 +112,7 @@ const initialUi: UiState = {
   room: 'living',
   dimmerTimeoutMs: KIOSK_DEFAULTS.dimmerTimeoutMs,
   screenDimmed: false,
+  performanceMode: false,
   lastActionAt: Date.now(),
 };
 
@@ -409,6 +416,11 @@ export const useHomeStore = create<HomeState>()(
       },
       setScreenDimmed(screenDimmed) {
         set((state) => ({ ui: { ...state.ui, screenDimmed } }));
+      },
+      setPerformanceMode(performanceMode) {
+        set((state) => ({
+          ui: { ...state.ui, performanceMode, lastActionAt: Date.now() },
+        }));
       },
       touchActivity() {
         set((state) => ({ ui: { ...state.ui, lastActionAt: Date.now() } }));

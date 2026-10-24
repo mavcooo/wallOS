@@ -83,6 +83,10 @@ describe('App', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Overview' }),
     ).toBeInTheDocument();
+    // La pagina è un chunk lazy: il contenuto deve comparire dopo lo shell.
+    expect(
+      await screen.findByRole('heading', { level: 2, name: 'Scenari rapidi' }),
+    ).toBeInTheDocument();
 
     const main = document.querySelector('main');
     expect(main).not.toBeNull();

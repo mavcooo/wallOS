@@ -2,6 +2,7 @@ import { fileURLToPath, URL } from 'node:url';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ mode }) => {
   // `loadEnv` senza prefisso: il target del proxy può stare nel `.env` locale
@@ -10,12 +11,102 @@ export default defineConfig(({ mode }) => {
   const authTarget = env.AUTH_PROXY_TARGET?.trim() || 'http://127.0.0.1:8787';
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      VitePWA({
+        // Il kiosk non ha un utente che accetta un prompt: il nuovo service
+        // worker prende il controllo e ricarica alla prima occasione utile.
+        registerType: 'autoUpdate',
+        injectRegister: 'auto',
+        manifest: {
+          id: '/',
+          name: 'wallOS Dashboard',
+          short_name: 'wallOS',
+          description: 'Dashboard domotica per pannelli kiosk touch a parete.',
+          lang: 'it',
+          dir: 'ltr',
+          start_url: '/',
+          scope: '/',
+          // Fullscreen toglie anche le barre di sistema dove il browser lo
+          // supporta; standalone resta il fallback su iOS e desktop.
+          display: 'fullscreen',
+          display_override: ['fullscreen', 'standalone'],
+          orientation: 'landscape',
+          // Nero puro: nessun flash bianco durante il boot su OLED/LCD.
+          theme_color: '#000000',
+          background_color: '#000000',
+          categories: ['utilities', 'lifestyle'],
+          icons: [
+            {
+              src: '/icons/icon-192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/icons/icon-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any',
+            },
+            {
+              src: '/icons/maskable-512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+            {
+              src: '/icons/icon.svg',
+              sizes: 'any',
+              type: 'image/svg+xml',
+              purpose: 'any',
+            },
+          ],
+        },
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,woff,woff2}'],
+          navigateFallback: '/index.html',
+          // Le API del gateway e il broker non devono mai ricevere l'HTML
+          // della SPA: un 404/errore JSON deve arrivare intatto al client.
+          navigateFallbackDenylist: [/^\/api\//, /^\/mqtt/],
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
+        },
+        // In sviluppo il service worker nasconderebbe gli hot update.
+        devOptions: { enabled: false },
+      }),
+    ],
     // `MQTT_*` (vedi .env.example) deve arrivare all'app: Vite espone di default
     // solo le variabili con prefisso `VITE_`.
     envPrefix: ['VITE_', 'MQTT_'],
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+    },
+    build: {
+      rollupOptions: {
+        output: {
+          // Le pagine sono già `React.lazy`; qui separiamo le dipendenze che
+          // restano nel bootstrap della shell. Un unico vendor da oltre 900 kB
+          // blocca il parse su Raspberry Pi anche quando la pagina è leggera.
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-dom/client'],
+            'mqtt-vendor': ['mqtt'],
+            'query-vendor': ['@tanstack/react-query'],
+            'i18n-vendor': ['i18next', 'react-i18next'],
+            'radix-vendor': [
+              '@radix-ui/react-dialog',
+              '@radix-ui/react-label',
+              '@radix-ui/react-slider',
+              '@radix-ui/react-slot',
+              '@radix-ui/react-switch',
+              '@radix-ui/react-tabs',
+            ],
+            'icons-vendor': ['lucide-react'],
+          },
+        },
+      },
     },
     server: {
       host: '0.0.0.0',

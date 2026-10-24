@@ -62,10 +62,19 @@ export function KioskDimmerOverlay({
       data-testid="kiosk-dimmer-overlay"
       className={cn(
         'fixed inset-0 z-[80] overflow-hidden bg-black',
-        'pointer-events-auto transition-opacity ease-out',
-        visible ? 'opacity-100' : 'pointer-events-none opacity-0',
+        'pointer-events-auto',
+        visible ? 'opacity-100' : 'pointer-events-none invisible opacity-0',
       )}
-      style={{ transitionDuration: `${fadeMs}ms` }}
+      style={{
+        // Solo proprietà composited. `visibility` viene ritardata della durata
+        // del fade-out: a fine transizione l'overlay esce dal paint (niente
+        // texture né layer composito attivo), ma durante il fade resta visibile.
+        transitionProperty: 'opacity, visibility',
+        transitionDuration: `${fadeMs}ms, 0ms`,
+        transitionDelay: `0ms, ${visible ? '0ms' : `${fadeMs}ms`}`,
+        transitionTimingFunction: 'ease-out',
+        willChange: visible ? 'opacity' : 'auto',
+      }}
     >
       <div
         ref={clockRef}
@@ -75,6 +84,10 @@ export function KioskDimmerOverlay({
           ...shift.style,
           opacity: clockOpacity,
           transition,
+          // `usePixelShift` dichiara solo transform: qui aggiungiamo opacity,
+          // entrambe gestite dal compositor. A overlay spento il layer non
+          // viene più promosso, quindi non occupa memoria texture.
+          willChange: visible ? 'transform, opacity' : 'auto',
         }}
       >
         <span className="text-[13vw] font-extralight leading-none tracking-tight text-white">

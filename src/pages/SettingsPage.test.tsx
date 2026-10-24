@@ -26,6 +26,8 @@ const { useHomeStore } = await import('@/store/homeStore');
 
 beforeEach(() => {
   localStorage.clear();
+  delete document.documentElement.dataset.performanceMode;
+  useHomeStore.getState().setPerformanceMode(false);
   useHomeStore.getState().setBurnInSettings({
     mode: 'screensaver-float',
     shiftIntervalMs: 60_000,
@@ -58,6 +60,22 @@ describe('SettingsPage · protezione burn-in', () => {
     const opacity = screen.getByRole('slider');
     expect(opacity).toHaveAttribute('aria-valuenow', '30');
     expect(screen.getByText('30%')).toBeInTheDocument();
+  });
+
+  it('attiva la Performance Mode e la applica subito al documento', async () => {
+    renderPage();
+
+    const toggle = screen.getByRole('switch', {
+      name: /Performance Mode \(Schermi Lenti \/ Raspberry Pi\)/,
+    });
+    expect(toggle).not.toBeChecked();
+
+    await userEvent.click(toggle);
+
+    expect(toggle).toBeChecked();
+    expect(useHomeStore.getState().ui.performanceMode).toBe(true);
+    expect(document.documentElement.dataset.performanceMode).toBe('true');
+    expect(toggle).toHaveAccessibleName(/Performance Mode \(Schermi Lenti \/ Raspberry Pi\)/);
   });
 
   it('mostra il riepilogo allineato alle impostazioni correnti', () => {

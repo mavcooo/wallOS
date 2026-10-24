@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="wallOS">
+  <rect width="512" height="512" fill="#000000"/>
+  <rect x="51" y="51" width="410" height="410" rx="82" fill="#2dd4bf"/>
+  <path d="M143 164 L184 358 L256 215 L328 358 L369 164" fill="none" stroke="#000000" stroke-width="27" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
