@@ -119,6 +119,7 @@ function decodeChannel(
       return Number.isFinite(numeric) ? { kind: 'sensor', state: { value: numeric } } : null;
     }
     case 'media':
+    case 'camera':
       return null;
   }
 }

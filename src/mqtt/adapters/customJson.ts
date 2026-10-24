@@ -99,6 +99,8 @@ export const customJsonAdapter: DeviceAdapter = {
         const value = num(raw);
         return value === undefined ? null : { kind: 'sensor', state: { value } };
       }
+      case 'camera':
+        return null;
       case 'media': {
         const state: { volume?: number; muted?: boolean; nowPlaying?: string | null } = {};
         const volume = num(pick('volume'));

@@ -13,7 +13,7 @@
  */
 export type RoomId = string;
 
-export type DeviceKind = 'light' | 'climate' | 'power' | 'media' | 'sensor';
+export type DeviceKind = 'light' | 'climate' | 'power' | 'media' | 'sensor' | 'camera';
 
 /** Identificativo dell'adapter di parsing/encoding associato al device. */
 export type AdapterId = 'zigbee2mqtt' | 'shelly' | 'tasmota' | 'custom-json' | 'ha-discovery';
@@ -86,6 +86,23 @@ export type DeviceAvailability = 'online' | 'offline' | 'unknown';
 export type ClimateMode = 'off' | 'heat' | 'cool' | 'auto' | 'fan_only' | 'dry';
 export type ClimateAction = 'idle' | 'heating' | 'cooling' | 'drying' | 'fan';
 export type FanSpeed = 'auto' | 'low' | 'medium' | 'high';
+export type CameraProtocol = 'webrtc' | 'hls' | 'mjpeg' | 'auto';
+export type CameraAspectRatio = '16:9' | '4:3';
+
+/**
+ * Configurazione del flusso video di una telecamera IP.
+ *
+ * `url` è l'endpoint raggiungibile dal browser: WHEP/WebRTC (es. go2rtc),
+ * playlist HLS o stream MJPEG. L'URL RTSP nudo non è utilizzabile dal client
+ * e deve essere esposto da un proxy locale (go2rtc, MediaMTX, ...).
+ */
+export interface CameraStream {
+  url: string;
+  snapshotUrl?: string;
+  protocol: CameraProtocol;
+  aspectRatio: CameraAspectRatio;
+}
+
 export type SensorType =
   | 'temperature'
   | 'humidity'
@@ -209,7 +226,24 @@ export interface SensorDevice extends DeviceBase {
   state: SensorState;
 }
 
-export type Device = LightDevice | ClimateDevice | PowerDevice | MediaDevice | SensorDevice;
+/** Stato logico della telecamera; il player misura lo stato reale della sessione. */
+export interface CameraState {
+  live: boolean;
+}
+
+export interface CameraDevice extends DeviceBase {
+  kind: 'camera';
+  state: CameraState;
+  stream: CameraStream;
+}
+
+export type Device =
+  | LightDevice
+  | ClimateDevice
+  | PowerDevice
+  | MediaDevice
+  | SensorDevice
+  | CameraDevice;
 
 export type AnyDeviceState = Device['state'];
 
@@ -253,7 +287,8 @@ export type DeviceRealtimeState =
   | (DeviceRealtimeBase & { kind: 'climate'; state: ClimateState })
   | (DeviceRealtimeBase & { kind: 'power'; state: PowerState })
   | (DeviceRealtimeBase & { kind: 'media'; state: MediaState })
-  | (DeviceRealtimeBase & { kind: 'sensor'; state: SensorState });
+  | (DeviceRealtimeBase & { kind: 'sensor'; state: SensorState })
+  | (DeviceRealtimeBase & { kind: 'camera'; state: CameraState });
 
 export type DeviceState = DeviceRealtimeState['state'];
 
@@ -283,7 +318,8 @@ export type DecodedState =
   | { kind: 'climate'; state: Partial<ClimateState> }
   | { kind: 'power'; state: Partial<PowerState> }
   | { kind: 'media'; state: Partial<MediaState> }
-  | { kind: 'sensor'; state: Partial<SensorState> };
+  | { kind: 'sensor'; state: Partial<SensorState> }
+  | { kind: 'camera'; state: Partial<CameraState> };
 
 export interface EncodedCommand {
   topic: string;

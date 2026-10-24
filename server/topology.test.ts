@@ -287,6 +287,91 @@ describe('topologia dal database', () => {
     expect(deleted.statusCode).toBe(204);
   });
 
+  it('crea una telecamera con endpoint, snapshot e formato, poi li aggiorna', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const missingStream = await app.inject({
+      method: 'POST',
+      url: '/api/devices',
+      cookies,
+      payload: {
+        id: 'camera-garage',
+        roomId: 'living',
+        name: 'Telecamera garage',
+        type: 'camera',
+      },
+    });
+    expect(missingStream.statusCode).toBe(400);
+    expect(missingStream.json()).toMatchObject({ field: 'streamUrl' });
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/devices',
+      cookies,
+      payload: {
+        id: 'camera-garage',
+        roomId: 'living',
+        name: 'Telecamera garage',
+        type: 'camera',
+        adapter: 'custom-json',
+        streamUrl: 'http://192.168.0.59:1984/api/webrtc?src=garage',
+        snapshotUrl: 'http://192.168.0.59:1984/api/frame.jpeg?src=garage',
+        streamProtocol: 'auto',
+        aspectRatio: '4:3',
+        favorite: true,
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      device: {
+        id: 'camera-garage',
+        kind: 'camera',
+        favorite: true,
+        topics: { state: 'camera/camera-garage' },
+        state: { live: true },
+        stream: {
+          url: 'http://192.168.0.59:1984/api/webrtc?src=garage',
+          snapshotUrl: 'http://192.168.0.59:1984/api/frame.jpeg?src=garage',
+          protocol: 'auto',
+          aspectRatio: '4:3',
+        },
+      },
+    });
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: '/api/devices/camera-garage',
+      cookies,
+      payload: {
+        roomId: 'living',
+        name: 'Telecamera garage',
+        type: 'camera',
+        adapter: 'custom-json',
+        streamUrl: 'http://192.168.0.59:1984/api/stream.m3u8?src=garage',
+        streamProtocol: 'hls',
+        aspectRatio: '16:9',
+      },
+    });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({
+      device: {
+        stream: {
+          url: 'http://192.168.0.59:1984/api/stream.m3u8?src=garage',
+          protocol: 'hls',
+          aspectRatio: '16:9',
+        },
+      },
+    });
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: '/api/devices/camera-garage',
+      cookies,
+    });
+    expect(deleted.statusCode).toBe(204);
+  });
+
   it('valida i passi di uno scenario prima di salvarli', async () => {
     const { app } = await setup();
     const cookies = await login(app);

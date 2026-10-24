@@ -110,6 +110,7 @@ export const tasmotaAdapter: DeviceAdapter = {
         return generic === undefined ? null : { kind: 'sensor', state: { value: generic } };
       }
       case 'media':
+      case 'camera':
         return null;
     }
   },

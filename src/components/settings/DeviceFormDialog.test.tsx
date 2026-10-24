@@ -95,6 +95,36 @@ describe('DeviceFormDialog', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
+  it('crea una telecamera con endpoint WebRTC e fallback snapshot', async () => {
+    render(<DeviceFormDialog open onOpenChange={vi.fn()} rooms={ROOMS} />);
+
+    await userEvent.type(screen.getByLabelText('Nome'), 'Ingresso');
+    await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'camera');
+    await userEvent.type(
+      screen.getByLabelText('URL del flusso'),
+      'http://192.168.0.59:1984/api/webrtc?src=ingresso',
+    );
+    await userEvent.type(
+      screen.getByLabelText('URL snapshot (opzionale)'),
+      'http://192.168.0.59:1984/api/frame.jpeg?src=ingresso',
+    );
+    await userEvent.selectOptions(screen.getByLabelText('Protocollo'), 'hls');
+    await userEvent.selectOptions(screen.getByLabelText('Formato'), '4:3');
+    await userEvent.click(screen.getByRole('button', { name: 'Crea dispositivo' }));
+
+    expect(mocks.createDevice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'ingresso',
+        type: 'camera',
+        stateTopic: '',
+        streamUrl: 'http://192.168.0.59:1984/api/webrtc?src=ingresso',
+        snapshotUrl: 'http://192.168.0.59:1984/api/frame.jpeg?src=ingresso',
+        streamProtocol: 'hls',
+        aspectRatio: '4:3',
+      }),
+    );
+  }, 15_000);
+
   it('blocca i wildcard nel topic di stato', async () => {
     render(<DeviceFormDialog open onOpenChange={vi.fn()} rooms={ROOMS} />);
 

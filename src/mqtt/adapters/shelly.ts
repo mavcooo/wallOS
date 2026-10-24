@@ -83,6 +83,7 @@ export const shellyAdapter: DeviceAdapter = {
         return null;
       }
       case 'media':
+      case 'camera':
         return null;
     }
   },

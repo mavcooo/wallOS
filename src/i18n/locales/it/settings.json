@@ -92,7 +92,12 @@
     "summary": "Fade {{fade}} ms · orologio in sleep al {{opacity}}% · {{mode}} ogni {{seconds}} s · scudo anti-tocco {{guard}} ms.",
     "modeFloating": "orologio flottante",
     "modeShift": "micro-shift della dashboard",
-    "preview": "Mostra anteprima screensaver"
+    "preview": "Mostra anteprima screensaver",
+    "wakeLockLabel": "Wake Lock schermo",
+    "wakeLockActive": "Schermo bloccato (WakeLock attivo)",
+    "wakeLockInactive": "WakeLock rilasciato",
+    "wakeLockUnsupported": "WakeLock non supportato dal browser",
+    "wakeLockError": "Errore WakeLock: {{error}}"
   },
   "pin": {
     "title": "PIN pannello",

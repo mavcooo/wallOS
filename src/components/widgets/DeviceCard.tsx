@@ -6,6 +6,7 @@ import { useDevice, useRoomLabel } from '@/hooks/useDevice';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useOfflineQueue } from '@/mqtt/offlineQueue';
 import { useHomeStore } from '@/store/homeStore';
+import { CameraCard } from './CameraCard';
 import { ClimateCard } from './ClimateCard';
 import { LightCard } from './LightCard';
 import { MediaCard } from './MediaCard';
@@ -110,5 +111,14 @@ export const DeviceCard = memo(function DeviceCard({
       );
     case 'sensor':
       return <SensorTile device={device} {...(className ? { className } : {})} />;
+    case 'camera':
+      return (
+        <CameraCard
+          device={device}
+          roomName={roomName}
+          {...(favorite ? { onToggleFavorite: favorite } : {})}
+          {...(className ? { className } : {})}
+        />
+      );
   }
 });

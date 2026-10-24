@@ -268,23 +268,27 @@ export function TopologyManager() {
                       </p>
                     </div>
                     <div className="min-w-0 text-[10px] text-fg-subtle">
-                      <p className="truncate font-mono text-fg-muted">{device.topics.state}</p>
+                      <p className="truncate font-mono text-fg-muted">
+                        {device.kind === 'camera' ? device.stream.url : device.topics.state}
+                      </p>
                       <p className="truncate font-mono">
                         {device.topics.command ?? t('topology.noCommand')}
                       </p>
                     </div>
                     <AvailabilityBadge deviceId={device.id} />
                     <div className="flex items-center justify-start gap-1 md:justify-end">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => openTest(device)}
-                        title={t('topology.actions.test')}
-                      >
-                        <Send className="size-3.5" />
-                        <span className="md:sr-only">{t('topology.actions.test')}</span>
-                      </Button>
+                      {device.kind === 'camera' ? null : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => openTest(device)}
+                          title={t('topology.actions.test')}
+                        >
+                          <Send className="size-3.5" />
+                          <span className="md:sr-only">{t('topology.actions.test')}</span>
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="ghost"

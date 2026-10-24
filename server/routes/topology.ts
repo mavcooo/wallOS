@@ -6,6 +6,9 @@ import type { AuthConfig, DeviceRow, RoomRow, ScenarioRow } from '../types.js';
 import { requireAuth, requireRole } from '../session.js';
 import type {
   AdapterId,
+  CameraAspectRatio,
+  CameraProtocol,
+  CameraState,
   ClimateState,
   Device,
   DeviceAvailability,
@@ -56,7 +59,9 @@ function toRoom(row: RoomRow): RoomDto {
 // ── Validazione input admin ────────────────────────────────────────────────
 
 const SLUG_RE = /^[a-z0-9][a-z0-9:_-]{0,63}$/;
-const DEVICE_TYPES = ['light', 'climate', 'power', 'media', 'sensor'] as const;
+const DEVICE_TYPES = ['light', 'climate', 'power', 'media', 'sensor', 'camera'] as const;
+const CAMERA_PROTOCOLS = ['webrtc', 'hls', 'mjpeg', 'auto'] as const;
+const ASPECT_RATIOS = ['16:9', '4:3'] as const;
 const ADAPTERS = ['zigbee2mqtt', 'shelly', 'tasmota', 'custom-json', 'ha-discovery'] as const;
 const CLIMATE_MODES = ['off', 'heat', 'cool', 'auto', 'fan_only', 'dry'] as const;
 const FAN_SPEEDS = ['auto', 'low', 'medium', 'high'] as const;
@@ -204,17 +209,58 @@ function roomInput(
   };
 }
 
+function streamUrl(
+  body: Record<string, unknown>,
+  key: string,
+  label: string,
+  allowWebrtc = true,
+): string | null {
+  const value = optionalText(body, key, 1_024, label);
+  if (value === null) return null;
+  const pattern = allowWebrtc ? /^(https?|webrtc):\/\/[^\s]+$/i : /^https?:\/\/[^\s]+$/i;
+  if (!pattern.test(value)) {
+    throw invalid(
+      `${label}: usa un URL ${allowWebrtc ? 'http(s) o webrtc://' : 'http(s)'}`,
+      key,
+    );
+  }
+  return value;
+}
+
 function deviceInput(body: Record<string, unknown>): DeviceFields {
   const name = requiredText(body, 'name', 80, 'Il nome del dispositivo');
+  const type = enumField(body, 'type', DEVICE_TYPES, 'light');
+  const isCamera = type === 'camera';
+  const stream = isCamera ? streamUrl(body, 'streamUrl', 'L’URL del flusso') : null;
+  if (isCamera && !stream) {
+    throw invalid('L’URL del flusso è obbligatorio per una telecamera', 'streamUrl');
+  }
+
   return {
     roomId: requiredText(body, 'roomId', 64, 'La stanza'),
     name,
-    type: enumField(body, 'type', DEVICE_TYPES, 'light'),
-    adapter: enumField(body, 'adapter', ADAPTERS, 'zigbee2mqtt'),
+    type,
+    adapter: enumField(body, 'adapter', ADAPTERS, isCamera ? 'custom-json' : 'zigbee2mqtt'),
     model: optionalText(body, 'model', 80, 'Il modello'),
-    stateTopic: requiredText(body, 'stateTopic', 512, 'Il topic di stato'),
-    commandTopic: optionalText(body, 'commandTopic', 512, 'Il topic di comando'),
-    availabilityTopic: optionalText(body, 'availabilityTopic', 512, 'Il topic di availability'),
+    stateTopic: isCamera
+      ? (readString(body, 'stateTopic', 512) ?? `camera/${resolveId(body, name)}`)
+      : requiredText(body, 'stateTopic', 512, 'Il topic di stato'),
+    commandTopic: isCamera
+      ? null
+      : optionalText(body, 'commandTopic', 512, 'Il topic di comando'),
+    availabilityTopic: isCamera
+      ? null
+      : optionalText(body, 'availabilityTopic', 512, 'Il topic di availability'),
+    streamUrl: stream,
+    snapshotUrl: isCamera
+      ? streamUrl(body, 'snapshotUrl', 'L’URL dello snapshot', false)
+      : null,
+    streamProtocol: isCamera
+      ? enumField<CameraProtocol>(body, 'streamProtocol', CAMERA_PROTOCOLS, 'auto')
+      : null,
+    aspectRatio: isCamera
+      ? enumField<CameraAspectRatio>(body, 'aspectRatio', ASPECT_RATIOS, '16:9')
+      : null,
     favorite: booleanField(body, 'favorite'),
     protected: booleanField(body, 'protected'),
     displayOrder: integerField(body, 'displayOrder', 0, 9_999),
@@ -438,6 +484,18 @@ function toDevice(row: DeviceRow): Device {
         ...base,
         kind: 'sensor',
         state: (meta.state as SensorState) ?? { value: 0, unit: '', type: 'temperature' },
+      };
+    case 'camera':
+      return {
+        ...base,
+        kind: 'camera',
+        state: (meta.state as CameraState) ?? { live: true },
+        stream: {
+          url: row.stream_url ?? '',
+          ...(row.snapshot_url ? { snapshotUrl: row.snapshot_url } : {}),
+          protocol: (row.stream_protocol as CameraProtocol | null) ?? 'auto',
+          aspectRatio: (row.aspect_ratio as CameraAspectRatio | null) ?? '16:9',
+        },
       };
   }
 }

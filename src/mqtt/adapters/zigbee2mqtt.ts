@@ -112,6 +112,8 @@ export const zigbee2mqttAdapter: DeviceAdapter = {
         const value = map[device.state.type];
         return value === undefined ? null : { kind: 'sensor', state: { value } };
       }
+      case 'camera':
+        return null;
       case 'media': {
         const state: { volume?: number } = {};
         const volume = num(data['volume']);

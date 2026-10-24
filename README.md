@@ -335,7 +335,8 @@ domus-kiosk/
 │   │   ├── settings/               # LanguageSwitcher, ContrastToggle,
 │   │   │                           # SunlightModeCard
 │   │   └── widgets/                # ClimateCard, LightCard, PowerCard, MediaCard,
-│   │                               # SensorTile, ScenarioButton, SummaryCard
+│   │                               # CameraCard/CameraModal, SensorTile,
+│   │                               # ScenarioButton, SummaryCard
 │   │
 │   └── pages/
 │       ├── OverviewPage.tsx        # scenari, KPI, stanze, preferiti
@@ -443,7 +444,7 @@ sostituisce né bcrypt a riposo né il lockout server-side.
 `src/types/device.ts` è il contratto unico tra hardware e UI.
 
 ```ts
-type DeviceKind = 'light' | 'climate' | 'power' | 'media' | 'sensor';
+type DeviceKind = 'light' | 'climate' | 'power' | 'media' | 'sensor' | 'camera';
 
 interface DeviceBase {
   id: string; name: string; room: RoomId; kind: DeviceKind;
@@ -469,6 +470,17 @@ interface ClimateDevice extends DeviceBase {
     action: 'idle'|'heating'|'cooling'|'drying'|'fan';
   };
   minTemp: number; maxTemp: number; tempStep: number;
+}
+
+interface CameraDevice extends DeviceBase {
+  kind: 'camera';
+  state: { live: boolean };
+  stream: {
+    url: string;                 // WHEP/HLS/MJPEG raggiungibile dal browser
+    snapshotUrl?: string;        // fallback JPEG
+    protocol: 'webrtc' | 'hls' | 'mjpeg' | 'auto';
+    aspectRatio: '16:9' | '4:3';
+  };
 }
 ```
 
@@ -509,6 +521,58 @@ interface DeviceAdapter {
 Aggiungere un firmware significa aggiungere **un file** in `mqtt/adapters/` e una
 voce nel registry: nessun widget viene toccato.
 
+### Telecamere IP e proxy video
+
+Il browser non apre RTSP: la telecamera resta sulla VLAN videosorveglianza e un
+proxy locale espone WHEP/WebRTC, HLS o MJPEG. In `devices` i campi dedicati sono
+`stream_url`, `snapshot_url`, `stream_protocol` e `aspect_ratio`; lo stato
+runtime `{ live: true }` resta in `metadata` come per gli altri device. Le
+telecamere **non vengono sottoscritte su MQTT** (`stateTopics` restituisce un
+array vuoto): la disponibilità mostrata è quella reale della sessione video.
+
+```sql
+UPDATE devices SET
+  type = 'camera',
+  stream_url = 'http://192.168.0.59:1984/api/webrtc?src=porta_ingresso',
+  snapshot_url = 'http://192.168.0.59:1984/api/frame.jpeg?src=porta_ingresso',
+  stream_protocol = 'auto',
+  aspect_ratio = '16:9'
+WHERE id = 'camera-outdoor-gate';
+```
+
+Esempio minimo `go2rtc.yaml` sul Raspberry/gateway (il flusso RTSP non esce
+mai verso il pannello):
+
+```yaml
+streams:
+  porta_ingresso: rtsp://utente:password@192.168.0.60:554/Streaming/Channels/101
+
+api:
+  listen: ":1984"
+webrtc:
+  listen: ":8555"
+```
+
+```bash
+go2rtc -config go2rtc.yaml
+# WHEP / WebRTC  http://192.168.0.59:1984/api/webrtc?src=porta_ingresso
+# HLS           http://192.168.0.59:1984/api/stream.m3u8?src=porta_ingresso
+# snapshot JPEG http://192.168.0.59:1984/api/frame.jpeg?src=porta_ingresso
+```
+
+`CameraCard` monta il flusso solo quando la card è visibile (`IntersectionObserver`,
+soglia 0.2), quando la pagina è in primo piano e quando il dimmer kiosk è spento.
+La modale fullscreen usa lo stesso hook; aprendola la card sospende la propria
+sessione per non decodificare due volte. WebRTC chiude peer e sessione WHEP
+(`DELETE` sul `Location`), HLS distrugge l'istanza e libera il buffer, il
+fallback snapshot fa una richiesta ogni 1,5 s. `auto` sceglie dal suffisso
+dell'URL (`.m3u8` → HLS, `.mjpg/.mjpeg` → MJPEG, altrimenti WebRTC). Per gli
+endpoint go2rtc `/api/webrtc`, `/api/stream.m3u8` e `/api/frame.jpeg` il player
+riscrive solo il path mantenendo host e query, quindi prova automaticamente
+WebRTC → HLS → snapshot; un proxy generico resta sul trasporto configurato e
+usa il solo snapshot esplicito. Se il pannello è servito in HTTPS, anche il
+proxy deve essere HTTPS: i browser bloccano i flussi HTTP come mixed content.
+
 ---
 
 ## 4. Flusso MQTT
@@ -539,7 +603,9 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
    `metadata` JSONB con stato iniziale e `fieldMap` se custom) oppure nel seed
    `server/seed-data/devices.ts` per un impianto nuovo;
 2. se il firmware è nuovo, implementa il suo adapter lato client;
-3. ricarica: `GET /api/topology` restituisce il device, subscribe e widget
+3. per una telecamera usa `type = 'camera'` e valorizza `stream_url`,
+   `snapshot_url`, `stream_protocol`, `aspect_ratio` (vedi sopra);
+4. ricarica: `GET /api/topology` restituisce il device, subscribe e widget
    funzionano senza altre modifiche.
 
 ---
@@ -554,6 +620,67 @@ temperature e sensori; i comandi restano ottimistici e coerenti.
   `stopPropagation` e risveglia: il tap **non** attiva il widget sottostante;
 - per 350 ms dopo il risveglio vengono assorbiti `pointerup`/`click` residui;
 - il tasto standby in header e l'anteprima in Impostazioni usano lo stesso flusso.
+
+### `useScreenWakeLock` (Wake Lock API)
+- montato **una sola volta** a livello root in `App.tsx`, indipendente dal
+  dimmer: il dimmer software resta l'unico gestore dello "spegnimento" visivo,
+  mentre il Wake Lock impedisce al browser/SO di mettere lo schermo in standby
+  dopo pochi minuti di inattività (power management di Android/iPadOS);
+- `navigator.wakeLock.request('screen')` con controllo di supporto
+  (`'wakeLock' in navigator`): se l'API manca l'hook è un no-op e lo stato
+  "non supportato" viene mostrato in Impostazioni;
+- riacquisizione automatica: il browser rilascia il sentinel quando la scheda
+  perde visibilità, quindi su `visibilitychange → visible` la richiesta viene
+  emessa di nuovo; l'evento `release` del sentinel aggiorna lo stato interno;
+- `releaseWakeLock()` ferma la riacquisizione (nessun loop invisibile),
+  `requestWakeLock()` la riprende; entrambe sono idempotenti, con un contatore
+  di gara che scarta le risposte orfane di `request()` in arrivo dopo lo
+  smontaggio;
+- pulizia completa allo smontaggio: `sentinel.release()` + rimozione dei
+  listener `release` e `visibilitychange`;
+- interfaccia: `{ isSupported, isActive, error, requestWakeLock, releaseWakeLock }`;
+- diagnostica: in **Impostazioni → Kiosk** una riga mostra lo stato
+  ("Schermo bloccato (WakeLock attivo)" / "WakeLock non supportato dal
+  browser" / errore), utile durante l'installazione su tablet fisici.
+
+### PWA installata (manifest + service worker)
+- `vite-plugin-pwa` con `registerType: 'autoUpdate'`: il nuovo service worker
+  prende il controllo e ricarica alla prima occasione utile (nessun prompt sul
+  kiosk);
+- manifest: `name: "wallOS Dashboard"`, `short_name: "wallOS"`,
+  `start_url: '/'`, `display: 'fullscreen'` (fallback `standalone` via
+  `display_override`), `orientation: 'landscape'`, `theme_color` e
+  `background_color` a `#000000` (nessun flash bianco al boot);
+- icone PNG 192/512 con `purpose: "any"` più `maskable-512` per il ritaglio
+  Android e un SVG a risoluzione qualsiasi;
+- workbox: precache di `js/css/html/svg/png/ico/webmanifest/woff2`,
+  `navigateFallback: '/index.html'` con denylist su `/api/` e `/mqtt` (gli errori
+  JSON del gateway non vengono mai sostituiti dall'HTML della SPA);
+- `index.html`: viewport anti-zoom (`maximum-scale=1.0, user-scalable=no,
+  viewport-fit=cover`) e meta Apple (`apple-mobile-web-app-capable`,
+  `apple-mobile-web-app-status-bar-style: black-translucent`,
+  `apple-mobile-web-app-title`) per l'installazione da Safari "Aggiungi a
+  Home" su iPadOS;
+- gesture neutrate in `src/index.css`: `overscroll-behavior: none` su `html` e
+  `body` (niente pull-to-refresh né rubber-banding), `user-select: none`,
+  `-webkit-touch-callout: none`, `touch-action: pan-x pan-y`; i contenitori
+  scrollabili usano la utility `.kiosk-scroll` con
+  `overscroll-behavior: contain`, quindi il bounce resta isolato al pannello.
+
+#### Verifica su tablet (Android / iPad)
+1. **Android (Chrome):** `chrome://inspect` dal desktop (oppure Chrome Remote
+   Debugging USB) → seleziona la scheda wallOS → pesta **manifest** per
+   verificare nome/icone/`display: fullscreen` e **Service Workers** per il
+   worker attivo; da `chrome://settings/siteData` o dal menu ⋮ → "Installa
+   app" l'app appare come standalone a schermo intero in orizzontale.
+2. **iPad (Safari):** Condivisione → "Aggiungi a Home" → apri wallOS: deve
+   partire senza barra URL, con status bar nera traslente e orientamento
+   orizzontale; verifica in Impostazioni → Kiosk che la riga Wake Lock dica
+   "non supportato" (iPadOS non espone ancora l'API) oppure "attivo".
+3. **Stato Wake Lock:** in Impostazioni → Kiosk la riga "Wake Lock schermo"
+   deve mostrare "Schermo bloccato (WakeLock attivo)"; per il debug remoto su
+   Android aprire `chrome://inspect` → console e verificare
+   `navigator.wakeLock` e `document.visibilityState`.
 
 ### `usePixelShift` (protezione burn-in)
 - dashboard attiva: micro-spostamenti di 1-4 px attorno all'origine, ogni 60 s;
@@ -749,6 +876,9 @@ un impianto reale:
 - Widget: `PowerCard` copre stato iniziale normalizzato, tap, offline (ultime
   metriche note) e patch successive senza rimontaggio; `LightCard` copre dimmer,
   preset colore e stato spento.
+- Telecamere: 8 test sulle scelte URL/protocollo e sul backoff, 3 sul hook
+  (`IntersectionObserver`, sospensione, WHEP con chiusura sessione), 2 su
+  `CameraCard`/modale e un test API che crea/aggiorna una camera con PGlite.
 - CI GitHub Actions (`.github/workflows/ci.yml`): `npm ci`, typecheck,
   coverage con soglie, test server, build e artifact `coverage/`.
 
@@ -765,7 +895,9 @@ npm run test:all       # frontend + server
 - `npm run build` → build Vite OK.
 - `npm run build:server` → emit ESM in `dist-server/` (stesso comando usato dal
   Dockerfile).
-- `npm test` → 39 file, 265 test frontend (jsdom).
+- `npm test` → 49 file, 306 test frontend (jsdom); 1 benchmark è saltato di
+  default.
+- `npm run test:server` → 43 test Fastify + PGlite.
 - `npm run test:coverage` → adapters: 96.7% statement, 99.2% righe, 100%
   funzioni, 82.4% rami (sopra le soglie).
 - Bootstrap: 3 test RTL su `TopologyGate` (splash brandizzato, retry che
@@ -823,9 +955,10 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 
 ## 8. Limiti noti / prossimi passi
 
-- Bundle unico ~970 kB (mqtt.js pesa ~300 kB, i18next + i cinque namespace
-  bilingui ~35 kB): valutare `manualChunks` o import dinamico di mqtt per
-  ridurre il first paint su tablet datati.
+- Bootstrap JS ~946 kB raw / ~299 kB gzip, già diviso in vendor (mqtt.js
+  ~338 kB, React ~209 kB, UI Radix ~74 kB). `hls.js` usa la build `light`
+  (~371 kB) ed è caricato solo quando una telecamera HLS è visibile: non entra
+  nel first paint né nella shell delle pagine senza telecamere.
 - Lo stato runtime dei device non è persistito nel database: al reload si
   riparte dallo stato del seed finché il broker non ripubblica. Per impianti
   reali conviene `retain: true` sui topic di stato o un cache layer locale.
@@ -836,6 +969,10 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 - La disponibilità per-device (`availability`) è nello store ma non è mostrata
   nei widget: l'header espone solo lo stato del broker. Il test widget verifica
   che un device `offline` continui a renderizzare le ultime metriche note.
+- La Picture-in-Picture nativa resta legata al `<video>` della modale: chiudendo
+  la modale o cambiando pagina il browser chiude la finestrella. Per un
+  mini-player persistente serve un host video a livello App (fuori dal ciclo di
+  vita della pagina), con una sola sessione condivisa.
 - Lo storage è PostgreSQL (PGlite nei test): SQLite non è implementato. Per un
   driver aggiuntivo va astratto il repository in `server/db.ts`; la URL resta
   l'unico punto di configurazione (`DATABASE_URL`).

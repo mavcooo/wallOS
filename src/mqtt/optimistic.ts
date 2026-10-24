@@ -58,6 +58,7 @@ export function optimisticState(
           return null;
       }
     case 'sensor':
+    case 'camera':
       return null;
   }
 }

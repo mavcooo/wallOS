@@ -6,9 +6,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { adminApi, type DevicePayload } from '@/lib/adminApi';
 import { roomIdFromLabel, type RoomConfig } from '@/lib/rooms';
-import type { AdapterId, DeviceKind, DeviceMetadata } from '@/types/device';
+import type {
+  AdapterId,
+  CameraAspectRatio,
+  CameraProtocol,
+  DeviceKind,
+  DeviceMetadata,
+} from '@/types/device';
 
-const TYPES: readonly DeviceKind[] = ['light', 'climate', 'power', 'media', 'sensor'];
+const TYPES: readonly DeviceKind[] = ['light', 'climate', 'power', 'media', 'sensor', 'camera'];
+const CAMERA_PROTOCOLS: readonly CameraProtocol[] = ['auto', 'webrtc', 'hls', 'mjpeg'];
+const ASPECT_RATIOS: readonly CameraAspectRatio[] = ['16:9', '4:3'];
 
 const ADAPTERS: readonly AdapterId[] = [
   'zigbee2mqtt',
@@ -41,6 +49,18 @@ export function DeviceForm({
   const [commandTopic, setCommandTopic] = useState(device?.topics.command ?? '');
   const [availabilityTopic, setAvailabilityTopic] = useState(
     device?.topics.availability ?? '',
+  );
+  const [streamUrl, setStreamUrl] = useState(
+    device?.kind === 'camera' ? device.stream.url : '',
+  );
+  const [snapshotUrl, setSnapshotUrl] = useState(
+    device?.kind === 'camera' ? (device.stream.snapshotUrl ?? '') : '',
+  );
+  const [streamProtocol, setStreamProtocol] = useState<CameraProtocol>(
+    device?.kind === 'camera' ? device.stream.protocol : 'auto',
+  );
+  const [aspectRatio, setAspectRatio] = useState<CameraAspectRatio>(
+    device?.kind === 'camera' ? device.stream.aspectRatio : '16:9',
   );
   const [favorite, setFavorite] = useState(device?.favorite ?? false);
   const [protectedDevice, setProtectedDevice] = useState(device?.protected ?? false);
@@ -85,6 +105,7 @@ export function DeviceForm({
     }
 
     try {
+      const camera = type === 'camera';
       const payload: DevicePayload = {
         roomId,
         name: name.trim(),
@@ -92,12 +113,20 @@ export function DeviceForm({
         adapter,
         model: model.trim() || null,
         stateTopic: stateTopic.trim(),
-        commandTopic: commandTopic.trim() || null,
-        availabilityTopic: availabilityTopic.trim() || null,
+        commandTopic: camera ? null : commandTopic.trim() || null,
+        availabilityTopic: camera ? null : availabilityTopic.trim() || null,
         favorite,
         protected: protectedDevice,
         displayOrder: Number(displayOrder) || 0,
         ...(parsedFieldMap ? { fieldMap: parsedFieldMap } : {}),
+        ...(camera
+          ? {
+              streamUrl: streamUrl.trim(),
+              snapshotUrl: snapshotUrl.trim() || null,
+              streamProtocol,
+              aspectRatio,
+            }
+          : {}),
       };
       if (device) {
         await adminApi.updateDevice(device.id, payload);
@@ -189,34 +218,89 @@ export function DeviceForm({
             placeholder="Ikea TRADFRI"
           />
         </Field>
-        <Field label={t('forms.device.stateTopic')}>
-          <Input
-            value={stateTopic}
-            onChange={(event) => setStateTopic(event.target.value)}
-            required
-            maxLength={512}
-            placeholder="zigbee2mqtt/garage/light"
-          />
-        </Field>
-        <Field label={t('forms.device.commandTopic')} hint={t('forms.device.commandHint')}>
-          <Input
-            value={commandTopic}
-            onChange={(event) => setCommandTopic(event.target.value)}
-            maxLength={512}
-            placeholder="zigbee2mqtt/garage/light/set"
-          />
-        </Field>
-        <Field
-          label={t('forms.device.availabilityTopic')}
-          hint={t('forms.device.availabilityHint')}
-        >
-          <Input
-            value={availabilityTopic}
-            onChange={(event) => setAvailabilityTopic(event.target.value)}
-            maxLength={512}
-            placeholder="zigbee2mqtt/garage/light/availability"
-          />
-        </Field>
+        {type === 'camera' ? (
+          <>
+            <Field label={t('forms.device.camera.streamUrl')} hint={t('forms.device.camera.streamUrlHint')}>
+              <Input
+                value={streamUrl}
+                onChange={(event) => setStreamUrl(event.target.value)}
+                required
+                maxLength={1_024}
+                placeholder="http://192.168.0.59:1984/api/webrtc?src=porta_ingresso"
+                spellCheck={false}
+              />
+            </Field>
+            <Field
+              label={t('forms.device.camera.snapshotUrl')}
+              hint={t('forms.device.camera.snapshotHint')}
+            >
+              <Input
+                value={snapshotUrl}
+                onChange={(event) => setSnapshotUrl(event.target.value)}
+                maxLength={1_024}
+                placeholder="http://192.168.0.59:1984/api/frame.jpeg?src=porta_ingresso"
+                spellCheck={false}
+              />
+            </Field>
+            <Field label={t('forms.device.camera.protocol')}>
+              <select
+                className={selectClass}
+                value={streamProtocol}
+                onChange={(event) => setStreamProtocol(event.target.value as CameraProtocol)}
+              >
+                {CAMERA_PROTOCOLS.map((protocol) => (
+                  <option key={protocol} value={protocol}>
+                    {t(`forms.device.camera.protocols.${protocol}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label={t('forms.device.camera.aspectRatio')}>
+              <select
+                className={selectClass}
+                value={aspectRatio}
+                onChange={(event) => setAspectRatio(event.target.value as CameraAspectRatio)}
+              >
+                {ASPECT_RATIOS.map((ratio) => (
+                  <option key={ratio} value={ratio}>
+                    {t(`forms.device.camera.aspectRatios.${ratio}`)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label={t('forms.device.stateTopic')}>
+              <Input
+                value={stateTopic}
+                onChange={(event) => setStateTopic(event.target.value)}
+                required
+                maxLength={512}
+                placeholder="zigbee2mqtt/garage/light"
+              />
+            </Field>
+            <Field label={t('forms.device.commandTopic')} hint={t('forms.device.commandHint')}>
+              <Input
+                value={commandTopic}
+                onChange={(event) => setCommandTopic(event.target.value)}
+                maxLength={512}
+                placeholder="zigbee2mqtt/garage/light/set"
+              />
+            </Field>
+            <Field
+              label={t('forms.device.availabilityTopic')}
+              hint={t('forms.device.availabilityHint')}
+            >
+              <Input
+                value={availabilityTopic}
+                onChange={(event) => setAvailabilityTopic(event.target.value)}
+                maxLength={512}
+                placeholder="zigbee2mqtt/garage/light/availability"
+              />
+            </Field>
+          </>
+        )}
         <Field label={t('forms.order')} hint={t('forms.orderHint')}>
           <Input
             type="number"
@@ -264,7 +348,11 @@ export function DeviceForm({
         <Button
           type="submit"
           variant="primary"
-          disabled={busy || name.trim().length === 0 || stateTopic.trim().length === 0}
+          disabled={
+            busy ||
+            name.trim().length === 0 ||
+            (type === 'camera' ? streamUrl.trim().length === 0 : stateTopic.trim().length === 0)
+          }
         >
           {busy ? t('forms.saving') : t(device ? 'forms.device.save' : 'forms.device.create')}
         </Button>

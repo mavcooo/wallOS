@@ -37,13 +37,17 @@ CREATE TABLE IF NOT EXISTS devices (
   id                  TEXT PRIMARY KEY,
   room_id             TEXT NOT NULL REFERENCES rooms(id) ON DELETE RESTRICT,
   name                TEXT NOT NULL,
-  type                TEXT NOT NULL CHECK (type IN ('light', 'climate', 'power', 'media', 'sensor')),
+  type                TEXT NOT NULL CHECK (type IN ('light', 'climate', 'power', 'media', 'sensor', 'camera')),
   adapter             TEXT NOT NULL DEFAULT 'custom-json',
   model               TEXT,
   state_topic         TEXT NOT NULL,
   command_topic       TEXT,
   availability_topic  TEXT,
   field_map           JSONB,
+  stream_url          TEXT,
+  snapshot_url        TEXT,
+  stream_protocol     TEXT,
+  aspect_ratio        TEXT,
   metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
   favorite            BOOLEAN NOT NULL DEFAULT FALSE,
   protected           BOOLEAN NOT NULL DEFAULT FALSE,
@@ -55,6 +59,26 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS idx_devices_room ON devices(room_id);
 CREATE INDEX IF NOT EXISTS idx_devices_type ON devices(type);
 CREATE INDEX IF NOT EXISTS idx_devices_order ON devices(display_order);
+
+-- Migrazione idempotente per database già inizializzati: le colonne camera
+-- arrivano anche senza ricreare la tabella, e il CHECK sul tipo viene sostituito
+-- per accettare `camera` anche sui volumi esistenti.
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS stream_url TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS snapshot_url TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS stream_protocol TEXT;
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS aspect_ratio TEXT;
+
+ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_type_check;
+ALTER TABLE devices ADD CONSTRAINT devices_type_check
+  CHECK (type IN ('light', 'climate', 'power', 'media', 'sensor', 'camera'));
+
+ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_stream_protocol_check;
+ALTER TABLE devices ADD CONSTRAINT devices_stream_protocol_check
+  CHECK (stream_protocol IS NULL OR stream_protocol IN ('webrtc', 'hls', 'mjpeg', 'auto'));
+
+ALTER TABLE devices DROP CONSTRAINT IF EXISTS devices_aspect_ratio_check;
+ALTER TABLE devices ADD CONSTRAINT devices_aspect_ratio_check
+  CHECK (aspect_ratio IS NULL OR aspect_ratio IN ('16:9', '4:3'));
 
 CREATE TABLE IF NOT EXISTS scenarios (
   id             TEXT PRIMARY KEY,

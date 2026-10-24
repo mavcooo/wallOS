@@ -26,6 +26,7 @@ const TELEMETRY_FIELDS: Record<DeviceKind, readonly string[]> = {
   power: ['watts', 'voltage', 'current', 'energyTodayKwh', 'energyTotalKwh'],
   media: [],
   sensor: ['value'],
+  camera: [],
 };
 
 const FIELD_SETS: Record<DeviceKind, ReadonlySet<string>> = {
@@ -34,6 +35,7 @@ const FIELD_SETS: Record<DeviceKind, ReadonlySet<string>> = {
   power: new Set(TELEMETRY_FIELDS.power),
   media: EMPTY_FIELDS,
   sensor: new Set(TELEMETRY_FIELDS.sensor),
+  camera: EMPTY_FIELDS,
 };
 
 /** Campi di un device che possono essere accumulati e applicati in differita. */

@@ -7,6 +7,7 @@ import {
   Monitor,
   RefreshCw,
   Send,
+  Sun,
   Trash2,
   Wifi,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ import { KIOSK_DEFAULTS } from '@/config/app.config';
 import { BURN_IN_INTERVAL_OPTIONS, BURN_IN_LIMITS } from '@/lib/burnIn';
 import { ADAPTERS } from '@/mqtt/adapters';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
+import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn, formatTime } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -86,6 +88,9 @@ export function SettingsPage() {
   const { publishRaw, reconnect } = useMqttApi();
   const requestPin = usePinGuard();
   const pushToast = useToastStore((state) => state.push);
+  // Stato diagnostico: lo stesso hook vive a livello root in App.tsx, qui
+  // serve solo la riga di stato per la verifica su tablet fisici.
+  const wakeLock = useScreenWakeLock();
 
   const [draft, setDraft] = useState<BrokerSettings>(broker);
   const [topic, setTopic] = useState('domus/test');
@@ -450,6 +455,35 @@ export function SettingsPage() {
                     {Math.round(burnIn.dimClockOpacity * 100)}%
                   </span>
                 </div>
+              </div>
+
+              {/* Diagnostica Wake Lock: utile al debug su tablet fisici. */}
+              <div
+                className="flex items-center justify-between gap-3 rounded-xl border border-line bg-panel-2 px-3 py-2.5"
+                data-testid="wake-lock-status"
+              >
+                <span className="flex items-center gap-2 text-[11px] font-medium text-fg-muted">
+                  <Sun className="size-3.5 text-accent" aria-hidden /> {t('kiosk.wakeLockLabel')}
+                </span>
+                <Badge
+                  variant={
+                    wakeLock.error
+                      ? 'danger'
+                      : wakeLock.isActive
+                        ? 'success'
+                        : wakeLock.isSupported
+                          ? 'warning'
+                          : 'neutral'
+                  }
+                >
+                  {wakeLock.error
+                    ? t('kiosk.wakeLockError', { error: wakeLock.error.message })
+                    : wakeLock.isActive
+                      ? t('kiosk.wakeLockActive')
+                      : wakeLock.isSupported
+                        ? t('kiosk.wakeLockInactive')
+                        : t('kiosk.wakeLockUnsupported')}
+                </Badge>
               </div>
 
               <div className="rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-[10px] leading-relaxed text-fg-subtle">

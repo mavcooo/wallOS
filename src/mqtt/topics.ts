@@ -25,6 +25,9 @@ export function buildBrokerUrl(settings: BrokerSettings): string {
  * entità scoperte, tutti i canali di stato e di availability dell'annuncio.
  */
 export function stateTopics(device: DeviceMetadata): string[] {
+  // Le telecamere non pubblicano telemetria MQTT: il flusso è negoziato dal
+  // player e il topic resta solo un identificativo stabile.
+  if (device.kind === 'camera') return [];
   const topics = new Set<string>();
   if (device.topics.state) topics.add(device.topics.state);
   if (device.topics.availability) topics.add(device.topics.availability);

@@ -156,7 +156,8 @@
       "lights": "Lights",
       "powers": "Sockets and loads",
       "media": "Media",
-      "sensors": "Environmental sensors"
+      "sensors": "Environmental sensors",
+      "cameras": "Cameras"
     },
     "adapters": "Active adapters: {{adapters}}",
     "topic": "Topic: {{topic}}"
@@ -284,7 +285,8 @@
       "climate": "Climate",
       "power": "Power",
       "media": "Media",
-      "sensor": "Sensor"
+      "sensor": "Sensor",
+      "camera": "Camera"
     },
     "badges": {
       "favorite": "Favorite",
@@ -353,7 +355,8 @@
         "climate": "Climate",
         "power": "Socket / power",
         "media": "Media",
-        "sensor": "Sensor"
+        "sensor": "Sensor",
+        "camera": "Camera"
       },
       "adapter": "Adapter",
       "adapters": {
@@ -382,7 +385,27 @@
       "fieldMapStrings": "values must be strings",
       "fieldMapInvalid": "invalid fieldMap: {{reason}}",
       "nameRequired": "Name is required.",
-      "roomRequired": "Choose a room."
+      "roomRequired": "Choose a room.",
+      "camera": {
+        "streamUrl": "Stream URL",
+        "streamUrlHint": "Local proxy endpoint over HTTP(S), e.g. http://192.168.0.59:1984/api/webrtc?src=front_gate",
+        "snapshotUrl": "Snapshot URL (optional)",
+        "snapshotHint": "Refreshed JPEG used as a fallback when live is unavailable.",
+        "protocol": "Protocol",
+        "protocols": {
+          "auto": "Auto (WebRTC → HLS → snapshot)",
+          "webrtc": "WebRTC / WHEP",
+          "hls": "HLS",
+          "mjpeg": "MJPEG / snapshot"
+        },
+        "aspectRatio": "Aspect ratio",
+        "aspectRatios": {
+          "16:9": "16:9",
+          "4:3": "4:3"
+        },
+        "streamRequired": "A camera requires a stream URL.",
+        "streamInvalid": "Use a valid http(s) or webrtc:// URL."
+      }
     },
     "scenario": {
       "namePlaceholder": "Goodnight",

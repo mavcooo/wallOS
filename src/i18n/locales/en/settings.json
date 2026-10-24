@@ -92,7 +92,12 @@
     "summary": "Fade {{fade}} ms · clock at {{opacity}}% in sleep · {{mode}} every {{seconds}} s · touch guard {{guard}} ms.",
     "modeFloating": "floating clock",
     "modeShift": "dashboard micro-shift",
-    "preview": "Show screensaver preview"
+    "preview": "Show screensaver preview",
+    "wakeLockLabel": "Screen wake lock",
+    "wakeLockActive": "Screen locked (WakeLock active)",
+    "wakeLockInactive": "WakeLock released",
+    "wakeLockUnsupported": "WakeLock not supported by this browser",
+    "wakeLockError": "WakeLock error: {{error}}"
   },
   "pin": {
     "title": "Panel PIN",

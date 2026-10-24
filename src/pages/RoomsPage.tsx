@@ -46,6 +46,7 @@ function groupByKind(devices: readonly DeviceMetadata[]) {
     powers: devices.filter((device) => device.kind === 'power'),
     media: devices.filter((device) => device.kind === 'media'),
     sensors: devices.filter((device) => device.kind === 'sensor'),
+    cameras: devices.filter((device) => device.kind === 'camera'),
   };
 }
 
@@ -273,6 +274,16 @@ export function RoomsPage() {
           <Group title={t('rooms.groups.powers')} count={groups.powers.length}>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
               {groups.powers.map((device) => (
+                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
+              ))}
+            </div>
+          </Group>
+        ) : null}
+
+        {groups.cameras.length > 0 ? (
+          <Group title={t('rooms.groups.cameras')} count={groups.cameras.length}>
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+              {groups.cameras.map((device) => (
                 <DeviceCard key={device.id} deviceId={device.id} showFavorite />
               ))}
             </div>

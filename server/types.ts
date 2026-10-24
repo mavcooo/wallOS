@@ -52,13 +52,17 @@ export interface DeviceRow {
   id: string;
   room_id: string;
   name: string;
-  type: 'light' | 'climate' | 'power' | 'media' | 'sensor';
+  type: 'light' | 'climate' | 'power' | 'media' | 'sensor' | 'camera';
   adapter: string;
   model: string | null;
   state_topic: string;
   command_topic: string | null;
   availability_topic: string | null;
   field_map: Record<string, string> | null;
+  stream_url: string | null;
+  snapshot_url: string | null;
+  stream_protocol: 'webrtc' | 'hls' | 'mjpeg' | 'auto' | null;
+  aspect_ratio: '16:9' | '4:3' | null;
   metadata: Record<string, unknown>;
   favorite: boolean;
   protected: boolean;

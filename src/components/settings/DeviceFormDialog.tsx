@@ -34,12 +34,23 @@ import {
 import { useToastStore } from '@/store/toastStore';
 import type {
   AdapterId,
+  CameraAspectRatio,
+  CameraProtocol,
   DeviceKind,
   DeviceMetadata,
 } from '@/types/device';
 import type { RawMqttMessage } from '@/types/mqtt';
 
-const KINDS: readonly DeviceKind[] = ['light', 'climate', 'power', 'media', 'sensor'];
+const KINDS: readonly DeviceKind[] = [
+  'light',
+  'climate',
+  'power',
+  'media',
+  'sensor',
+  'camera',
+];
+const CAMERA_PROTOCOLS: readonly CameraProtocol[] = ['auto', 'webrtc', 'hls', 'mjpeg'];
+const ASPECT_RATIOS: readonly CameraAspectRatio[] = ['16:9', '4:3'];
 const ADAPTERS: readonly AdapterId[] = [
   'zigbee2mqtt',
   'shelly',
@@ -66,6 +77,10 @@ interface Values {
   stateTopic: string;
   commandTopic: string;
   availabilityTopic: string;
+  streamUrl: string;
+  snapshotUrl: string;
+  streamProtocol: CameraProtocol;
+  aspectRatio: CameraAspectRatio;
   displayOrder: string;
   favorite: boolean;
   protectedDevice: boolean;
@@ -85,6 +100,10 @@ function valuesFrom(device: DeviceMetadata | null | undefined, roomId: string): 
     stateTopic: device?.topics.state ?? '',
     commandTopic: device?.topics.command ?? '',
     availabilityTopic: device?.topics.availability ?? '',
+    streamUrl: device?.kind === 'camera' ? device.stream.url : '',
+    snapshotUrl: device?.kind === 'camera' ? (device.stream.snapshotUrl ?? '') : '',
+    streamProtocol: device?.kind === 'camera' ? device.stream.protocol : 'auto',
+    aspectRatio: device?.kind === 'camera' ? device.stream.aspectRatio : '16:9',
     displayOrder: String(device?.displayOrder ?? 0),
     favorite: device?.favorite ?? false,
     protectedDevice: device?.protected ?? false,
@@ -170,7 +189,7 @@ export function DeviceFormDialog({
           name: z.string().trim().min(1, t('forms.device.nameRequired')).max(80),
           id: z.string().trim().max(64),
           roomId: z.string().trim().min(1, t('forms.device.roomRequired')),
-          kind: z.enum(['light', 'climate', 'power', 'media', 'sensor']),
+          kind: z.enum(['light', 'climate', 'power', 'media', 'sensor', 'camera']),
           adapter: z.enum([
             'zigbee2mqtt',
             'shelly',
@@ -179,9 +198,13 @@ export function DeviceFormDialog({
             'ha-discovery',
           ]),
           model: z.string().trim().max(80),
-          stateTopic: topicSchema,
+          stateTopic: z.string().trim().max(512),
           commandTopic: z.union([z.literal(''), topicSchema]),
           availabilityTopic: z.union([z.literal(''), topicSchema]),
+          streamUrl: z.string().trim().max(1_024),
+          snapshotUrl: z.string().trim().max(1_024),
+          streamProtocol: z.enum(['webrtc', 'hls', 'mjpeg', 'auto']),
+          aspectRatio: z.enum(['16:9', '4:3']),
           displayOrder: z.string(),
           favorite: z.boolean(),
           protectedDevice: z.boolean(),
@@ -203,6 +226,34 @@ export function DeviceFormDialog({
               code: 'custom',
               path: ['displayOrder'],
               message: tSettings('topology.deviceDialog.errors.order'),
+            });
+          }
+          if (data.kind === 'camera') {
+            if (!data.streamUrl) {
+              context.addIssue({
+                code: 'custom',
+                path: ['streamUrl'],
+                message: t('forms.device.camera.streamRequired'),
+              });
+            } else if (!/^(https?|webrtc):\/\/[^\s]+$/i.test(data.streamUrl)) {
+              context.addIssue({
+                code: 'custom',
+                path: ['streamUrl'],
+                message: t('forms.device.camera.streamInvalid'),
+              });
+            }
+            if (data.snapshotUrl && !/^https?:\/\/[^\s]+$/i.test(data.snapshotUrl)) {
+              context.addIssue({
+                code: 'custom',
+                path: ['snapshotUrl'],
+                message: t('forms.device.camera.streamInvalid'),
+              });
+            }
+          } else if (!isValidDeviceTopic(data.stateTopic)) {
+            context.addIssue({
+              code: 'custom',
+              path: ['stateTopic'],
+              message: tSettings('topology.deviceDialog.errors.topic'),
             });
           }
           if (data.adapter === 'custom-json') {
@@ -270,6 +321,7 @@ export function DeviceFormDialog({
         fieldMap = { ...existing, relay: String(Number(data.relay) || 1) };
       }
 
+      const camera = data.kind === 'camera';
       const payload: DevicePayload = {
         roomId: data.roomId,
         name: data.name,
@@ -277,12 +329,20 @@ export function DeviceFormDialog({
         adapter: data.adapter,
         model: data.model || null,
         stateTopic: data.stateTopic,
-        commandTopic: data.commandTopic || null,
-        availabilityTopic: data.availabilityTopic || null,
+        commandTopic: camera ? null : data.commandTopic || null,
+        availabilityTopic: camera ? null : data.availabilityTopic || null,
         favorite: data.favorite,
         protected: data.protectedDevice,
         displayOrder: Number(data.displayOrder) || 0,
         ...(fieldMap ? { fieldMap } : {}),
+        ...(camera
+          ? {
+              streamUrl: data.streamUrl,
+              snapshotUrl: data.snapshotUrl || null,
+              streamProtocol: data.streamProtocol,
+              aspectRatio: data.aspectRatio,
+            }
+          : {}),
       };
 
       if (device) {
@@ -580,50 +640,129 @@ export function DeviceFormDialog({
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="device-state-topic">{t('forms.device.stateTopic')}</Label>
-                  <Input
-                    id="device-state-topic"
-                    value={values.stateTopic}
-                    onChange={(event) => patch({ stateTopic: event.target.value })}
-                    maxLength={512}
-                    placeholder="zigbee2mqtt/garage/light"
-                    spellCheck={false}
-                  />
-                  {!isValidDeviceTopic(values.stateTopic) ? (
-                    <span className="text-[10px] text-danger">
-                      {tSettings('topology.deviceDialog.errors.topic')}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="device-command-topic">{t('forms.device.commandTopic')}</Label>
-                  <Input
-                    id="device-command-topic"
-                    value={values.commandTopic}
-                    onChange={(event) => patch({ commandTopic: event.target.value })}
-                    maxLength={512}
-                    placeholder="zigbee2mqtt/garage/light/set"
-                    spellCheck={false}
-                  />
-                  <span className="text-[10px] text-fg-subtle">{t('forms.device.commandHint')}</span>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="device-availability-topic">
-                    {t('forms.device.availabilityTopic')}
-                  </Label>
-                  <Input
-                    id="device-availability-topic"
-                    value={values.availabilityTopic}
-                    onChange={(event) => patch({ availabilityTopic: event.target.value })}
-                    maxLength={512}
-                    placeholder="zigbee2mqtt/garage/light/availability"
-                    spellCheck={false}
-                  />
-                  <span className="text-[10px] text-fg-subtle">
-                    {t('forms.device.availabilityHint')}
-                  </span>
-                </div>
+                {values.kind === 'camera' ? (
+                  <>
+                    <div className="flex flex-col gap-1.5 sm:col-span-2">
+                      <Label htmlFor="device-stream-url">
+                        {t('forms.device.camera.streamUrl')}
+                      </Label>
+                      <Input
+                        id="device-stream-url"
+                        value={values.streamUrl}
+                        onChange={(event) => patch({ streamUrl: event.target.value })}
+                        maxLength={1_024}
+                        placeholder="http://192.168.0.59:1984/api/webrtc?src=porta_ingresso"
+                        spellCheck={false}
+                      />
+                      <span className="text-[10px] leading-relaxed text-fg-subtle">
+                        {t('forms.device.camera.streamUrlHint')}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="device-snapshot-url">
+                        {t('forms.device.camera.snapshotUrl')}
+                      </Label>
+                      <Input
+                        id="device-snapshot-url"
+                        value={values.snapshotUrl}
+                        onChange={(event) => patch({ snapshotUrl: event.target.value })}
+                        maxLength={1_024}
+                        placeholder="http://192.168.0.59:1984/api/frame.jpeg?src=porta_ingresso"
+                        spellCheck={false}
+                      />
+                      <span className="text-[10px] text-fg-subtle">
+                        {t('forms.device.camera.snapshotHint')}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="device-stream-protocol">
+                        {t('forms.device.camera.protocol')}
+                      </Label>
+                      <select
+                        id="device-stream-protocol"
+                        value={values.streamProtocol}
+                        onChange={(event) =>
+                          patch({ streamProtocol: event.target.value as CameraProtocol })
+                        }
+                        className="h-11 rounded-xl border border-line bg-panel-2 px-3 text-sm text-fg focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20"
+                      >
+                        {CAMERA_PROTOCOLS.map((protocol) => (
+                          <option key={protocol} value={protocol}>
+                            {t(`forms.device.camera.protocols.${protocol}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="device-aspect-ratio">
+                        {t('forms.device.camera.aspectRatio')}
+                      </Label>
+                      <select
+                        id="device-aspect-ratio"
+                        value={values.aspectRatio}
+                        onChange={(event) =>
+                          patch({ aspectRatio: event.target.value as CameraAspectRatio })
+                        }
+                        className="h-11 rounded-xl border border-line bg-panel-2 px-3 text-sm text-fg focus-visible:border-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/20"
+                      >
+                        {ASPECT_RATIOS.map((ratio) => (
+                          <option key={ratio} value={ratio}>
+                            {t(`forms.device.camera.aspectRatios.${ratio}`)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="device-state-topic">{t('forms.device.stateTopic')}</Label>
+                      <Input
+                        id="device-state-topic"
+                        value={values.stateTopic}
+                        onChange={(event) => patch({ stateTopic: event.target.value })}
+                        maxLength={512}
+                        placeholder="zigbee2mqtt/garage/light"
+                        spellCheck={false}
+                      />
+                      {!isValidDeviceTopic(values.stateTopic) ? (
+                        <span className="text-[10px] text-danger">
+                          {tSettings('topology.deviceDialog.errors.topic')}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="device-command-topic">{t('forms.device.commandTopic')}</Label>
+                      <Input
+                        id="device-command-topic"
+                        value={values.commandTopic}
+                        onChange={(event) => patch({ commandTopic: event.target.value })}
+                        maxLength={512}
+                        placeholder="zigbee2mqtt/garage/light/set"
+                        spellCheck={false}
+                      />
+                      <span className="text-[10px] text-fg-subtle">
+                        {t('forms.device.commandHint')}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor="device-availability-topic">
+                        {t('forms.device.availabilityTopic')}
+                      </Label>
+                      <Input
+                        id="device-availability-topic"
+                        value={values.availabilityTopic}
+                        onChange={(event) => patch({ availabilityTopic: event.target.value })}
+                        maxLength={512}
+                        placeholder="zigbee2mqtt/garage/light/availability"
+                        spellCheck={false}
+                      />
+                      <span className="text-[10px] text-fg-subtle">
+                        {t('forms.device.availabilityHint')}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="flex flex-col gap-1.5">
                   <Label htmlFor="device-order">{t('forms.order')}</Label>
                   <Input

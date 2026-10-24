@@ -421,4 +421,25 @@ export const initialDevices: readonly Device[] = [
       maxWatts: 800,
     },
   },
+  {
+    id: 'camera-outdoor-gate',
+    name: 'Ingresso carrabile',
+    room: 'outdoor',
+    kind: 'camera',
+    adapter: 'custom-json',
+    model: 'go2rtc · Hikvision',
+    // La telecamera non usa MQTT: il topic è solo un identificativo stabile.
+    topics: { state: 'camera/outdoor/gate' },
+    availability: 'online',
+    lastSeen: null,
+    favorite: true,
+    protected: false,
+    state: { live: true },
+    stream: {
+      url: 'http://192.168.0.59:1984/api/webrtc?src=porta_ingresso',
+      snapshotUrl: 'http://192.168.0.59:1984/api/frame.jpeg?src=porta_ingresso',
+      protocol: 'auto',
+      aspectRatio: '16:9',
+    },
+  },
 ];

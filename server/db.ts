@@ -88,13 +88,17 @@ export interface NewDevice {
   id: string;
   roomId: string;
   name: string;
-  type: 'light' | 'climate' | 'power' | 'media' | 'sensor';
+  type: 'light' | 'climate' | 'power' | 'media' | 'sensor' | 'camera';
   adapter: string;
   model: string | null;
   stateTopic: string;
   commandTopic: string | null;
   availabilityTopic: string | null;
   fieldMap: Record<string, string> | null;
+  streamUrl: string | null;
+  snapshotUrl: string | null;
+  streamProtocol: 'webrtc' | 'hls' | 'mjpeg' | 'auto' | null;
+  aspectRatio: '16:9' | '4:3' | null;
   metadata: Record<string, unknown>;
   favorite: boolean;
   protected: boolean;
@@ -129,6 +133,10 @@ export interface DeviceFields {
   stateTopic: string;
   commandTopic: string | null;
   availabilityTopic: string | null;
+  streamUrl: string | null;
+  snapshotUrl: string | null;
+  streamProtocol: 'webrtc' | 'hls' | 'mjpeg' | 'auto' | null;
+  aspectRatio: '16:9' | '4:3' | null;
   favorite: boolean;
   protected: boolean;
   displayOrder: number;
@@ -664,7 +672,8 @@ export class Database {
   async listDevices(): Promise<DeviceRow[]> {
     const { rows } = await this.client.query<DeviceRow>(
       `SELECT id, room_id, name, type, adapter, model, state_topic, command_topic,
-              availability_topic, field_map, metadata, favorite, protected, display_order
+              availability_topic, field_map, stream_url, snapshot_url,
+              stream_protocol, aspect_ratio, metadata, favorite, protected, display_order
        FROM devices
        ORDER BY display_order, name`,
     );
@@ -739,10 +748,11 @@ export class Database {
     await this.client.query(
       `INSERT INTO devices (
          id, room_id, name, type, adapter, model, state_topic, command_topic,
-         availability_topic, field_map, metadata, favorite, protected, display_order
+         availability_topic, field_map, stream_url, snapshot_url, stream_protocol,
+         aspect_ratio, metadata, favorite, protected, display_order
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-         $10::jsonb, $11::jsonb, $12, $13, $14
+         $10::jsonb, $11, $12, $13, $14, $15::jsonb, $16, $17, $18
        )`,
       [
         device.id,
@@ -755,6 +765,10 @@ export class Database {
         device.commandTopic,
         device.availabilityTopic,
         device.fieldMap === null ? null : JSON.stringify(device.fieldMap),
+        device.streamUrl,
+        device.snapshotUrl,
+        device.streamProtocol,
+        device.aspectRatio,
         JSON.stringify(device.metadata),
         device.favorite,
         device.protected,
@@ -772,7 +786,9 @@ export class Database {
          state_topic = $7, command_topic = $8, availability_topic = $9,
          favorite = $10, protected = $11, display_order = $12,
          field_map = CASE WHEN $13 THEN $14::jsonb ELSE field_map END,
-         metadata = CASE WHEN $15 THEN $16::jsonb ELSE metadata END,
+         stream_url = $15, snapshot_url = $16, stream_protocol = $17,
+         aspect_ratio = $18,
+         metadata = CASE WHEN $19 THEN $20::jsonb ELSE metadata END,
          updated_at = now()
        WHERE id = $1`,
       [
@@ -792,6 +808,10 @@ export class Database {
         device.fieldMap === undefined || device.fieldMap === null
           ? null
           : JSON.stringify(device.fieldMap),
+        device.streamUrl,
+        device.snapshotUrl,
+        device.streamProtocol,
+        device.aspectRatio,
         hasMetadata,
         device.metadata === undefined ? null : JSON.stringify(device.metadata),
       ],
@@ -853,10 +873,11 @@ export class Database {
     await this.client.query(
       `INSERT INTO devices (
          id, room_id, name, type, adapter, model, state_topic, command_topic,
-         availability_topic, field_map, metadata, favorite, protected, display_order
+         availability_topic, field_map, stream_url, snapshot_url, stream_protocol,
+         aspect_ratio, metadata, favorite, protected, display_order
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-         $10::jsonb, $11::jsonb, $12, $13, $14
+         $10::jsonb, $11, $12, $13, $14, $15::jsonb, $16, $17, $18
        )
        ON CONFLICT (id) DO NOTHING`,
       [
@@ -870,6 +891,10 @@ export class Database {
         device.commandTopic,
         device.availabilityTopic,
         device.fieldMap === null ? null : JSON.stringify(device.fieldMap),
+        device.streamUrl,
+        device.snapshotUrl,
+        device.streamProtocol,
+        device.aspectRatio,
         JSON.stringify(device.metadata),
         device.favorite,
         device.protected,

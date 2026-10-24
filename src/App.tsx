@@ -15,6 +15,7 @@ import { CarouselDots } from '@/components/ui/carousel-dots';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { usePerformanceMode } from '@/hooks/usePerformanceMode';
+import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { canView } from '@/lib/permissions';
 import { createQueryClient } from '@/lib/queryClient';
@@ -207,6 +208,11 @@ export default function App() {
   // Modalità a basse prestazioni: l'attributo su <html> è già impostato dallo
   // script inline in index.html; il hook lo mantiene allineato allo store.
   usePerformanceMode();
+  // Wake Lock a livello root: impedisce lo standby hardware dello schermo H24 e
+  // riacquisisce il sentinel al ritorno in `visible`. Non tocca il dimmer
+  // software (KioskDimmerOverlay), che resta l'unico gestore dello spegnimento
+  // visivo; se il browser non supporta l'API l'hook è un no-op.
+  useScreenWakeLock();
   // Un client per albero React: in StrictMode l'initializer viene scartato al
   // doppio render di sviluppo, senza condividere cache tra test o mount.
   const [queryClient] = useState(createQueryClient);

@@ -105,6 +105,9 @@
     /* Kiosk: nessun pinch-zoom, rimbalzo o callout del browser. */
     touch-action: pan-x pan-y;
     overscroll-behavior: none;
+    /* Niente momentum scrolling elastico: il bounce è solo dei contenitori
+       interni con `.kiosk-scroll` (`overscroll-behavior: contain`). */
+    -webkit-overflow-scrolling: auto;
     -webkit-touch-callout: none;
   }
 

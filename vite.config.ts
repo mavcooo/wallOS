@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
           id: '/',
           name: 'wallOS Dashboard',
           short_name: 'wallOS',
-          description: 'Dashboard domotica per pannelli kiosk touch a parete.',
+          description: 'Pannello domotico locale Kiosk',
           lang: 'it',
           dir: 'ltr',
           start_url: '/',

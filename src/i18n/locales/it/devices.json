@@ -57,6 +57,33 @@
     "unmute": "Riattiva audio",
     "volumeAria": "Volume {{name}}"
   },
+  "camera": {
+    "live": "LIVE",
+    "offline": "OFFLINE",
+    "connecting": "Connessione…",
+    "reconnecting": "Riconnessione…",
+    "suspended": "In pausa",
+    "error": "Flusso non disponibile",
+    "retry": "Riprova",
+    "openAria": "Apri la telecamera {{name}}",
+    "close": "Chiudi telecamera",
+    "expand": "Ingrandisci",
+    "mute": "Disattiva audio",
+    "unmute": "Attiva audio",
+    "snapshot": "Salva istantanea",
+    "snapshotUnavailable": "Istantanea non disponibile",
+    "snapshotSaved": "Istantanea salvata",
+    "pip": "Picture-in-Picture",
+    "pipUnsupported": "PiP non supportato",
+    "liveBadge": "In diretta",
+    "mode": {
+      "webrtc": "WebRTC",
+      "hls": "HLS",
+      "mjpeg": "MJPEG",
+      "snapshot": "Snapshot"
+    },
+    "updatedAt": "Aggiornato alle {{time}}"
+  },
   "sensor": {
     "smoke": {
       "alarm": "Allarme",

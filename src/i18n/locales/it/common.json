@@ -156,7 +156,8 @@
       "lights": "Luci",
       "powers": "Prese e carichi",
       "media": "Media",
-      "sensors": "Sensori ambientali"
+      "sensors": "Sensori ambientali",
+      "cameras": "Telecamere"
     },
     "adapters": "Adapter attivi: {{adapters}}",
     "topic": "Topic: {{topic}}"
@@ -284,7 +285,8 @@
       "climate": "Clima",
       "power": "Energia",
       "media": "Media",
-      "sensor": "Sensore"
+      "sensor": "Sensore",
+      "camera": "Telecamera"
     },
     "badges": {
       "favorite": "Preferito",
@@ -353,7 +355,8 @@
         "climate": "Clima",
         "power": "Presa / energia",
         "media": "Media",
-        "sensor": "Sensore"
+        "sensor": "Sensore",
+        "camera": "Telecamera"
       },
       "adapter": "Adapter",
       "adapters": {
@@ -382,7 +385,27 @@
       "fieldMapStrings": "i valori devono essere stringhe",
       "fieldMapInvalid": "fieldMap non valido: {{reason}}",
       "nameRequired": "Il nome è obbligatorio.",
-      "roomRequired": "Scegli una stanza."
+      "roomRequired": "Scegli una stanza.",
+      "camera": {
+        "streamUrl": "URL del flusso",
+        "streamUrlHint": "Endpoint HTTP(S) del proxy locale, es. http://192.168.0.59:1984/api/webrtc?src=porta_ingresso",
+        "snapshotUrl": "URL snapshot (opzionale)",
+        "snapshotHint": "JPEG aggiornato come fallback quando il live non è disponibile.",
+        "protocol": "Protocollo",
+        "protocols": {
+          "auto": "Auto (WebRTC → HLS → snapshot)",
+          "webrtc": "WebRTC / WHEP",
+          "hls": "HLS",
+          "mjpeg": "MJPEG / snapshot"
+        },
+        "aspectRatio": "Formato",
+        "aspectRatios": {
+          "16:9": "16:9",
+          "4:3": "4:3"
+        },
+        "streamRequired": "L’URL del flusso è obbligatorio per una telecamera.",
+        "streamInvalid": "Usa un URL http(s) o webrtc:// valido."
+      }
     },
     "scenario": {
       "namePlaceholder": "Buonanotte",

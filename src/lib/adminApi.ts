@@ -1,7 +1,15 @@
 import i18n from '@/i18n';
 import { ApiError, refreshSession } from '@/lib/authApi';
 import type { RoomConfig } from '@/lib/rooms';
-import type { AdapterId, Device, DeviceKind, Scenario, ScenarioStep } from '@/types/device';
+import type {
+  AdapterId,
+  CameraAspectRatio,
+  CameraProtocol,
+  Device,
+  DeviceKind,
+  Scenario,
+  ScenarioStep,
+} from '@/types/device';
 
 const API_BASE = (import.meta.env.VITE_AUTH_API_BASE?.trim() || '/api').replace(/\/+$/, '');
 
@@ -28,6 +36,11 @@ export interface DevicePayload {
   displayOrder?: number;
   /** Solo custom-json: campo normalizzato → percorso nel payload. */
   fieldMap?: Record<string, string> | null;
+  /** Solo camera: endpoint WHEP/HLS/MJPEG e fallback snapshot. */
+  streamUrl?: string | null;
+  snapshotUrl?: string | null;
+  streamProtocol?: CameraProtocol | null;
+  aspectRatio?: CameraAspectRatio | null;
 }
 
 export interface ScenarioPayload {
