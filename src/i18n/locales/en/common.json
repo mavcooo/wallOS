@@ -262,6 +262,31 @@
       "generic": "Database error"
     }
   },
+  "alarm": {
+    "badge": "Critical alert",
+    "types": {
+      "smoke": "Smoke detected",
+      "flood": "Water leak",
+      "intrusion": "Intrusion detected",
+      "connection": "System offline",
+      "generic": "Critical alert"
+    },
+    "since": "Triggered at {{time}}",
+    "others_one": "{{count}} more active alarm",
+    "others_other": "{{count}} more active alarms",
+    "silence": "Silence sound",
+    "silenced": "Sound silenced",
+    "acknowledge": "Acknowledge and close",
+    "pinTitle": "Confirm alarm acknowledgement",
+    "pinDescription": "“{{title}}” requires an authorised profile.",
+    "pinAction": "The alarm stays active until the PIN is verified.",
+    "watchdog": {
+      "databaseTitle": "Database unreachable",
+      "databaseDescription": "No response for over a minute: home data may be stale.",
+      "brokerTitle": "MQTT broker offline",
+      "brokerDescription": "No connection for over a minute: queued commands are waiting."
+    }
+  },
   "admin": {
     "title": "Home configuration",
     "description": "Rooms, devices and scenarios are PostgreSQL rows. Every save goes through the protected APIs (admin role) and updates the store immediately: no kiosk restart.",

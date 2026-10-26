@@ -5,6 +5,7 @@ import { KioskDimmerOverlay } from '@/components/kiosk/KioskDimmerOverlay';
 import { useKioskDimmer } from '@/hooks/useKioskDimmer';
 import { usePixelShift } from '@/hooks/usePixelShift';
 import { useHomeStore } from '@/store/homeStore';
+import { selectCriticalCount, useToastStore } from '@/store/toastStore';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 
@@ -17,7 +18,15 @@ interface AppShellProps {
 export function AppShell({ children, mainProps }: AppShellProps) {
   const timeoutMs = useHomeStore((state) => state.ui.dimmerTimeoutMs);
   const burnIn = useHomeStore((state) => state.burnIn);
-  const { isDimmed, sleep } = useKioskDimmer({ timeoutMs });
+  // Ponte store → dimmer: un allarme critico attivo blocca il countdown.
+  const criticalCount = useToastStore(selectCriticalCount);
+  const { isDimmed, sleep, wake } = useKioskDimmer({ timeoutMs, hold: criticalCount > 0 });
+
+  // L'allarme deve trovare lo schermo acceso: il risveglio usa la stessa
+  // pipeline del tap, quindi l'overlay è subito visibile e toccabile.
+  useEffect(() => {
+    if (criticalCount > 0) wake();
+  }, [criticalCount, wake]);
 
   // Micro-spostamento della dashboard mentre la UI è attiva: 1-4 px attorno
   // all'origine, solo `transform`. Si azzera appena parte il dimmer, perché
@@ -29,11 +38,14 @@ export function AppShell({ children, mainProps }: AppShellProps) {
   });
 
   // Permette a qualsiasi pagina (es. Impostazioni) di testare lo standby.
+  // Durante un allarme lo standby manuale è ignorato: il pannello resta acceso.
   useEffect(() => {
-    const handler = () => sleep();
+    const handler = () => {
+      if (criticalCount === 0) sleep();
+    };
     window.addEventListener('domus:kiosk-sleep', handler);
     return () => window.removeEventListener('domus:kiosk-sleep', handler);
-  }, [sleep]);
+  }, [criticalCount, sleep]);
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-bg">

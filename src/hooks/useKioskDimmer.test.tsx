@@ -34,6 +34,28 @@ it('il passare del tempo (e quindi i movimenti anti burn-in) non risveglia il di
   expect(result.current.isDimmed).toBe(false);
 });
 
+it('hold sveglia lo schermo e congela il countdown finché resta attivo', () => {
+  const { result, rerender } = renderHook(
+    ({ hold }: { hold: boolean }) => useKioskDimmer({ timeoutMs: 1_000, hold }),
+    { initialProps: { hold: false } },
+  );
+
+  act(() => {
+    vi.advanceTimersByTime(1_500);
+  });
+  expect(result.current.isDimmed).toBe(true);
+
+  // Allarme critico: il pannello si riaccende subito.
+  rerender({ hold: true });
+  expect(result.current.isDimmed).toBe(false);
+
+  // Nessun nuovo standby mentre l'allarme è attivo.
+  act(() => {
+    vi.advanceTimersByTime(120_000);
+  });
+  expect(result.current.isDimmed).toBe(false);
+});
+
 it('azzera il tick di inattività allo smontaggio', () => {
   const { unmount } = renderHook(() => useKioskDimmer({ timeoutMs: 1_000 }));
 

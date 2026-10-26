@@ -9,6 +9,9 @@ import {
 } from '@/store/databaseHealthStore';
 import { useToastStore } from '@/store/toastStore';
 
+/** Dopo questo tempo di down il database diventa un allarme critico. */
+const DATABASE_WATCHDOG_MS = 60_000;
+
 /**
  * Monitoraggio periodico di `/api/health`.
  *
@@ -31,6 +34,8 @@ export function useDatabaseHealthMonitor(options?: {
     checkedAt: null,
   });
   const lastStatus = useRef<'up' | 'down' | null>(null);
+  const downSince = useRef<number | null>(null);
+  const watchdogAlertId = useRef<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -51,6 +56,28 @@ export function useDatabaseHealthMonitor(options?: {
       setState(snapshot);
       // L'header legge lo stesso snapshot senza avviare un secondo polling.
       useDatabaseHealthStore.getState().setHealth(snapshot);
+
+      // Watchdog: un down persistente non è un toast, è un allarme bloccante.
+      const notifications = useToastStore.getState();
+      if (health.status === 'down') {
+        if (downSince.current === null) downSince.current = Date.now();
+        if (
+          !watchdogAlertId.current &&
+          Date.now() - downSince.current >= DATABASE_WATCHDOG_MS
+        ) {
+          watchdogAlertId.current = notifications.addCritical({
+            title: i18n.t('alarm.watchdog.databaseTitle'),
+            description: i18n.t('alarm.watchdog.databaseDescription'),
+            metadata: { type: 'connection', source: 'database' },
+          });
+        }
+      } else {
+        downSince.current = null;
+        if (watchdogAlertId.current) {
+          notifications.acknowledgeCritical(watchdogAlertId.current);
+          watchdogAlertId.current = null;
+        }
+      }
 
       const toast = useToastStore.getState().push;
       if (health.status === 'down' && lastStatus.current !== 'down') {
@@ -85,6 +112,10 @@ export function useDatabaseHealthMonitor(options?: {
       active = false;
       controller.abort();
       if (timer !== undefined) window.clearTimeout(timer);
+      if (watchdogAlertId.current) {
+        useToastStore.getState().acknowledgeCritical(watchdogAlertId.current);
+        watchdogAlertId.current = null;
+      }
     };
   }, [intervalMs, timeoutMs]);
 

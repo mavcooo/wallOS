@@ -12,6 +12,7 @@ import { DatabaseHealthMonitor } from '@/components/layout/DatabaseHealthMonitor
 import { PinProvider } from '@/components/kiosk/PinProvider';
 import { Toaster } from '@/components/kiosk/Toaster';
 import { CarouselDots } from '@/components/ui/carousel-dots';
+import { CriticalAlertOverlay } from '@/components/ui/CriticalAlertOverlay';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { usePerformanceMode } from '@/hooks/usePerformanceMode';
@@ -222,19 +223,23 @@ export default function App() {
       {/* Cache della topologia legata alla sessione: cambio profilo → refetch,
           logout → query eliminata. */}
       <QuerySessionBoundary />
-      {/* Health del database a livello applicazione: notifiche e badge anche
-          sul lock screen, prima che la topologia sia caricata. */}
-      <DatabaseHealthMonitor />
-      <AuthGate>
-        <TopologyGate>
-          <PinProvider>
+      {/* Il PIN è condiviso da azioni protette e riconoscimento allarmi, anche
+          sul lock screen: il provider avvolge l'intera applicazione. */}
+      <PinProvider>
+        {/* Health del database a livello applicazione: notifiche e badge anche
+            sul lock screen, prima che la topologia sia caricata. */}
+        <DatabaseHealthMonitor />
+        <AuthGate>
+          <TopologyGate>
             <MqttProvider>
               <AppNavigation />
             </MqttProvider>
-          </PinProvider>
-        </TopologyGate>
-      </AuthGate>
-      <Toaster />
+          </TopologyGate>
+        </AuthGate>
+        <Toaster />
+        {/* Allarmi critici: sopra il dimmer kiosk e il lock screen. */}
+        <CriticalAlertOverlay />
+      </PinProvider>
     </QueryClientProvider>
   );
 }

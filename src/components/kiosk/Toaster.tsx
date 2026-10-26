@@ -1,4 +1,4 @@
-import { CheckCircle2, Info, X, XCircle } from 'lucide-react';
+import { CheckCircle2, Info, TriangleAlert, X, XCircle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -8,14 +8,20 @@ const ICONS = {
   success: CheckCircle2,
   error: XCircle,
   info: Info,
+  warning: TriangleAlert,
 } as const;
 
+/**
+ * Toast transitori (`info`/`warning`). Gli allarmi `critical` non passano di
+ * qui: sono bloccanti e vivono in `CriticalAlertOverlay`.
+ */
 export function Toaster() {
   const { t } = useTranslation();
   const toasts = useToastStore((state) => state.toasts);
   const dismiss = useToastStore((state) => state.dismiss);
 
-  if (toasts.length === 0) return null;
+  const visible = toasts.filter((toast) => toast.priority !== 'critical');
+  if (visible.length === 0) return null;
 
   return (
     <div
@@ -23,25 +29,28 @@ export function Toaster() {
       role="status"
       aria-live="polite"
     >
-      {toasts.map((toast) => {
-        const Icon = ICONS[toast.tone];
+      {visible.map((toast) => {
+        const kind = toast.tone ?? (toast.priority === 'warning' ? 'warning' : 'info');
+        const Icon = ICONS[kind];
         return (
           <div
             key={toast.id}
             className={cn(
               'pointer-events-auto flex items-start gap-3 rounded-2xl border bg-panel/95 p-3 shadow-2xl backdrop-blur',
               'animate-rise',
-              toast.tone === 'success' && 'border-success/30',
-              toast.tone === 'error' && 'border-danger/30',
-              toast.tone === 'info' && 'border-line',
+              kind === 'success' && 'border-success/30',
+              kind === 'error' && 'border-danger/30',
+              kind === 'warning' && 'border-warning/40',
+              kind === 'info' && 'border-line',
             )}
           >
             <Icon
               className={cn(
                 'mt-0.5 size-4 shrink-0',
-                toast.tone === 'success' && 'text-success',
-                toast.tone === 'error' && 'text-danger',
-                toast.tone === 'info' && 'text-accent',
+                kind === 'success' && 'text-success',
+                kind === 'error' && 'text-danger',
+                kind === 'warning' && 'text-warning',
+                kind === 'info' && 'text-accent',
               )}
             />
             <div className="min-w-0 flex-1">

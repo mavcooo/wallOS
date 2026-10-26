@@ -262,6 +262,31 @@
       "generic": "Errore database"
     }
   },
+  "alarm": {
+    "badge": "Allarme critico",
+    "types": {
+      "smoke": "Fumo rilevato",
+      "flood": "Allagamento rilevato",
+      "intrusion": "Intrusione rilevata",
+      "connection": "Sistema non connesso",
+      "generic": "Allarme critico"
+    },
+    "since": "Scattato alle {{time}}",
+    "others_one": "{{count}} altro allarme attivo",
+    "others_other": "{{count}} altri allarmi attivi",
+    "silence": "Tacita segnale sonoro",
+    "silenced": "Segnale sonoro tacitato",
+    "acknowledge": "Riconosci e chiudi",
+    "pinTitle": "Conferma riconoscimento allarme",
+    "pinDescription": "“{{title}}” richiede un profilo autorizzato.",
+    "pinAction": "L'allarme resta attivo finché il PIN non è verificato.",
+    "watchdog": {
+      "databaseTitle": "Database non raggiungibile",
+      "databaseDescription": "Nessuna risposta da oltre un minuto: i dati della casa potrebbero essere obsoleti.",
+      "brokerTitle": "Broker MQTT offline",
+      "brokerDescription": "Nessuna connessione da oltre un minuto: i comandi in coda sono in attesa."
+    }
+  },
   "admin": {
     "title": "Configurazione della casa",
     "description": "Stanze, dispositivi e scenari sono righe di PostgreSQL. Ogni salvataggio passa dalle API protette (ruolo admin) e aggiorna subito lo store: nessun riavvio del kiosk.",

@@ -11,6 +11,11 @@ export interface KioskDimmerOptions {
   /** Durata della transizione verso il nero. */
   fadeMs?: number;
   enabled?: boolean;
+  /**
+   * Congela il timer di inattività (es. allarme critico attivo): lo schermo
+   * resta acceso e non può rioscursi da solo durante un'emergenza.
+   */
+  hold?: boolean;
 }
 
 export interface KioskDimmerApi {
@@ -41,6 +46,7 @@ export function useKioskDimmer(options: KioskDimmerOptions = {}): KioskDimmerApi
   const {
     timeoutMs = KIOSK_DEFAULTS.dimmerTimeoutMs,
     enabled = true,
+    hold = false,
   } = options;
 
   const [phase, setPhase] = useState<DimmerPhase>('awake');
@@ -73,6 +79,13 @@ export function useKioskDimmer(options: KioskDimmerOptions = {}): KioskDimmerApi
   const sleep = useCallback(() => {
     applyPhase('dimmed');
   }, [applyPhase]);
+
+  // Un allarme attivo sveglia subito il pannello e sospende il countdown.
+  useEffect(() => {
+    if (!hold) return;
+    lastActivityRef.current = Date.now();
+    applyPhase('awake');
+  }, [applyPhase, hold]);
 
   useEffect(() => {
     if (!enabled) {
@@ -108,6 +121,12 @@ export function useKioskDimmer(options: KioskDimmerOptions = {}): KioskDimmerApi
 
     const tick = window.setInterval(() => {
       if (document.visibilityState !== 'visible') return;
+      // Finché c'è un allarme non tacitato il timer resta fermo al massimo.
+      if (hold) {
+        lastActivityRef.current = Date.now();
+        setSecondsToSleep(Math.round(timeoutMs / 1000));
+        return;
+      }
       if (phaseRef.current === 'dimmed') {
         setSecondsToSleep(0);
         return;
@@ -129,7 +148,7 @@ export function useKioskDimmer(options: KioskDimmerOptions = {}): KioskDimmerApi
       document.removeEventListener('visibilitychange', onVisibility);
       window.clearInterval(tick);
     };
-  }, [applyPhase, enabled, timeoutMs, wake]);
+  }, [applyPhase, enabled, hold, timeoutMs, wake]);
 
   return {
     phase,
