@@ -9,6 +9,11 @@ import { HttpError } from './http.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerTopologyRoutes } from './routes/topology.js';
 import { registerUserRoutes } from './routes/users.js';
+import {
+  registerTelemetryIngestRoutes,
+  registerTelemetryRoutes,
+  registerTelemetrySummaryRoutes,
+} from './routes/telemetry.js';
 import { hashSecret, randomToken } from './security.js';
 import { seedDatabase } from './seed.js';
 import type { AuthConfig } from './types.js';
@@ -189,6 +194,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   registerAuthRoutes(app, { db, config, dummyPasswordHash });
   registerUserRoutes(app, { db, config });
   registerTopologyRoutes(app, { db, config });
+  registerTelemetryRoutes(app, { db, config });
+  registerTelemetrySummaryRoutes(app, { db, config });
+  registerTelemetryIngestRoutes(app, { db, config });
 
   app.addHook('onClose', async () => {
     await db.close();

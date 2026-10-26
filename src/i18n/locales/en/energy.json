@@ -40,5 +40,26 @@
   "guard": {
     "title": "Protected load",
     "description": "Confirm the command on {{name}}."
+  },
+  "telemetry": {
+    "title": "Historical telemetry",
+    "hint": "Stored samples with 30-day retention",
+    "rangeAria": "Time range",
+    "range": {
+      "24h": "24 h",
+      "7d": "7 days",
+      "30d": "30 days"
+    },
+    "loading": "Loading history…",
+    "error": "History unavailable",
+    "empty": "No samples recorded yet",
+    "noDevice": "No socket available",
+    "points": "{{count}} samples"
+  },
+  "metric": {
+    "power_watts": "Power",
+    "energy_kwh": "Energy",
+    "temperature": "Temperature",
+    "humidity": "Humidity"
   }
 }

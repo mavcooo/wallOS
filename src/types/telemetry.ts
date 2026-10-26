@@ -1,4 +1,4 @@
-import type { DecodedState } from '@/types/device';
+import type { DecodedState } from './device';
 
 /**
  * Configurazione runtime del buffer telemetria.

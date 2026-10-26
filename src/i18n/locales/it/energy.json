@@ -40,5 +40,26 @@
   "guard": {
     "title": "Carico protetto",
     "description": "Conferma il comando su {{name}}."
+  },
+  "telemetry": {
+    "title": "Telemetria storica",
+    "hint": "Campioni salvati con conservazione 30 giorni",
+    "rangeAria": "Intervallo temporale",
+    "range": {
+      "24h": "24 h",
+      "7d": "7 giorni",
+      "30d": "30 giorni"
+    },
+    "loading": "Caricamento storico…",
+    "error": "Storico non disponibile",
+    "empty": "Nessun campione registrato",
+    "noDevice": "Nessuna presa disponibile",
+    "points": "{{count}} campioni"
+  },
+  "metric": {
+    "power_watts": "Potenza",
+    "energy_kwh": "Energia",
+    "temperature": "Temperatura",
+    "humidity": "Umidità"
   }
 }

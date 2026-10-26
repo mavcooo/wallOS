@@ -6,6 +6,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { LivePowerCard } from '@/components/widgets/LivePowerCard';
 import { SummaryCard } from '@/components/widgets/SummaryCard';
+import { TelemetryChart } from '@/components/TelemetryChart';
 import { useDevices } from '@/hooks/useTopologyQuery';
 import { combineDevice } from '@/lib/deviceState';
 import { useMqttApi } from '@/mqtt/MqttProvider';
@@ -108,6 +109,20 @@ export function EnergyPage() {
           </div>
         </section>
       ) : null}
+
+      <section aria-labelledby="telemetry-title" className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
+        <div>
+          <h2 id="telemetry-title" className="text-sm font-semibold text-fg">{t('telemetry.title')}</h2>
+          <p className="mt-0.5 text-[11px] text-fg-subtle">{t('telemetry.hint')}</p>
+        </div>
+        <div className="mt-3">
+          <TelemetryChart
+            deviceId={powerDevices[0]?.id || ''}
+            metric="power_watts"
+            range="24h"
+          />
+        </div>
+      </section>
 
       <section className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
         <div className="flex items-end justify-between">
