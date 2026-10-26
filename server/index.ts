@@ -2,7 +2,7 @@ import { loadEnvFile } from 'node:process';
 
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import { checkDatabaseConnection, describeDatabaseError, describeDatabaseTarget } from './db.js';
+import { bootstrapMigrations } from './migrate.js';
 
 try {
   // Node 24: carica `.env` senza dipendenze aggiuntive. Se il file manca si
@@ -28,7 +28,21 @@ if (config.nodeEnv !== 'production' && !process.env.ADMIN_PASSWORD) {
   );
 }
 
-const databaseTarget = describeDatabaseTarget(config.databaseUrl);
+// Esegui migrazioni DATABASE prima di avviare il server
+// Se il database è aggiornato o le migrazioni terminano con successo, avviare il server HTTP;
+// in caso di errore DDL bloccante, interrompere il bootstrap con log di errore strutturato (process.exit(1))
+let migrationsResult;
+try {
+  migrationsResult = await bootstrapMigrations();
+  if (!migrationsResult.success) {
+    console.error(`[migrate] Bootstrap interrotto: fallimento migratorie\n${migrationsResult.error}`);
+    process.exit(1);
+  }
+  console.log('[migrate] Migrazioni applicate con successo');
+} catch (error) {
+  console.error(`[migrate] Errore critico durante il bootstrap delle migrazioni: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 
 let app;
 try {
@@ -36,13 +50,9 @@ try {
   app = built.app;
   // Controllo esplicito di startup: query reale sul pool prima di ascoltare,
   // con log compatto che non espone la password contenuta nella URL.
-  await checkDatabaseConnection(built.db.client, {
-    connectionString: config.databaseUrl,
-    source: config.databaseUrlSource,
-    log: (message) => built.app.log.info(message),
-  });
+  await built.db.ping();
 } catch (error) {
-  console.error(`[auth] avvio interrotto · ${describeDatabaseError(error, config.databaseUrl)}`);
+  console.error(`[auth] avvio interrotto · ${error instanceof Error ? error.message : String(error)}`);
   process.exit(1);
 }
 
@@ -58,7 +68,7 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 try {
   await app.listen({ host: config.host, port: config.port });
   app.log.info(
-    `auth pronta · http://${config.host}:${config.port} · db ${databaseTarget}`,
+    `auth pronta · http://${config.host}:${config.port} · db ${config.databaseUrl}`,
   );
 } catch (error) {
   app.log.error(error);

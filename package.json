@@ -19,6 +19,9 @@
     "test:ui": "vitest --ui",
     "test:server": "vitest run --config vitest.config.server.ts",
     "db:check": "tsx server/db-check.ts",
+    "migrate:up": "tsx server/migrate.ts up",
+    "migrate:down": "tsx server/migrate.ts down",
+    "migrate:create": "tsx server/migrate.ts create",
     "test:all": "npm run test && npm run test:server",
     "bench:mqtt": "vitest run --mode benchmark src/perf/mqttPipeline.bench.test.ts",
     "preview": "vite preview"
@@ -45,6 +48,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.545.0",
     "mqtt": "^5.14.1",
+    "node-pg-migrate": "^9.0.0",
     "pg": "^8.23.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

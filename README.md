@@ -998,3 +998,78 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 - La sessione kiosk dipende dal cookie di refresh (90 giorni): se il browser
   cancella i cookie serve reinserire il PIN del device.
 - Nessun service worker: aggiungerlo per il boot offline del pannello.
+
+---
+
+## Migrazioni versionate del database
+
+Il servizio usa ora **node-pg-migrate** per migrazioni PostgreSQL versionate e sequenziali.
+Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL con blocchi `UP` e `DOWN`:
+
+| File | Descrizione |
+| --- | --- |
+| `001_initial_schema.sql` | Tabelle base: users, rooms, devices, scenarios con FK, indici e JSONB |
+| `002_add_camera_entity.sql` | Colonne stream/metadata camera nella tabella devices + tabella cameras dedicata |
+
+### Script npm
+
+| Comando | Descrizione |
+| --- | --- |
+| `npm run migrate:up` | Applica tutte le migrazioni pendenti in ordine cronologico |
+| `npm run migrate:down` | Rollback dell'ultima migrazione applicata |
+| `npm run migrate:create <nome>` | Crea un nuovo file di migrazione timestamped nella cartella `server/migrations/` |
+
+### Bootstrap all'avvio
+
+All'avvio del micro-servizio, il backend esegue automaticamente `migrate:up` prima di ascoltare le richieste HTTP. Se il database è già aggiornato o le migrazioni terminano con successo, il server parte regolarmente. In caso di errore DDL bloccante, il bootstrap si interrompe con `process.exit(1)` per prevenire incoerenze nello schema.
+
+Per ulteriori dettagli consulta `server/migrate.ts` e i file in `server/migrations/`.
+
+---
+
+## Backup e ripristino del database
+
+Script dedicato per backup coerenti e ripristino rapido:
+
+### Generazione backup
+
+Eseguire `npm run db:backup` per creare un dump compressato con `pg_dump` + `gzip`.
+Il file verrà nominato `wallos_backup_YYYY-MM-DD_HH-mm-ss.sql.gz` nella directory specificata da `BACKUP_DIR` (default `./backups`).
+
+### Retention policy
+
+I backup vecchi vengono automaticamente rimossi in base a una delle due policy:
+- `RETENTION_DAYS=7`: mantieni gli ultimi 7 giorni di backup
+- `RETENTION_COUNT=10`: mantieni gli ultimi 10 file di backup
+
+La pulizia avviene dopo ogni generazione di backup.
+
+### Ripristino d'emergenza
+
+Eseguire `npm run db:backup -- --restore <path>` per ripristinare il database da un backup precedentemente generato.
+
+### Variabili d'ambiente opzionali
+
+| Variabile | Descrizione | Default |
+| --- | --- | --- |
+| `BACKUP_DIR` | Directory di destinazione dei backup | `./backups` |
+| `RETENTION_DAYS` | Mantieni gli ultimi N giorni di backup | `7` |
+| `RETENTION_COUNT` | Mantieni gli ultimi N file di backup | `10` |
+
+Per schedulare un backup notturno, aggiungi una voce cron:
+
+```bash
+0 3 * * * /usr/local/bin/node $(pwd)/tools/db-backup.mjs >> $(pwd)/tools/backup.log 2>&1
+```
+
+Per maggiori dettagli consulta `tools/db-backup.mjs`.
+
+---
+
+## Limiti noti / prossimi passi
+
+- PostgreSQL non ha ancora un audit log applicativo né backup automatici:
+  aggiungerli prima di un impianto multi-utente.
+- La sessione kiosk dipende dal cookie di refresh (90 giorni): se il browser
+  cancella i cookie serve reinserire il PIN del device.
+- Nessun service worker: aggiungerlo per il boot offline del pannello.
