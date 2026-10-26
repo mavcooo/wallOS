@@ -29,7 +29,66 @@
       "medium": "2",
       "high": "3"
     },
-    "swing": "Oscillazione"
+    "swing": "Oscillazione",
+    "schedule": {
+      "title": "Programma settimanale",
+      "description": "Fasce orarie, modalità e override manuale",
+      "openAria": "Apri il programma orario di {{name}}",
+      "loading": "Carico il programma…",
+      "loadError": "Programma non disponibile",
+      "retry": "Riprova",
+      "selectBand": "Seleziona la fascia {{start}}–{{end}}",
+      "gapHint": "Le fasce non coperte spengono il termostato",
+      "add": "Aggiungi fascia",
+      "emptyDay": "Nessuna fascia: il termostato segue solo gli override manuali",
+      "start": "Inizio",
+      "end": "Fine",
+      "target": "Temperatura",
+      "earlier": "Sposta indietro",
+      "later": "Sposta avanti",
+      "colder": "Abbassa la temperatura",
+      "warmer": "Alza la temperatura",
+      "remove": "Elimina fascia",
+      "presets": {
+        "comfort": "Comfort",
+        "eco": "Eco",
+        "auto": "Auto",
+        "off": "Antigelo"
+      },
+      "copyTitle": "Copia {{day}} su altri giorni",
+      "copyAction": "Copia su {{count}} giorni",
+      "copied": "Copiato su {{count}} giorni",
+      "coverage": "{{hours}} ore programmate in una settimana",
+      "vacation": {
+        "title": "Vacanza",
+        "hint": "Sospende il programma e spegne il riscaldamento fino al rientro.",
+        "return": "Rientro",
+        "activate": "Attiva vacanza",
+        "stop": "Termina vacanza",
+        "activeUntil": "Vacanza fino al {{date}}",
+        "activeNoEnd": "Vacanza senza data di rientro"
+      },
+      "cancel": "Annulla",
+      "save": "Salva programma",
+      "saving": "Salvataggio…",
+      "saved": "Programma salvato"
+    },
+    "override": {
+      "title": "Mantieni {{temp}}?",
+      "description": "Le fasce programmate sono sospese",
+      "nextChange": "Fino al prossimo cambio orario",
+      "hours": "Per {{count}} ora",
+      "keepPermanent": "Mantieni permanente (manuale)",
+      "dismissHint": "Senza scegliere, il setpoint resta fino al prossimo cambio orario.",
+      "badge": "Override fino alle {{time}} · {{temp}}",
+      "badgePermanent": "Manuale · {{temp}}",
+      "cancel": "Annulla override"
+    },
+    "vacation": {
+      "until": "Vacanza fino al {{date}}",
+      "noEnd": "Vacanza senza data di rientro",
+      "cancel": "Termina vacanza"
+    }
   },
   "light": {
     "off": "spenta",

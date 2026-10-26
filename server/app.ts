@@ -7,6 +7,7 @@ import { loadConfig } from './config.js';
 import { Database, shortVersion } from './db.js';
 import { HttpError } from './http.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerClimateRoutes } from './routes/climate.js';
 import { registerTopologyRoutes } from './routes/topology.js';
 import { registerTopologyEventRoutes } from './routes/topologyEvents.js';
 import { registerUserRoutes } from './routes/users.js';
@@ -211,6 +212,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   registerTelemetryRoutes(app, { db, config });
   registerTelemetrySummaryRoutes(app, { db, config });
   registerTelemetryIngestRoutes(app, { db, config });
+  // Cronotermostato: solo persistenza, i comandi li pubblica il job periodico
+  // (`createClimateScheduler`, avviato da `server/index.ts`).
+  registerClimateRoutes(app, { db, config });
 
   app.addHook('onClose', async () => {
     await topologyEvents.close();

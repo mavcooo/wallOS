@@ -27,6 +27,20 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
+/**
+ * Solo la sezione UP di un file di migrazione.
+ *
+ * I file del progetto contengono sia UP sia DOWN (vedi `migrate:create`);
+ * eseguire l'intero file applicherebbe anche il rollback, cancellando le
+ * tabelle appena create a ogni avvio. Il taglio avviene sul marcatore
+ * `<file> - DOWN`; un file senza marcatore viene eseguito per intero.
+ */
+export function extractUpSection(sql: string): string {
+  const downMarker = /^--\s*-*\s*\S+\s*-\s*DOWN\s*-*\s*$/im;
+  const match = downMarker.exec(sql);
+  return match ? sql.slice(0, match.index) : sql;
+}
+
 // Get all migration files sorted by name
 function getMigrationFiles(): string[] {
   const files = fs.readdirSync(migrationDir);
@@ -44,7 +58,7 @@ export async function migrateUp(): Promise<{ success: boolean; error?: string; a
     for (const file of migrations) {
       const filePath = path.resolve(migrationDir, file);
       console.log(`[migrate] Applying: ${file}`);
-      const sql = fs.readFileSync(filePath, 'utf8');
+      const sql = extractUpSection(fs.readFileSync(filePath, 'utf8'));
       await client.query(sql);
       applied++;
     }

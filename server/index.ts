@@ -3,6 +3,7 @@ import { loadEnvFile } from 'node:process';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { bootstrapMigrations } from './migrate.js';
+import { createClimateScheduler, createMqttClimatePublisher } from './services/climateScheduler.js';
 
 try {
   // Node 24: carica `.env` senza dipendenze aggiuntive. Se il file manca si
@@ -44,10 +45,9 @@ try {
   process.exit(1);
 }
 
-let app;
+let built: Awaited<ReturnType<typeof buildApp>>;
 try {
-  const built = await buildApp({ config, logger: true });
-  app = built.app;
+  built = await buildApp({ config, logger: true });
   // Controllo esplicito di startup: query reale sul pool prima di ascoltare,
   // con log compatto che non espone la password contenuta nella URL.
   await built.db.ping();
@@ -56,8 +56,22 @@ try {
   process.exit(1);
 }
 
+const app = built.app;
+
+// Cronotermostato: un job al minuto valuta la fascia attiva e pubblica i
+// setpoint sul broker locale. Vive qui e non in `buildApp` perché nei test
+// l'istanza Fastify deve restare senza timer attivi.
+const climatePublisher = createMqttClimatePublisher(config, app.log);
+const climateScheduler = createClimateScheduler({
+  db: built.db,
+  publisher: climatePublisher,
+  log: app.log,
+});
+
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'arresto del servizio auth');
+  climateScheduler.stop();
+  await climatePublisher.close();
   await app.close();
   process.exit(0);
 };
@@ -70,6 +84,7 @@ try {
   app.log.info(
     `auth pronta · http://${config.host}:${config.port} · db ${config.databaseUrl}`,
   );
+  climateScheduler.start();
 } catch (error) {
   app.log.error(error);
   process.exit(1);

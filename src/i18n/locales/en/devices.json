@@ -29,7 +29,66 @@
       "medium": "2",
       "high": "3"
     },
-    "swing": "Oscillation"
+    "swing": "Oscillation",
+    "schedule": {
+      "title": "Weekly schedule",
+      "description": "Time bands, modes and manual override",
+      "openAria": "Open the schedule for {{name}}",
+      "loading": "Loading the schedule…",
+      "loadError": "Schedule unavailable",
+      "retry": "Retry",
+      "selectBand": "Select band {{start}}–{{end}}",
+      "gapHint": "Gaps between bands switch the thermostat off",
+      "add": "Add band",
+      "emptyDay": "No bands: the thermostat only follows manual overrides",
+      "start": "Start",
+      "end": "End",
+      "target": "Temperature",
+      "earlier": "Move earlier",
+      "later": "Move later",
+      "colder": "Lower the temperature",
+      "warmer": "Raise the temperature",
+      "remove": "Delete band",
+      "presets": {
+        "comfort": "Comfort",
+        "eco": "Eco",
+        "auto": "Auto",
+        "off": "Frost guard"
+      },
+      "copyTitle": "Copy {{day}} to other days",
+      "copyAction": "Copy to {{count}} days",
+      "copied": "Copied to {{count}} days",
+      "coverage": "{{hours}} scheduled hours per week",
+      "vacation": {
+        "title": "Vacation",
+        "hint": "Pauses the schedule and turns heating off until you return.",
+        "return": "Return",
+        "activate": "Start vacation",
+        "stop": "End vacation",
+        "activeUntil": "Vacation until {{date}}",
+        "activeNoEnd": "Vacation with no return date"
+      },
+      "cancel": "Cancel",
+      "save": "Save schedule",
+      "saving": "Saving…",
+      "saved": "Schedule saved"
+    },
+    "override": {
+      "title": "Keep {{temp}}?",
+      "description": "Scheduled bands are paused",
+      "nextChange": "Until the next scheduled change",
+      "hours": "For {{count}} h",
+      "keepPermanent": "Keep permanent (manual)",
+      "dismissHint": "If you close without choosing, the setpoint is kept until the next scheduled change.",
+      "badge": "Override until {{time}} · {{temp}}",
+      "badgePermanent": "Manual · {{temp}}",
+      "cancel": "Cancel override"
+    },
+    "vacation": {
+      "until": "Vacation until {{date}}",
+      "noEnd": "Vacation with no return date",
+      "cancel": "End vacation"
+    }
   },
   "light": {
     "off": "off",

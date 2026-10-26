@@ -5,6 +5,9 @@ import { Pool } from 'pg';
 import type {
   AttemptPolicy,
   AttemptRow,
+  ClimatePreset,
+  ClimateRuntimeRow,
+  ClimateScheduleRow,
   DeviceRow,
   RefreshTokenRow,
   RoomRow,
@@ -151,6 +154,24 @@ export interface ScenarioFields {
   protected: boolean;
   actions: unknown;
   displayOrder: number;
+}
+
+/** Fascia oraria validata dalle route, pronta per la scrittura bulk. */
+export interface ClimateScheduleInput {
+  dayOfWeek: number;
+  /** `HH:MM` o `HH:MM:SS`; `24:00` è accettato per fine giornata. */
+  startTime: string;
+  endTime: string;
+  targetTemp: number;
+  preset: ClimatePreset;
+  isActive: boolean;
+}
+
+/** Override manuale. `until: null` = permanente, fino a cancellazione. */
+export interface ClimateOverrideInput {
+  targetTemp: number | null;
+  preset: ClimatePreset | null;
+  until: Date | null;
 }
 
 export type AuthDb = Database;
@@ -719,6 +740,158 @@ export class Database {
       [roomId],
     );
     return Number(rows[0]?.count ?? 0);
+  }
+
+  // ── Cronotermostato ─────────────────────────────────────────────────────
+
+  /** Tutti i dispositivi che possono ricevere un setpoint programmato. */
+  async listClimateDevices(): Promise<DeviceRow[]> {
+    const { rows } = await this.client.query<DeviceRow>(
+      `SELECT id, room_id, name, type, adapter, model, state_topic, command_topic,
+              availability_topic, field_map, stream_url, snapshot_url,
+              stream_protocol, aspect_ratio, metadata, favorite, protected, display_order
+       FROM devices
+       WHERE type = 'climate'
+       ORDER BY display_order, name`,
+    );
+    return rows;
+  }
+
+  async listClimateSchedules(deviceId: string): Promise<ClimateScheduleRow[]> {
+    const { rows } = await this.client.query<ClimateScheduleRow>(
+      `SELECT id, device_id, day_of_week, start_time, end_time,
+              target_temp, hvac_mode, is_active
+       FROM climate_schedules
+       WHERE device_id = $1
+       ORDER BY day_of_week, start_time`,
+      [deviceId],
+    );
+    return rows;
+  }
+
+  /**
+   * Salvataggio bulk dell'intera settimana: una sola istruzione (CTE + unnest)
+   * perché il client è un pool condiviso e non regge un BEGIN/COMMIT multi-query
+   * su connessioni diverse. Il DELETE è nella CTE, quindi o passa tutto o nulla.
+   */
+  async replaceClimateSchedules(
+    deviceId: string,
+    schedules: readonly ClimateScheduleInput[],
+  ): Promise<void> {
+    await this.client.query(
+      `WITH cleared AS (
+         DELETE FROM climate_schedules WHERE device_id = $1
+       )
+       INSERT INTO climate_schedules (
+         device_id, day_of_week, start_time, end_time, target_temp, hvac_mode, is_active
+       )
+       SELECT $1, day_of_week, start_time, end_time, target_temp, hvac_mode, is_active
+       FROM unnest(
+         $2::smallint[], $3::time[], $4::time[], $5::numeric[], $6::text[], $7::boolean[]
+       ) AS rows(day_of_week, start_time, end_time, target_temp, hvac_mode, is_active)`,
+      [
+        deviceId,
+        schedules.map((schedule) => schedule.dayOfWeek),
+        schedules.map((schedule) => schedule.startTime),
+        schedules.map((schedule) => schedule.endTime),
+        schedules.map((schedule) => schedule.targetTemp),
+        schedules.map((schedule) => schedule.preset),
+        schedules.map((schedule) => schedule.isActive),
+      ],
+    );
+  }
+
+  /** Riga di stato runtime, creata alla prima lettura se assente. */
+  async getClimateRuntime(deviceId: string): Promise<ClimateRuntimeRow> {
+    await this.client.query(
+      `INSERT INTO climate_runtime_states (device_id)
+       VALUES ($1)
+       ON CONFLICT (device_id) DO NOTHING`,
+      [deviceId],
+    );
+    const { rows } = await this.client.query<ClimateRuntimeRow>(
+      'SELECT * FROM climate_runtime_states WHERE device_id = $1',
+      [deviceId],
+    );
+    const row = rows[0];
+    if (!row) {
+      // Impossibile con l'INSERT sopra, ma il tipo non ammette undefined.
+      throw new Error(`[db] stato clima non disponibile per il device ${deviceId}`);
+    }
+    return row;
+  }
+
+  async listClimateRuntimes(): Promise<ClimateRuntimeRow[]> {
+    const { rows } = await this.client.query<ClimateRuntimeRow>(
+      'SELECT * FROM climate_runtime_states',
+    );
+    return rows;
+  }
+
+  /** Imposta (o sostituisce) l'override manuale di un dispositivo. */
+  async setClimateOverride(deviceId: string, override: ClimateOverrideInput): Promise<void> {
+    await this.client.query(
+      `INSERT INTO climate_runtime_states (
+         device_id, override_target_temp, override_hvac_mode, override_until, updated_at
+       ) VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (device_id) DO UPDATE SET
+         override_target_temp = EXCLUDED.override_target_temp,
+         override_hvac_mode = EXCLUDED.override_hvac_mode,
+         override_until = EXCLUDED.override_until,
+         updated_at = now()`,
+      [deviceId, override.targetTemp, override.preset, override.until],
+    );
+  }
+
+  /** Cancella l'override e la cache dell'ultimo comando (riallineamento pieno). */
+  async clearClimateOverride(deviceId: string): Promise<void> {
+    await this.client.query(
+      `UPDATE climate_runtime_states
+       SET override_target_temp = NULL, override_hvac_mode = NULL,
+           override_until = NULL, updated_at = now()
+       WHERE device_id = $1`,
+      [deviceId],
+    );
+  }
+
+  async setClimateVacation(
+    deviceId: string,
+    vacation: { active: boolean; until: Date | null },
+  ): Promise<void> {
+    await this.client.query(
+      `INSERT INTO climate_runtime_states (device_id, vacation_mode, vacation_until, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (device_id) DO UPDATE SET
+         vacation_mode = EXCLUDED.vacation_mode,
+         vacation_until = EXCLUDED.vacation_until,
+         updated_at = now()`,
+      [deviceId, vacation.active, vacation.active ? vacation.until : null],
+    );
+  }
+
+  async clearClimateVacation(deviceId: string): Promise<void> {
+    await this.client.query(
+      `UPDATE climate_runtime_states
+       SET vacation_mode = FALSE, vacation_until = NULL, updated_at = now()
+       WHERE device_id = $1`,
+      [deviceId],
+    );
+  }
+
+  /** Cache dell'ultimo setpoint pubblicato: evita comandi identici ogni minuto. */
+  async recordClimateCommand(
+    deviceId: string,
+    targetTemp: number | null,
+    preset: ClimatePreset,
+    at: Date,
+  ): Promise<void> {
+    await this.client.query(
+      `UPDATE climate_runtime_states
+       SET last_sent_target_temp = $2, last_sent_hvac_mode = $3,
+           last_sent_at = $4, updated_at = now()
+       WHERE device_id = $1`,
+      [deviceId, targetTemp, preset, at],
+    );
   }
 
   // ── Topologia · mutazioni (solo admin, validazione nelle route) ───────────

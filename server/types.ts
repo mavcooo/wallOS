@@ -69,6 +69,35 @@ export interface DeviceRow {
   display_order: number;
 }
 
+/** Preset del cronotermostato: non è la modalità del firmware. */
+export type ClimatePreset = 'comfort' | 'eco' | 'auto' | 'off';
+
+/** Riga di `climate_schedules`: `NUMERIC` e `TIME` arrivano come stringhe da PG. */
+export interface ClimateScheduleRow {
+  id: string;
+  device_id: string;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  target_temp: string | number;
+  hvac_mode: string;
+  is_active: boolean;
+}
+
+/** Riga di `climate_runtime_states`: override, vacanza e ultimo comando. */
+export interface ClimateRuntimeRow {
+  device_id: string;
+  override_target_temp: string | number | null;
+  override_hvac_mode: string | null;
+  override_until: Date | string | null;
+  vacation_mode: boolean;
+  vacation_until: Date | string | null;
+  last_sent_target_temp: string | number | null;
+  last_sent_hvac_mode: string | null;
+  last_sent_at: Date | string | null;
+  updated_at: Date | string;
+}
+
 export interface ScenarioRow {
   id: string;
   name: string;

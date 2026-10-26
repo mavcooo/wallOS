@@ -1,17 +1,28 @@
 import {
+  CalendarClock,
   Flame,
+  Hourglass,
   Minus,
+  Palmtree,
   Plus,
   Power,
   RefreshCw,
   Snowflake,
   Star,
   Wind,
+  X,
 } from 'lucide-react';
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import {
+  useClearClimateOverride,
+  useClimateSchedule,
+  useClimateVacation,
+  useSetClimateOverride,
+} from '@/hooks/useClimateSchedule';
 import { clamp, cn, formatTemp } from '@/lib/utils';
+import type { ClimateOverrideDuration, ClimateOverrideRequest } from '@/types/climate';
 import type {
   ClimateAction,
   ClimateDevice,
@@ -19,6 +30,8 @@ import type {
   ControlAction,
   FanSpeed,
 } from '@/types/device';
+import { ClimateOverridePrompt } from './ClimateOverridePrompt';
+import { ClimateScheduleModal } from './ClimateScheduleModal';
 import { SyncIndicator } from './SyncIndicator';
 
 interface ClimateCardProps {
@@ -65,8 +78,21 @@ export function ClimateCard({
   const { state } = device;
   const [draft, setDraft] = useState(state.targetTemp);
   const [dragging, setDragging] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  /** Setpoint in attesa della scelta di durata dell'override. */
+  const [overrideDraft, setOverrideDraft] = useState<number | null>(null);
   const draggingRef = useRef(false);
   const draftRef = useRef(state.targetTemp);
+
+  // Programma e override: una sola query per card (condivisa col modale).
+  const scheduleQuery = useClimateSchedule(device.id);
+  const schedule = scheduleQuery.data;
+  const override = schedule?.runtime?.override ?? null;
+  const vacation = schedule?.runtime?.vacation ?? null;
+  const programmed = (schedule?.schedules.length ?? 0) > 0;
+  const setOverride = useSetClimateOverride(device.id);
+  const clearOverride = useClearClimateOverride(device.id);
+  const stopVacation = useClimateVacation(device.id);
 
   useEffect(() => {
     if (draggingRef.current) return;
@@ -93,9 +119,31 @@ export function ClimateCard({
     setDraft(next);
   };
 
+  /**
+   * La temperatura parte subito verso il broker (comando manuale immediato) e
+   * l'override viene registrato *nello stesso gesto*: tra il tocco e la scelta
+   * della durata c'è un giro del job (fino a 60 s) che altrimenti riallineerebbe
+   * il dispositivo al programma. Il prompt poi affina la durata; chiuderlo
+   * senza scegliere lascia l'override predefinito (prossimo cambio orario).
+   */
   const commit = (value: number) => {
     onAction({ type: 'targetTemp', targetTemp: value });
+    if (!programmed || vacation) return;
+    setOverrideDraft(value);
+    setOverride.mutate({ targetTemp: value, preset: 'comfort', until: 'next_schedule' });
   };
+
+  const chooseOverride = (duration: ClimateOverrideDuration) => {
+    if (overrideDraft === null) return;
+    const request: ClimateOverrideRequest =
+      'minutes' in duration
+        ? { targetTemp: overrideDraft, preset: 'comfort', durationMinutes: duration.minutes }
+        : { targetTemp: overrideDraft, preset: 'comfort', until: duration.until };
+    setOverride.mutate(request, { onSettled: () => setOverrideDraft(null) });
+  };
+
+  const clockOf = (timestamp: number) =>
+    new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
   const nudge = (delta: number) => {
     const next = quantize(draftRef.current + delta);
@@ -139,16 +187,87 @@ export function ClimateCard({
             {roomName} · {t('climate.humidity', { value: state.humidity ?? '—' })}
           </p>
         </div>
-        <span
-          className={cn(
-            'flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-1 text-[10px] font-medium',
-            actionTone,
-          )}
-        >
-          <span className="size-1.5 rounded-full bg-current" />
-          {off ? t('climate.off') : t(`climate.actions.${state.action}`)}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setScheduleOpen(true)}
+            aria-label={t('climate.schedule.openAria', { name: device.name })}
+            title={t('climate.schedule.openAria', { name: device.name })}
+            className="flex size-9 items-center justify-center rounded-xl border border-line bg-panel-2 text-fg-subtle transition-colors hover:text-fg"
+          >
+            <CalendarClock className="size-4" />
+          </button>
+          <span
+            className={cn(
+              'flex items-center gap-1.5 rounded-full border border-line bg-panel-2 px-2.5 py-1 text-[10px] font-medium',
+              actionTone,
+            )}
+          >
+            <span className="size-1.5 rounded-full bg-current" />
+            {off ? t('climate.off') : t(`climate.actions.${state.action}`)}
+          </span>
+        </div>
       </div>
+
+      {/* Override o vacanza: il programma è sospeso, l'utente deve vederlo
+          senza aprire il modale e poterlo annullare con un tocco. */}
+      {override ? (
+        <div
+          role="status"
+          className="flex items-center gap-1.5 rounded-xl border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[10px] font-medium text-warning"
+        >
+          <Hourglass className="size-3 shrink-0" aria-hidden />
+          <span className="tabular min-w-0 flex-1 truncate">
+            {override.permanent
+              ? t('climate.override.badgePermanent', {
+                  temp: formatTemp(override.targetTemp),
+                })
+              : t('climate.override.badge', {
+                  temp: formatTemp(override.targetTemp),
+                  time: override.until === null ? '—' : clockOf(override.until),
+                })}
+          </span>
+          <button
+            type="button"
+            onClick={() => clearOverride.mutate()}
+            disabled={clearOverride.isPending}
+            aria-label={t('climate.override.cancel')}
+            title={t('climate.override.cancel')}
+            className="flex size-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-warning/20 disabled:opacity-40"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : vacation ? (
+        <div
+          role="status"
+          className="flex items-center gap-1.5 rounded-xl border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[10px] font-medium text-warning"
+        >
+          <Palmtree className="size-3 shrink-0" aria-hidden />
+          <span className="tabular min-w-0 flex-1 truncate">
+            {vacation.until === null
+              ? t('climate.vacation.noEnd')
+              : t('climate.vacation.until', {
+                  date: new Date(vacation.until).toLocaleString([], {
+                    day: '2-digit',
+                    month: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  }),
+                })}
+          </span>
+          <button
+            type="button"
+            onClick={() => stopVacation.mutate({ active: false, until: null })}
+            disabled={stopVacation.isPending}
+            aria-label={t('climate.vacation.cancel')}
+            title={t('climate.vacation.cancel')}
+            className="flex size-7 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-warning/20 disabled:opacity-40"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+      ) : null}
 
       <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
         {/* Manopola */}
@@ -356,6 +475,30 @@ export function ClimateCard({
           </div>
         </div>
       </div>
+
+      {/* Il portale Radix esce dal sottoalbero `inert` della card: il modale
+          resta usabile anche quando il widget è bloccato. */}
+      <ClimateScheduleModal
+        deviceId={device.id}
+        deviceName={device.name}
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        minTemp={device.minTemp}
+        maxTemp={device.maxTemp}
+        tempStep={device.tempStep}
+      />
+
+      <ClimateOverridePrompt
+        deviceName={device.name}
+        targetTemp={overrideDraft ?? draft}
+        open={overrideDraft !== null}
+        onOpenChange={(open) => {
+          if (!open) setOverrideDraft(null);
+        }}
+        onChoose={chooseOverride}
+        nextChangeAt={schedule?.nextChangeAt ?? null}
+        pending={setOverride.isPending}
+      />
     </div>
   );
 }
