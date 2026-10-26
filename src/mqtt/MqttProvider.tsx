@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from 'react';
 
+import { useAvailabilityWatchdog } from '@/hooks/useAvailabilityWatchdog';
 import { useMqtt, type MqttApi } from '@/hooks/useMqtt';
 import { useDevices, useScenarios } from '@/hooks/useTopologyQuery';
 
@@ -10,6 +11,8 @@ export function MqttProvider({ children }: { children: ReactNode }) {
   const devices = useDevices();
   const scenarios = useScenarios();
   const api = useMqtt(scenarios, devices);
+  // I sensori a batteria non hanno LWT: il silenzio è l'unico segnale di guasto.
+  useAvailabilityWatchdog(devices);
   return <MqttContext.Provider value={api}>{children}</MqttContext.Provider>;
 }
 

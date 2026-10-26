@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { DISCOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import { useRooms } from '@/hooks/useTopologyQuery';
 import i18n from '@/i18n';
+import { availabilityChannels, parseAvailabilityPayload } from '@/lib/availability';
 import { combineDevice, seedDeviceRealtimeState } from '@/lib/deviceState';
 import {
   forgetDiscoveredDevice,
@@ -373,19 +374,23 @@ export function useMqtt(
       });
     }
 
-    /** Stato o availability di un device, decodificato dall'adapter giusto. */
+    /**
+     * Stato o availability di un device, decodificato dall'adapter giusto.
+     *
+     * LWT: il payload (Tasmota `Online`, Zigbee2MQTT `{"state":"online"}`,
+     * Shelly `true`) viene normalizzato da un unico parser e tocca **solo**
+     * `availability`/`isAvailable`: le metriche restano quelle dell'ultima
+     * lettura, così la card mostra il dato congelato ma non interattivo.
+     */
     function handleDeviceMessage(device: Device, topic: string, payload: string): void {
-      if (device.topics.availability === topic) {
-        setAvailability(device.id, payload.trim() === 'online' ? 'online' : 'offline');
-        return;
-      }
-
-      const availability = device.discovery?.availability.find(
-        (entry) => entry.topic === topic,
-      );
-      if (availability) {
-        const expected = availability.payloadAvailable ?? 'online';
-        setAvailability(device.id, payload.trim() === expected ? 'online' : 'offline');
+      const channel = availabilityChannels(device).find((entry) => entry.topic === topic);
+      if (channel) {
+        const state = parseAvailabilityPayload(payload, {
+          payloadOnline: channel.payloadOnline,
+          payloadOffline: channel.payloadOffline,
+        });
+        // Payload vuoto o sconosciuto: nessun cambio di stato.
+        if (state) setAvailability(device.id, state);
         return;
       }
 

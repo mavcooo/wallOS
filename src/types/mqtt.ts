@@ -1,5 +1,12 @@
 /** Tipi di dominio per trasporto MQTT, configurazione broker e telemetria di connessione. */
 
+/**
+ * Stato pubblicato su un topic LWT/availability.
+ * Non esiste un "unknown" sul filo: l'assenza di payload viene scartata dal
+ * parser e lascia intatta la riga realtime.
+ */
+export type MqttAvailabilityState = 'online' | 'offline';
+
 export type ConnectionStatus =
   | 'idle'
   | 'connecting'

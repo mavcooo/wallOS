@@ -120,6 +120,14 @@
     "volume": "Volume {{value}}",
     "source": "Source {{source}}"
   },
+  "availability": {
+    "offline": "Offline",
+    "stale": "No data",
+    "offlineHint": "Device unreachable",
+    "staleHint": "No response from sensor",
+    "offlineSince": "Offline for {{minutes}} min",
+    "staleSince": "No reading for {{minutes}} min"
+  },
   "live": {
     "underLoad": "Under load",
     "standby": "Standby"

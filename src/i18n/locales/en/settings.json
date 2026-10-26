@@ -262,6 +262,7 @@
     "availability": {
       "online": "Online",
       "offline": "Offline",
+      "stale": "Stale",
       "unknown": "Unknown"
     },
     "table": {

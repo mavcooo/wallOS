@@ -16,6 +16,12 @@ interface LightCardProps {
   onToggleFavorite?: () => void;
   /** Comando in coda, in attesa di conferma dal broker. */
   pending?: boolean;
+  /**
+   * Device non raggiungibile (LWT offline o watchdog `stale`). Blocca ogni
+   * controllo alla fonte, così il widget resta corretto anche se montato fuori
+   * da `DeviceCard` (dettagli, test, future viste).
+   */
+  disabled?: boolean;
   className?: string;
 }
 
@@ -31,6 +37,7 @@ export function LightCard({
   onAction,
   onToggleFavorite,
   pending = false,
+  disabled = false,
   className,
 }: LightCardProps) {
   const { t } = useTranslation('devices');
@@ -80,14 +87,16 @@ export function LightCard({
             <button
               type="button"
               onClick={onToggleFavorite}
+              disabled={disabled}
               aria-label={tCommon(device.favorite ? 'favorites.remove' : 'favorites.add')}
-              className="flex size-9 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-elevated hover:text-fg"
+              className="flex size-9 items-center justify-center rounded-lg text-fg-subtle transition-colors hover:bg-elevated hover:text-fg disabled:opacity-40"
             >
               <Star className={cn('size-4', device.favorite && 'fill-accent text-accent')} />
             </button>
           ) : null}
           <Switch
             checked={active}
+            disabled={disabled}
             onCheckedChange={(on) => onAction({ type: 'power', on })}
             aria-label={t('light.toggleAria', { name: device.name })}
           />
@@ -109,7 +118,7 @@ export function LightCard({
           min={0}
           max={100}
           step={1}
-          disabled={!capabilities.dimmable}
+          disabled={!capabilities.dimmable || disabled}
           onValueChange={(values) => setBrightness(values[0] ?? 0)}
           onValueCommit={(values) => {
             const next = values[0] ?? 0;
@@ -124,13 +133,14 @@ export function LightCard({
         <div className="flex items-center gap-1.5">
           {PRESETS.map((preset) => {
             const range = capabilities.colorTempRange;
-            const disabled = !range || preset.kelvin < range[0] || preset.kelvin > range[1];
+            const outOfRange =
+              !range || preset.kelvin < range[0] || preset.kelvin > range[1];
             const selected = state.colorTemp !== undefined && Math.abs(state.colorTemp - preset.kelvin) < 200;
             return (
               <button
                 key={preset.kelvin}
                 type="button"
-                disabled={disabled || !active}
+                disabled={disabled || outOfRange || !active}
                 onClick={() => onAction({ type: 'colorTemp', kelvin: preset.kelvin })}
                 className={cn(
                   'h-9 flex-1 rounded-lg border text-[11px] font-medium transition-colors',

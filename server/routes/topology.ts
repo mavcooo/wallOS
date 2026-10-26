@@ -410,6 +410,18 @@ function toDevice(row: DeviceRow): Device {
       ...(row.availability_topic ? { availability: row.availability_topic } : {}),
     },
     ...(row.field_map ? { fieldMap: row.field_map } : {}),
+    // Payload LWT non standard e timeout del watchdog: configurazione opzionale
+    // in `metadata`, così un Tasmota con `Online` o un sensore a batteria
+    // lento non richiedono una migrazione dello schema.
+    ...(typeof meta.availabilityPayloadOnline === 'string'
+      ? { availabilityPayloadOnline: meta.availabilityPayloadOnline }
+      : {}),
+    ...(typeof meta.availabilityPayloadOffline === 'string'
+      ? { availabilityPayloadOffline: meta.availabilityPayloadOffline }
+      : {}),
+    ...(typeof meta.staleTimeoutMs === 'number' && meta.staleTimeoutMs > 0
+      ? { staleTimeoutMs: meta.staleTimeoutMs }
+      : {}),
     availability: asAvailability(meta.availability),
     lastSeen: typeof meta.lastSeen === 'number' ? meta.lastSeen : null,
     favorite: row.favorite,

@@ -26,7 +26,10 @@ export function seedDeviceRealtimeState(device: Device): DeviceRealtimeState {
     lastSeen: device.lastSeen,
     favorite: device.favorite,
     isOptimistic: false,
-    lastUpdated: Date.now(),
+    // Senza un payload reale non c'è nulla da dichiarare offline: lo snapshot
+    // del server è il punto di partenza, il watchdog parte da qui.
+    isAvailable: (device.availability ?? 'unknown') !== 'offline',
+    lastUpdated: device.lastSeen ?? Date.now(),
   } as DeviceRealtimeState;
 }
 
@@ -42,6 +45,7 @@ export function combineDevice(
     availability: realtime.availability,
     lastSeen: realtime.lastSeen,
     favorite: realtime.favorite,
+    isAvailable: realtime.isAvailable,
   } as Device;
 }
 
@@ -54,6 +58,7 @@ export function combineDevice(
 export function mergeDecodedRealtime(
   current: DeviceRealtimeState | undefined,
   decoded: DecodedState,
+  at: number = Date.now(),
 ): DeviceRealtimeState | null {
   if (!current || current.kind !== decoded.kind) return null;
 
@@ -62,7 +67,10 @@ export function mergeDecodedRealtime(
     ...current,
     state,
     availability: 'online',
+    // Una lettura valida è la prova che il device è vivo: azzera anche lo
+    // `stale` del watchdog senza aspettare il prossimo controllo.
+    isAvailable: true,
     isOptimistic: false,
-    lastUpdated: Date.now(),
+    lastUpdated: Math.max(current.lastUpdated, at),
   } as DeviceRealtimeState;
 }

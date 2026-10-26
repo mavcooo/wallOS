@@ -268,8 +268,64 @@ describe('useMqtt · Home Assistant Discovery', () => {
       message('zigbee2mqtt/pianta/availability', 'offline');
     });
 
-    expect(useHomeStore.getState().deviceStates['ha:light:pianta']?.availability).toBe(
+    const row = useHomeStore.getState().deviceStates['ha:light:pianta'];
+    expect(row?.availability).toBe('offline');
+    expect(row?.isAvailable).toBe(false);
+    unmount();
+  });
+});
+
+describe('useMqtt · disponibilità LWT dei device statici', () => {
+  it('applica il JSON Zigbee2MQTT senza sovrascrivere le metriche', () => {
+    const { unmount } = setup();
+
+    act(() => {
+      emit('connect');
+      message('zigbee2mqtt/living/main', 'ON');
+      message('zigbee2mqtt/living/main/availability', '{"state":"offline"}');
+      vi.advanceTimersByTime(300);
+    });
+
+    const offline = useHomeStore.getState().deviceStates['light-living-main'];
+    expect(offline?.availability).toBe('offline');
+    expect(offline?.isAvailable).toBe(false);
+    // L'ultima lettura resta visibile: la card mostra il dato, non lo perde.
+    expect(offline?.kind === 'light' && offline.state.on).toBe(true);
+
+    act(() => {
+      message('zigbee2mqtt/living/main/availability', '{"state":"online"}');
+    });
+
+    const online = useHomeStore.getState().deviceStates['light-living-main'];
+    expect(online?.availability).toBe('online');
+    expect(online?.isAvailable).toBe(true);
+    unmount();
+  });
+
+  it('accetta i payload Tasmota e ignora i retained sconosciuti', () => {
+    const { unmount } = setup();
+
+    act(() => {
+      emit('connect');
+      // Payload non riconosciuto: nessun cambio di stato (resta lo snapshot).
+      message('zigbee2mqtt/living/main/availability', '');
+    });
+    expect(
+      useHomeStore.getState().deviceStates['light-living-main']?.isAvailable,
+    ).toBe(true);
+
+    act(() => {
+      message('zigbee2mqtt/living/main/availability', 'Offline');
+    });
+    expect(useHomeStore.getState().deviceStates['light-living-main']?.availability).toBe(
       'offline',
+    );
+
+    act(() => {
+      message('zigbee2mqtt/living/main/availability', 'Online');
+    });
+    expect(useHomeStore.getState().deviceStates['light-living-main']?.availability).toBe(
+      'online',
     );
     unmount();
   });

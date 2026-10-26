@@ -118,7 +118,11 @@ const initialUi: UiState = {
 
 /**
  * Applica una patch decodificata alla riga del device.
- * `optimistic` distingue l'intenzione locale dalla telemetria del broker.
+ *
+ * `optimistic` distingue l'intenzione locale dalla telemetria del broker:
+ * solo un payload reale dimostra che il device è raggiungibile, quindi solo in
+ * quel caso si azzera `stale`/`offline` e si sposta `lastUpdated` (base del
+ * watchdog). Un tap dell'utente non deve far sembrare vivo un device muto.
  */
 function mergeRow(
   current: DeviceRealtimeState | undefined,
@@ -126,10 +130,16 @@ function mergeRow(
   optimistic: boolean,
 ): DeviceRealtimeState | null {
   if (!current || current.kind !== decoded.kind) return null;
+  const state = { ...current.state, ...decoded.state } as DeviceRealtimeState['state'];
+  if (optimistic) {
+    return { ...current, state, isOptimistic: true } as DeviceRealtimeState;
+  }
   return {
     ...current,
-    state: { ...current.state, ...decoded.state },
-    isOptimistic: optimistic,
+    state,
+    isOptimistic: false,
+    availability: 'online',
+    isAvailable: true,
     lastUpdated: Date.now(),
   } as DeviceRealtimeState;
 }
@@ -175,7 +185,9 @@ export const useHomeStore = create<HomeState>()(
               [id]: {
                 ...current,
                 ...patch,
-                lastUpdated: Date.now(),
+                // `lastUpdated` misura l'ultimo payload, non l'ultima patch
+                // locale: favorite/flags non devono rianimare un device muto.
+                lastUpdated: current.lastUpdated,
               } as DeviceRealtimeState,
             },
           };
@@ -199,7 +211,6 @@ export const useHomeStore = create<HomeState>()(
               ...state.deviceStates,
               [deviceId]: {
                 ...next,
-                availability: 'online',
                 lastSeen: Date.now(),
               },
             },
@@ -226,7 +237,7 @@ export const useHomeStore = create<HomeState>()(
           let changed = false;
           for (const update of updates) {
             const current = deviceStates[update.deviceId];
-            const merged = mergeDecodedRealtime(current, update.decoded);
+            const merged = mergeDecodedRealtime(current, update.decoded, update.at);
             if (!merged || !current) continue;
             deviceStates[update.deviceId] = {
               ...merged,
@@ -246,7 +257,11 @@ export const useHomeStore = create<HomeState>()(
           return {
             deviceStates: {
               ...state.deviceStates,
-              [deviceId]: { ...current, availability, lastUpdated: Date.now() },
+              [deviceId]: {
+                ...current,
+                availability,
+                isAvailable: availability === 'online',
+              },
             },
           };
         });
@@ -262,7 +277,6 @@ export const useHomeStore = create<HomeState>()(
               [deviceId]: {
                 ...current,
                 favorite: !current.favorite,
-                lastUpdated: Date.now(),
               },
             },
           };
@@ -279,6 +293,8 @@ export const useHomeStore = create<HomeState>()(
               const watts = Math.round(jitter(base, row.state.on ? 40 : 0, 0));
               deviceStates[id] = {
                 ...row,
+                availability: 'online',
+                isAvailable: true,
                 lastUpdated: now,
                 lastSeen: now,
                 state: {
@@ -303,6 +319,8 @@ export const useHomeStore = create<HomeState>()(
               );
               deviceStates[id] = {
                 ...row,
+                availability: 'online',
+                isAvailable: true,
                 lastUpdated: now,
                 lastSeen: now,
                 state: {
@@ -325,6 +343,8 @@ export const useHomeStore = create<HomeState>()(
               const amp = row.state.type === 'co2' ? 30 : 0.4;
               deviceStates[id] = {
                 ...row,
+                availability: 'online',
+                isAvailable: true,
                 lastUpdated: now,
                 lastSeen: now,
                 state: {

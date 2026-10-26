@@ -3,9 +3,11 @@ import { useTranslation } from 'react-i18next';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useDevice, useRoomLabel } from '@/hooks/useDevice';
+import { cn } from '@/lib/utils';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useOfflineQueue } from '@/mqtt/offlineQueue';
 import { useHomeStore } from '@/store/homeStore';
+import { AvailabilityBadge } from './AvailabilityBadge';
 import { CameraCard } from './CameraCard';
 import { ClimateCard } from './ClimateCard';
 import { LightCard } from './LightCard';
@@ -28,6 +30,9 @@ interface DeviceCardProps {
  * - La telemetria arriva da `useDevice`, che osserva solo `deviceStates[id]`.
  * - `memo` + `deviceId` impediscono al parent di ridisegnare la card quando
  *   arriva un messaggio destinato a un altro device.
+ * - `isAvailable === false` (LWT offline o watchdog `stale`) disabilita il
+ *   sottoalbero con `inert` + `pointer-events-none`, mostra il badge e scarta
+ *   i comandi: nessuna pubblicazione MQTT verso un device muto.
  */
 export const DeviceCard = memo(function DeviceCard({
   deviceId,
@@ -48,6 +53,8 @@ export const DeviceCard = memo(function DeviceCard({
 
   if (!device) return null;
 
+  const unavailable = device.isAvailable === false;
+
   const favorite = showFavorite
     ? () => {
         toggleFavorite(device.id);
@@ -55,6 +62,9 @@ export const DeviceCard = memo(function DeviceCard({
     : undefined;
 
   const onAction = (action: Parameters<typeof sendAction>[1]) => {
+    // Barriera finale: anche un event handler sfuggito a `inert` (o un tap di
+    // un widget per cui la card è già disabilitata) non genera comandi a vuoto.
+    if (unavailable) return;
     if (device.protected) {
       requestPin({
         title: t('guard.title'),
@@ -66,59 +76,84 @@ export const DeviceCard = memo(function DeviceCard({
     sendAction(device.id, action);
   };
 
-  switch (device.kind) {
-    case 'light':
-      return (
-        <LightCard
-          device={device}
-          roomName={roomName}
-          onAction={onAction}
-          pending={pending}
-          {...(favorite ? { onToggleFavorite: favorite } : {})}
-          {...(className ? { className } : {})}
-        />
-      );
-    case 'climate':
-      return (
-        <ClimateCard
-          device={device}
-          roomName={roomName}
-          onAction={onAction}
-          pending={pending}
-          {...(favorite ? { onToggleFavorite: favorite } : {})}
-          {...(className ? { className } : {})}
-        />
-      );
-    case 'power':
-      return (
-        <PowerCard
-          device={device}
-          onAction={onAction}
-          pending={pending}
-          {...(favorite ? { onToggleFavorite: favorite } : {})}
-          {...(className ? { className } : {})}
-        />
-      );
-    case 'media':
-      return (
-        <MediaCard
-          device={device}
-          onAction={onAction}
-          pending={pending}
-          {...(favorite ? { onToggleFavorite: favorite } : {})}
-          {...(className ? { className } : {})}
-        />
-      );
-    case 'sensor':
-      return <SensorTile device={device} {...(className ? { className } : {})} />;
-    case 'camera':
-      return (
-        <CameraCard
-          device={device}
-          roomName={roomName}
-          {...(favorite ? { onToggleFavorite: favorite } : {})}
-          {...(className ? { className } : {})}
-        />
-      );
-  }
+  // Il wrapper è il grid item: la card deve continuare a riempirlo, altrimenti
+  // le card della stessa riga perderebbero l'altezza uniforme del layout.
+  const card = (() => {
+    switch (device.kind) {
+      case 'light':
+        return (
+          <LightCard
+            device={device}
+            roomName={roomName}
+            onAction={onAction}
+            pending={pending}
+            disabled={unavailable}
+            className="h-full"
+            {...(favorite ? { onToggleFavorite: favorite } : {})}
+          />
+        );
+      case 'climate':
+        return (
+          <ClimateCard
+            device={device}
+            roomName={roomName}
+            onAction={onAction}
+            pending={pending}
+            className="h-full"
+            {...(favorite ? { onToggleFavorite: favorite } : {})}
+          />
+        );
+      case 'power':
+        return (
+          <PowerCard
+            device={device}
+            onAction={onAction}
+            pending={pending}
+            className="h-full"
+            {...(favorite ? { onToggleFavorite: favorite } : {})}
+          />
+        );
+      case 'media':
+        return (
+          <MediaCard
+            device={device}
+            onAction={onAction}
+            pending={pending}
+            className="h-full"
+            {...(favorite ? { onToggleFavorite: favorite } : {})}
+          />
+        );
+      case 'sensor':
+        return <SensorTile device={device} className="h-full" />;
+      case 'camera':
+        return (
+          <CameraCard
+            device={device}
+            roomName={roomName}
+            className="h-full"
+            {...(favorite ? { onToggleFavorite: favorite } : {})}
+          />
+        );
+    }
+  })();
+
+  return (
+    <div className={cn('relative h-full', className)}>
+      <div
+        // `inert` spegne focus, click e slider dell'intero sottoalbero: un solo
+        // punto di blocco per tutti i widget, nessun `disabled` da propagare.
+        inert={unavailable}
+        aria-disabled={unavailable || undefined}
+        className={cn(
+          'h-full',
+          unavailable && 'pointer-events-none select-none opacity-55 grayscale',
+        )}
+      >
+        {card}
+      </div>
+      {unavailable ? (
+        <AvailabilityBadge device={device} className="absolute right-2 top-2 z-[1]" />
+      ) : null}
+    </div>
+  );
 });

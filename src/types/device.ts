@@ -81,7 +81,7 @@ export interface DeviceDiscovery {
   availability: DiscoveryAvailability[];
 }
 
-export type DeviceAvailability = 'online' | 'offline' | 'unknown';
+export type DeviceAvailability = 'online' | 'offline' | 'stale' | 'unknown';
 
 export type ClimateMode = 'off' | 'heat' | 'cool' | 'auto' | 'fan_only' | 'dry';
 export type ClimateAction = 'idle' | 'heating' | 'cooling' | 'drying' | 'fan';
@@ -120,7 +120,11 @@ export interface DeviceTopics {
   state: string;
   /** Topic di comando su cui pubblicare (assente sui sensori read-only). */
   command?: string;
-  /** Topic LWT/availability opzionale (payload `online`/`offline`). */
+  /**
+   * Topic LWT/availability opzionale. Il payload è interpretato da
+   * `parseAvailabilityPayload`: stringhe semplici, `true/false/0/1` e JSON
+   * `{"state":"online"}` (Zigbee2MQTT) sono tutti accettati.
+   */
   availability?: string;
 }
 
@@ -137,6 +141,24 @@ interface DeviceBase {
   fieldMap?: Record<string, string>;
   availability: DeviceAvailability;
   lastSeen: number | null;
+  /**
+   * Payload LWT che dichiara il device in linea (default: online/true/1/on).
+   * Utile per Tasmota (`Online`) e Shelly Gen1 (`true`).
+   */
+  availabilityPayloadOnline?: string;
+  /** Payload LWT che dichiara il device caduto (default: offline/false/0/off). */
+  availabilityPayloadOffline?: string;
+  /**
+   * Silenzio massimo per i sensori passivi prima di considerarli `stale`
+   * (es. 1_800_000 = 30 minuti per un sensore a batteria). Se assente, il
+   * watchdog applica 30 minuti ai soli sensori senza LWT.
+   */
+  staleTimeoutMs?: number;
+  /**
+   * Solo view-model: `false` quando LWT o watchdog dichiarano il device non
+   * raggiungibile. Lo calcola il client, quindi non arriva mai dal server.
+   */
+  isAvailable?: boolean;
   favorite: boolean;
   /** Se true, i comandi richiedono PIN (tapparelle cancello, allarme, ...). */
   protected: boolean;
@@ -275,6 +297,12 @@ export interface DeviceRealtimeBase {
   isOptimistic: boolean;
   /** Epoch ms dell'ultima scrittura nella mappa realtime. */
   lastUpdated: number;
+  /**
+   * Disponibilità reale del device: `false` dopo un LWT offline o quando il
+   * watchdog dei sensori passivi supera `staleTimeoutMs`. È la sola cosa che
+   * le card devono guardare per bloccare i controlli.
+   */
+  isAvailable: boolean;
 }
 
 /**
