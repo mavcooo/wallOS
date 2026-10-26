@@ -43,6 +43,8 @@ const TIMEOUT_OPTIONS = [
   { value: 600_000, label: '10 min' },
 ] as const;
 
+const SYNC_DEBOUNCE_OPTIONS = [0, 100, 300, 600, 1_000] as const;
+
 const BURN_IN_MODE_OPTIONS = [
   {
     value: 'screensaver-float',
@@ -82,6 +84,8 @@ export function SettingsPage() {
   const setDimmerTimeout = useHomeStore((state) => state.setDimmerTimeout);
   const burnIn = useHomeStore((state) => state.burnIn);
   const setBurnInSettings = useHomeStore((state) => state.setBurnInSettings);
+  const topologySync = useHomeStore((state) => state.topologySync);
+  const setTopologySyncSettings = useHomeStore((state) => state.setTopologySyncSettings);
   const changePin = useAuthStore((state) => state.changePin);
   const elevated = useAuthStore((state) => state.elevated);
   const role = useAuthStore((state) => state.user?.role);
@@ -353,6 +357,48 @@ export function SettingsPage() {
                 {t('broker.lastError', { error: connection.lastError })}
               </p>
             ) : null}
+          </CardContent>
+        </Card>
+
+        {/* Sincronizzazione topologia (affianca il broker) */}
+        <Card data-testid="topology-sync-card">
+          <CardHeader>
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <RefreshCw className="size-4 text-accent" /> {t('sync.title')}
+              </CardTitle>
+              <CardDescription className="mt-1">{t('sync.description')}</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div>
+              <Label>{t('sync.debounce')}</Label>
+              <div className="mt-1.5 grid grid-cols-5 gap-1.5">
+                {SYNC_DEBOUNCE_OPTIONS.map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={topologySync.debounceMs === value}
+                    onClick={() => setTopologySyncSettings({ debounceMs: value })}
+                    className={cn(
+                      'h-10 rounded-xl border text-[11px] font-medium transition-colors',
+                      topologySync.debounceMs === value
+                        ? 'border-accent/40 bg-accent-soft text-accent'
+                        : 'border-line bg-panel-2 text-fg-muted hover:text-fg',
+                    )}
+                  >
+                    {value === 0
+                      ? t('sync.immediate')
+                      : value < 1_000
+                        ? `${value} ms`
+                        : `${value / 1_000} s`}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[10px] leading-relaxed text-fg-subtle">
+                {t('sync.hint')}
+              </p>
+            </div>
           </CardContent>
         </Card>
 

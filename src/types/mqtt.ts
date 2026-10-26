@@ -12,6 +12,11 @@ export type ConnectionStatus =
   | 'connecting'
   | 'connected'
   | 'reconnecting'
+  /**
+   * Socket "half-open": la TCP non ha emesso FIN/RST ma il broker non
+   * risponde più a nessun pacchetto applicativo (watchdog 90 s scattato).
+   */
+  | 'stale'
   | 'offline'
   | 'error';
 
@@ -44,6 +49,14 @@ export interface ConnectionMetrics {
   reconnectAttempts: number;
   /** Timestamp epoch dell'ultima connessione riuscita. */
   connectedAt: number | null;
+  /**
+   * Epoch ms dell'ultimo pacchetto realmente ricevuto (pong, echo, qualsiasi
+   * messaggio valido). È la base del watchdog anti-freeze: se resta fermo
+   * mentre `status === 'connected'`, il socket è zombie.
+   */
+  lastNetworkActivityAt: number | null;
+  /** Epoch ms in cui il watchdog ha dichiarato la socket congelata. */
+  frozenSince: number | null;
   lastError: string | null;
   messagesIn: number;
   messagesOut: number;

@@ -9,15 +9,18 @@ import { RequireRole } from '@/components/auth/RequireRole';
 import { TopologyGate } from '@/components/auth/TopologyGate';
 import { AppShell } from '@/components/layout/AppShell';
 import { DatabaseHealthMonitor } from '@/components/layout/DatabaseHealthMonitor';
+import { EmergencyReloadModal } from '@/components/kiosk/EmergencyReloadModal';
 import { PinProvider } from '@/components/kiosk/PinProvider';
 import { Toaster } from '@/components/kiosk/Toaster';
 import { CarouselDots } from '@/components/ui/carousel-dots';
 import { CriticalAlertOverlay } from '@/components/ui/CriticalAlertOverlay';
+import { useBootRecovery } from '@/hooks/useBootRecovery';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { usePerformanceMode } from '@/hooks/usePerformanceMode';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
+import { useTopologySync } from '@/hooks/useTopologySync';
 import { canView } from '@/lib/permissions';
 import { createQueryClient } from '@/lib/queryClient';
 import { cn } from '@/lib/utils';
@@ -202,6 +205,19 @@ function AppNavigation() {
   );
 }
 
+/**
+ * Sincronizzazione topologia multi-client a livello root: ascolta l'evento
+ * `wallos/system/topology_changed` pubblicato dal server a ogni commit su
+ * PostgreSQL e invalida la cache TanStack Query con debounce, così ogni tablet
+ * della casa si riallinea in meno di un secondo senza tocco né reload.
+ * Deve stare dentro <MqttProvider> perché riallinea anche le sottoscrizioni
+ * ai topic dei device appena creati.
+ */
+function TopologySync() {
+  useTopologySync();
+  return null;
+}
+
 export default function App() {
   // Il tema alto contrasto vive a livello applicazione: `data-contrast` su
   // <html> è già attivo sul lock screen, prima che l'utente faccia login.
@@ -209,6 +225,10 @@ export default function App() {
   // Modalità a basse prestazioni: l'attributo su <html> è già impostato dallo
   // script inline in index.html; il hook lo mantiene allineato allo store.
   usePerformanceMode();
+  // Safe Boot: scarta i comandi pre-blackout e gestisce la finestra di
+  // idratazione dopo un riavvio (UI bloccata, coda in pausa). Vive qui perché
+  // deve partire prima di qualsiasi connessione MQTT.
+  useBootRecovery();
   // Wake Lock a livello root: impedisce lo standby hardware dello schermo H24 e
   // riacquisisce il sentinel al ritorno in `visible`. Non tocca il dimmer
   // software (KioskDimmerOverlay), che resta l'unico gestore dello spegnimento
@@ -232,6 +252,7 @@ export default function App() {
         <AuthGate>
           <TopologyGate>
             <MqttProvider>
+              <TopologySync />
               <AppNavigation />
             </MqttProvider>
           </TopologyGate>
@@ -239,6 +260,8 @@ export default function App() {
         <Toaster />
         {/* Allarmi critici: sopra il dimmer kiosk e il lock screen. */}
         <CriticalAlertOverlay />
+        {/* Blackout di rete prolungato: countdown prima del riavvio applicazione. */}
+        <EmergencyReloadModal />
       </PinProvider>
     </QueryClientProvider>
   );

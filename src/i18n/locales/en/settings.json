@@ -41,6 +41,13 @@
     "statusOff": "Off",
     "note": "Removes backdrop blur, shadows and gradients and trims micro-animations. The choice stays saved on this device."
   },
+  "sync": {
+    "title": "Topology sync",
+    "description": "Rooms and devices updated instantly on every panel in the house.",
+    "debounce": "Event batching",
+    "immediate": "Immediate",
+    "hint": "Received events are batched into a single refresh: Immediate reacts to every single change, higher values avoid repeated requests during bulk edits or reordering."
+  },
   "broker": {
     "title": "MQTT broker",
     "description": "LAN WebSocket connection · settings applied to the panel",

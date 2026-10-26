@@ -7,6 +7,7 @@ import { usePixelShift } from '@/hooks/usePixelShift';
 import { useHomeStore } from '@/store/homeStore';
 import { selectCriticalCount, useToastStore } from '@/store/toastStore';
 import { Header } from './Header';
+import { HydrationBanner } from './HydrationBanner';
 import { ScrollContainerProvider } from './ScrollContainerContext';
 import { Sidebar } from './Sidebar';
 
@@ -61,6 +62,15 @@ export function AppShell({ children, mainProps }: AppShellProps) {
     enabled: !isDimmed,
   });
 
+  // La modale di emergenza (blackout di rete > 10 min) può chiedere il
+  // risveglio: l'evento è l'unico ponte fra il watchdog e il dimmer, così
+  // l'heartbeat normale non sveglia mai lo schermo da solo.
+  useEffect(() => {
+    const handleWake = () => wake();
+    window.addEventListener('domus:kiosk-wake', handleWake);
+    return () => window.removeEventListener('domus:kiosk-wake', handleWake);
+  }, [wake]);
+
   // Permette a qualsiasi pagina (es. Impostazioni) di testare lo standby.
   // Durante un allarme lo standby manuale è ignorato: il pannello resta acceso.
   useEffect(() => {
@@ -78,6 +88,8 @@ export function AppShell({ children, mainProps }: AppShellProps) {
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
           <Header onStandby={sleep} />
+          {/* Safe boot: spiega perché i widget sono fermi durante l'idratazione. */}
+          <HydrationBanner />
           <main
             {...mainProps}
             ref={setMainRef}

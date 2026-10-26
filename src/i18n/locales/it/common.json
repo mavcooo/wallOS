@@ -198,6 +198,7 @@
       "connecting": "Connessione",
       "connected": "Online",
       "reconnecting": "Riconnessione",
+      "stale": "Congelato",
       "offline": "Offline",
       "error": "Errore"
     },
@@ -205,6 +206,7 @@
     "pending": "{{count}} comandi in attesa di sincronizzazione",
     "demo": "demo",
     "latencyEmpty": "— ms",
+    "silence": "{{seconds}}s di silenzio",
     "rx": "{{count}} rx"
   },
   "database": {
@@ -261,6 +263,30 @@
       "coded": "Errore database ({{code}})",
       "generic": "Errore database"
     }
+  },
+  "watchdog": {
+    "freezeTitle": "Rilevato freeze della connessione",
+    "freezeDescription": "Nessun pacchetto dal broker da {{seconds}}s. Riconnessione in corso…"
+  },
+  "topologySync": {
+    "toastTitle": "Topologia aggiornata in tempo reale",
+    "toastDescription": "Stanze e dispositivi allineati con il database."
+  },
+  "hydration": {
+    "title": "Sincronizzazione della casa in corso…",
+    "waiting": "attesa dei dati dal broker",
+    "progress_one": "{{count}} aggiornamento ricevuto",
+    "progress_other": "{{count}} aggiornamenti ricevuti",
+    "hint": "Comandi disabilitati fino al completamento"
+  },
+  "emergency": {
+    "badge": "Emergenza di rete",
+    "title": "Connessione LAN assente da {{minutes}} minuti",
+    "description": "Il pannello non riceve più dati dal broker. Per sicurezza l'applicazione verrà riavviata per ricreare una sessione pulita.",
+    "countdownLabel": "Riavvio applicazione tra",
+    "frozenHint": "La connessione MQTT è congelata: la socket sembra aperta ma non risponde.",
+    "cancelReload": "Annulla Riavvio",
+    "retryNow": "Riprova Ora"
   },
   "alarm": {
     "badge": "Allarme critico",

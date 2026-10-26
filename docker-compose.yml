@@ -54,6 +54,10 @@ services:
       KIOSK_PIN: ${KIOSK_PIN:?imposta KIOSK_PIN (4-6 cifre, diverso dai default)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Eventi di topologia → broker dello stack sul listener TCP (non il 9001
+      # WebSocket del browser). Senza questa variabile il server resta muto su
+      # MQTT e i pannelli ricevono gli aggiornamenti solo via SSE.
+      MQTT_SERVER_URL: ${MQTT_SERVER_URL:-mqtt://mqtt:1883}
 
 volumes:
   wallos-db:

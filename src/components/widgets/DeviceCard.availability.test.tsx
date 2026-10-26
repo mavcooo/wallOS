@@ -22,6 +22,9 @@ const LIGHT_ID = 'light-living-main';
 beforeEach(() => {
   localStorage.clear();
   useHomeStore.setState({ deviceStates: {} });
+  // Questi casi descrivono il pannello già idratato: il Safe Boot è concluso,
+  // quindi l'unico motivo di blocco resta la disponibilità del device.
+  useHomeStore.getState().finishHydration();
   mqttApi.sendAction.mockClear();
 });
 

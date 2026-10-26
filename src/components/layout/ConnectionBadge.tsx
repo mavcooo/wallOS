@@ -11,6 +11,10 @@ const TONES: Record<ConnectionStatus, string> = {
   connecting: 'border-warning/30 bg-warning/10 text-warning',
   connected: 'border-success/30 bg-success/10 text-success',
   reconnecting: 'border-warning/30 bg-warning/10 text-warning',
+  // Ambra pulsante: la socket sembra aperta ma il broker non risponde più
+  // (watchdog anti-freeze scattato). Differenziare da `offline` serve a capire
+  // che il problema è un half-open socket, non un cavo staccato.
+  stale: 'border-warning/45 bg-warning/15 text-warning',
   offline: 'border-danger/30 bg-danger/10 text-danger',
   error: 'border-danger/30 bg-danger/10 text-danger',
 };
@@ -21,8 +25,15 @@ export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => voi
   const demoMode = useHomeStore((state) => state.broker.demoMode);
   const pending = useOfflineQueue((state) => state.commands.length);
   const status = connection.status;
-  const busy = status === 'connecting' || status === 'reconnecting';
+  const busy =
+    status === 'connecting' || status === 'reconnecting' || status === 'stale';
   const statusLabel = t(`connection.status.${status}`);
+  // Minuti dall'ultimo pacchetto realmente ricevuto: il dettaglio che spiega
+  // perché il badge è ambra anche se la socket non ha emesso `close`.
+  const silenceSeconds =
+    connection.lastNetworkActivityAt === null
+      ? null
+      : Math.max(0, Math.round((Date.now() - connection.lastNetworkActivityAt) / 1_000));
 
   return (
     <button
@@ -65,10 +76,19 @@ export function ConnectionBadge({ onOpenSettings }: { onOpenSettings?: () => voi
           ) : null}
         </span>
         <span className="mt-0.5 flex items-center gap-2 text-[10px] font-medium text-fg-muted">
-          <span className="tabular">
-            {connection.latencyMs === null
-              ? t('connection.latencyEmpty')
-              : `${connection.latencyMs} ms`}
+          <span
+            className="tabular"
+            title={
+              silenceSeconds === null
+                ? undefined
+                : t('connection.silence', { seconds: silenceSeconds })
+            }
+          >
+            {status === 'stale' && silenceSeconds !== null
+              ? t('connection.silence', { seconds: silenceSeconds })
+              : connection.latencyMs === null
+                ? t('connection.latencyEmpty')
+                : `${connection.latencyMs} ms`}
           </span>
           <span className="text-fg-subtle">·</span>
           <span className="flex items-center gap-1">

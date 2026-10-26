@@ -87,3 +87,26 @@ describe('SettingsPage · protezione burn-in', () => {
     expect(screen.getByText(/ogni 30 s/)).toBeInTheDocument();
   });
 });
+
+describe('SettingsPage · sincronizzazione topologia', () => {
+  it('cambia il raggruppamento degli eventi e lo riflette nello store', async () => {
+    useHomeStore.getState().setTopologySyncSettings({ debounceMs: 300 });
+    renderPage();
+
+    expect(screen.getByRole('button', { name: '300 ms' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: '1 s' }));
+    expect(useHomeStore.getState().topologySync.debounceMs).toBe(1_000);
+    expect(screen.getByRole('button', { name: '1 s' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    // 0 = refetch immediato: resta nel range supportato dal normalizzatore.
+    await userEvent.click(screen.getByRole('button', { name: 'Subito' }));
+    expect(useHomeStore.getState().topologySync.debounceMs).toBe(0);
+  });
+});

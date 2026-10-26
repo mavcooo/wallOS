@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { BOOT_RECOVERY } from '@/config/app.config';
 import { captureRollback } from '@/mqtt/optimistic';
 import { resetBrowserStorage } from '@/test/browserEnv';
 import type { QueuedCommand } from '@/mqtt/offlineQueue';
@@ -27,6 +28,9 @@ async function setup() {
   // La topologia vive in TanStack Query: il test inietta le righe realtime
   // come farebbe TopologyGate dopo il bootstrap.
   useHomeStore.getState().syncDeviceStates(SEED_TOPOLOGY.devices);
+  // Safe boot concluso: qui si prova la coda operativa. I casi che vogliono
+  // l'idratazione in corso la riattivano esplicitamente.
+  useHomeStore.getState().finishHydration();
   const queue = await import('@/mqtt/offlineQueue');
   const { useToastStore } = await import('@/store/toastStore');
   return {
@@ -149,6 +153,91 @@ describe('coda offline: collasso e revisioni', () => {
     expect(ctx.useOfflineQueue.getState().commands).toHaveLength(1);
 
     expect(ctx.useOfflineQueue.getState().remove(first.id, 2)).toBe(true);
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(0);
+  });
+});
+
+describe('coda offline: purge dei comandi pre-blackout', () => {
+  it('scarta i comandi nati in una sessione precedente e non li trasmette', async () => {
+    const ctx = await setup();
+    enqueueBrightness(ctx, 40);
+    const command = ctx.useOfflineQueue.getState().commands[0]!;
+    // Il pannello è ripartito dopo il comando: blackout o refresh forzato.
+    const bootedAt = command.timestamp + 1_000;
+
+    // Anche con il runtime connesso, dopo il purge non parte nulla.
+    const publish = vi.fn(async () => true);
+    ctx.installQueueRuntime({ isConnected: () => true, publish });
+
+    const result = ctx.purgeStaleCommandsOnBoot({ bootedAt, now: bootedAt + 10 });
+
+    expect(result).toMatchObject({ discarded: 1, previousSession: 1, tooOld: 0 });
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(0);
+
+    await ctx.flushOfflineQueue();
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('conserva i comandi della sessione corrente', async () => {
+    const ctx = await setup();
+    enqueueBrightness(ctx, 40);
+    const command = ctx.useOfflineQueue.getState().commands[0]!;
+
+    const result = ctx.purgeStaleCommandsOnBoot({
+      bootedAt: command.timestamp - 1_000,
+      now: command.timestamp + 1_000,
+    });
+
+    expect(result.discarded).toBe(0);
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(1);
+  });
+
+  it('scarta anche un comando troppo vecchio con lo stesso timestamp di boot', async () => {
+    const ctx = await setup();
+    enqueueBrightness(ctx, 40);
+    const command = ctx.useOfflineQueue.getState().commands[0]!;
+
+    const result = ctx.purgeStaleCommandsOnBoot({
+      bootedAt: command.timestamp - 1_000,
+      now: command.timestamp + BOOT_RECOVERY.maxCommandTtlMs + 1,
+    });
+
+    expect(result).toMatchObject({ discarded: 1, previousSession: 0, tooOld: 1 });
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(0);
+  });
+
+  it('registra il purge nel buffer diagnostico del pannello', async () => {
+    const ctx = await setup();
+    enqueueBrightness(ctx, 40);
+    const command = ctx.useOfflineQueue.getState().commands[0]!;
+
+    ctx.purgeStaleCommandsOnBoot({ bootedAt: command.timestamp + 1_000, now: command.timestamp + 2_000 });
+
+    const entry = ctx.useHomeStore.getState().rawLog[0];
+    expect(entry).toMatchObject({ direction: 'system', topic: 'recovery' });
+    expect(entry?.payload).toContain('Scartati 1 comandi obsoleti');
+  });
+});
+
+describe('coda offline: Safe Boot', () => {
+  it('resta in pausa durante l\'idratazione, anche con runtime connesso', async () => {
+    const ctx = await setup();
+    enqueueBrightness(ctx, 40);
+    ctx.useHomeStore.setState({
+      recovery: { ...ctx.useHomeStore.getState().recovery, isHydrating: true },
+    });
+    const publish = vi.fn(async () => true);
+    ctx.installQueueRuntime({ isConnected: () => true, publish });
+
+    await ctx.flushOfflineQueue();
+
+    expect(publish).not.toHaveBeenCalled();
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(1);
+
+    // Fine idratazione: la coda riprende normalmente.
+    ctx.useHomeStore.getState().finishHydration();
+    const result = await ctx.flushOfflineQueue();
+    expect(result.sent).toBe(1);
     expect(ctx.useOfflineQueue.getState().commands).toHaveLength(0);
   });
 });

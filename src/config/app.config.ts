@@ -1,5 +1,6 @@
 import type { BrokerSettings, MqttProtocol } from '@/types/mqtt';
 import type { TelemetrySettings } from '@/types/telemetry';
+import type { TopologySyncSettings } from '@/types/topologySync';
 
 function randomClientId(): string {
   const suffix = Math.random().toString(36).slice(2, 8);
@@ -103,6 +104,29 @@ export const HEALTH_MONITOR = {
   timeoutMs: 8_000,
 } as const;
 
+/**
+ * Heartbeat applicativo MQTT e watchdog anti-freeze.
+ *
+ * Un socket "half-open" (AP o broker che azzera la sessione TCP senza FIN/RST)
+ * lascia mqtt.js con `connected === true` ma muto: queste soglie sono l'unica
+ * difesa a livello applicativo.
+ */
+export const MQTT_WATCHDOG = {
+  /** Pubblicazione del ping heartbeat sul topic loopback/pong. */
+  heartbeatIntervalMs: 30_000,
+  /** Topic di ping (loopback per RTT, pong per un eventuale echo esterno). */
+  heartbeatTopic: 'wallos/heartbeat/ping',
+  pongTopic: 'wallos/heartbeat/pong',
+  /** Silenzio massimo prima di dichiarare la socket zombie. */
+  freezeTimeoutMs: 90_000,
+  /** Frequenza del controllo di silenzio. */
+  checkIntervalMs: 10_000,
+  /** Blackout continuo dopo cui si prepara il riavvio. */
+  blackoutTimeoutMs: 600_000,
+  /** Countdown mostrato prima di `window.location.reload()`. */
+  reloadCountdownMs: 30_000,
+} as const;
+
 export const KIOSK_DEFAULTS = {
   /** 2 minuti di inattività prima del dim. */
   dimmerTimeoutMs: 120_000,
@@ -142,6 +166,42 @@ export const TELEMETRY_DEFAULTS: TelemetrySettings = {
 export const TELEMETRY_LIMITS = {
   minThrottleMs: 500,
   maxThrottleMs: 2_000,
+} as const;
+
+/**
+ * Default della sincronizzazione topologia (modificabili da Impostazioni e
+ * persistiti nello store): la finestra in cui gli eventi MQTT/SSE vengono
+ * accorpati in un unico refetch della topologia.
+ */
+export const TOPOLOGY_SYNC_DEFAULTS: TopologySyncSettings = {
+  debounceMs: 300,
+};
+
+/**
+ * Timestamp del boot del client, catturato al primo import della config: è la
+ * base per riconoscere i comandi in coda appartenenti a una sessione precedente
+ * (blackout elettrico, refresh forzato, crash del browser).
+ */
+export const APP_BOOT_AT = Date.now();
+
+/**
+ * Safe Boot / Power Failure Recovery.
+ *
+ * Dopo un blackout il pannello e i relè ripartono insieme: finché il broker non
+ * ha consegnato i retained, la UI mostra lo stato di sincronizzazione e non
+ * manda comandi. La finestra si chiude con il debounce di quiete (nessun
+ * retained per `quietWindowMs`), mai prima di `minHydrationMs` e comunque entro
+ * `maxHydrationMs`.
+ */
+export const BOOT_RECOVERY = {
+  /** Silenzio dopo l'ultimo retained che dichiara la casa idratata. */
+  quietWindowMs: 2_000,
+  /** Pavimento: evita un flash "sincronizzato" su un broker già in silenzio. */
+  minHydrationMs: 3_000,
+  /** Tetto: la UI si sblocca comunque, anche con broker muto o assente. */
+  maxHydrationMs: 12_000,
+  /** Anzianità massima di un comando ripreso dallo storage: oltre, si scarta. */
+  maxCommandTtlMs: 5 * 60_000,
 } as const;
 
 /** Parametri della coda comandi offline (QoS, TTL, retry, flush). */

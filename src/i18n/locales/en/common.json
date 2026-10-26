@@ -198,6 +198,7 @@
       "connecting": "Connecting",
       "connected": "Online",
       "reconnecting": "Reconnecting",
+      "stale": "Frozen",
       "offline": "Offline",
       "error": "Error"
     },
@@ -205,6 +206,7 @@
     "pending": "{{count}} commands waiting for synchronization",
     "demo": "demo",
     "latencyEmpty": "— ms",
+    "silence": "{{seconds}}s silence",
     "rx": "{{count}} rx"
   },
   "database": {
@@ -261,6 +263,30 @@
       "coded": "Database error ({{code}})",
       "generic": "Database error"
     }
+  },
+  "watchdog": {
+    "freezeTitle": "Connection freeze detected",
+    "freezeDescription": "No packets from the broker for {{seconds}}s. Reconnecting…"
+  },
+  "topologySync": {
+    "toastTitle": "Topology updated in real time",
+    "toastDescription": "Rooms and devices synced with the database."
+  },
+  "hydration": {
+    "title": "Synchronising the home…",
+    "waiting": "waiting for broker data",
+    "progress_one": "{{count}} update received",
+    "progress_other": "{{count}} updates received",
+    "hint": "Controls disabled until it completes"
+  },
+  "emergency": {
+    "badge": "Network emergency",
+    "title": "LAN connection down for {{minutes}} minutes",
+    "description": "The panel is no longer receiving data from the broker. As a safety measure the application will restart to create a clean session.",
+    "countdownLabel": "Application restart in",
+    "frozenHint": "The MQTT connection is frozen: the socket looks open but does not respond.",
+    "cancelReload": "Cancel Restart",
+    "retryNow": "Retry Now"
   },
   "alarm": {
     "badge": "Critical alert",

@@ -1,4 +1,4 @@
-import type { AttemptPolicy, AuthConfig, PinPolicy } from './types.js';
+import type { AttemptPolicy, AuthConfig, MqttEventsConfig, PinPolicy } from './types.js';
 
 const DEV_JWT_SECRET = 'dev-only-secret-change-me-domus-kiosk-auth-0001';
 
@@ -224,6 +224,50 @@ function resolveDatabase(env: NodeJS.ProcessEnv, issues: string[]): ResolvedData
 }
 
 /**
+ * Broker MQTT usato dal server per pubblicare gli eventi di topologia
+ * (`wallos/system/topology_changed`). Non è lo stesso endpoint del browser:
+ * lì serve il listener WebSocket, qui il listener TCP del broker in LAN.
+ *
+ * - `MQTT_SERVER_URL` ha la precedenza (endpoint esplicito, es. mqtts://)
+ * - altrimenti `MQTT_HOST` + `MQTT_SERVER_PORT` (default 1883)
+ * - nessuno dei due → pubblicazione disabilitata (`url: null`), il server
+ *   resta pienamente funzionante senza broker
+ */
+function resolveMqttEvents(env: NodeJS.ProcessEnv, issues: string[]): MqttEventsConfig {
+  const baseTopic = (text(env.MQTT_BASE_TOPIC) ?? '').replace(/^\/+|\/+$/g, '');
+  const credentials = {
+    username: text(env.MQTT_USERNAME) ?? null,
+    password: text(env.MQTT_PASSWORD) ?? null,
+    baseTopic,
+  };
+
+  const explicit = text(env.MQTT_SERVER_URL);
+  if (explicit) {
+    let protocol = '';
+    try {
+      protocol = new URL(explicit).protocol;
+    } catch {
+      protocol = '';
+    }
+    if (!['mqtt:', 'mqtts:', 'ws:', 'wss:'].includes(protocol)) {
+      issues.push(
+        `MQTT_SERVER_URL deve essere un URL mqtt://, mqtts://, ws:// o wss:// (ricevuto "${explicit}")`,
+      );
+      return { url: null, ...credentials };
+    }
+    return { url: explicit, ...credentials };
+  }
+
+  const host = text(env.MQTT_HOST);
+  if (!host) return { url: null, ...credentials };
+  if (/[\s/]/.test(host) && !host.includes('://')) {
+    issues.push('MQTT_HOST non può contenere spazi o slash: usa IP o hostname (es. 192.168.0.10)');
+  }
+  const port = boundedInteger(env, 'MQTT_SERVER_PORT', 1883, issues, 1, 65535);
+  return { url: `mqtt://${host}:${port}`, ...credentials };
+}
+
+/**
  * Legge la configurazione dall'ambiente. Il server rifiuta di partire in
  * produzione con un segreto JWT debole o credenziali di seed mancanti.
  */
@@ -261,6 +305,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
     lockoutMs: integer(env.LOGIN_LOCKOUT_MS, 5 * 60_000),
     windowMs: integer(env.LOGIN_WINDOW_MS, 15 * 60_000),
   };
+
+  // Broker per la pubblicazione degli eventi di topologia (opzionale).
+  const mqtt = resolveMqttEvents(env, issues);
 
   if (!/^\d{4,6}$/.test(adminPin)) issues.push('ADMIN_PIN deve avere 4-6 cifre');
   if (!/^\d{4,6}$/.test(kioskPin)) issues.push('KIOSK_PIN deve avere 4-6 cifre');
@@ -308,6 +355,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
     bcryptRounds: integer(env.BCRYPT_ROUNDS, production ? 12 : 10),
     pinPolicy,
     loginPolicy,
+    mqtt,
     seed: {
       adminUsername: (text(env.ADMIN_USERNAME) ?? 'admin').toLowerCase(),
       adminDisplayName: text(env.ADMIN_DISPLAY_NAME) ?? 'Amministratore',

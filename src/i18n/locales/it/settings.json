@@ -41,6 +41,13 @@
     "statusOff": "Disattivata",
     "note": "Rimuove backdrop blur, ombre e gradienti e riduce le micro-animazioni. La scelta resta salvata su questo dispositivo."
   },
+  "sync": {
+    "title": "Sincronizzazione topologia",
+    "description": "Aggiornamento istantaneo di stanze e dispositivi su tutti i pannelli della casa.",
+    "debounce": "Raggruppamento eventi",
+    "immediate": "Subito",
+    "hint": "Gli eventi ricevuti vengono accorpati in un unico aggiornamento: Subito reagisce a ogni singola modifica, i valori più alti evitano richieste ripetute durante riordini o configurazioni massive."
+  },
   "broker": {
     "title": "Broker MQTT",
     "description": "Connessione WebSocket in LAN · parametri applicati al pannello",

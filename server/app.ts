@@ -8,7 +8,12 @@ import { Database, shortVersion } from './db.js';
 import { HttpError } from './http.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerTopologyRoutes } from './routes/topology.js';
+import { registerTopologyEventRoutes } from './routes/topologyEvents.js';
 import { registerUserRoutes } from './routes/users.js';
+import {
+  createTopologyEventBus,
+  type TopologyEventBus,
+} from './services/topologyEvents.js';
 import {
   registerTelemetryIngestRoutes,
   registerTelemetryRoutes,
@@ -23,6 +28,8 @@ export interface BuildAppOptions {
   logger?: boolean;
   /** Database già costruito (test con PGlite); altrimenti pool da config. */
   db?: Database;
+  /** Bus degli eventi di topologia: nei test si inietta un falso spia. */
+  topologyEvents?: TopologyEventBus;
 }
 
 export interface BuiltApp {
@@ -111,7 +118,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     origin: config.corsOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    // X-Client-Id identifica il pannello che origina una mutazione: serve al
+    // server per riecheggiarlo nell'evento e al client per non rifare il refetch.
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id'],
     maxAge: 600,
   });
 
@@ -191,14 +200,20 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     }
   });
 
+  const topologyEvents =
+    options.topologyEvents ?? createTopologyEventBus(config, app.log);
+
   registerAuthRoutes(app, { db, config, dummyPasswordHash });
   registerUserRoutes(app, { db, config });
-  registerTopologyRoutes(app, { db, config });
+  registerTopologyRoutes(app, { db, config, events: topologyEvents });
+  // Ripiego SSE: i client la aprono solo quando la socket MQTT non è viva.
+  registerTopologyEventRoutes(app, { db, config, events: topologyEvents });
   registerTelemetryRoutes(app, { db, config });
   registerTelemetrySummaryRoutes(app, { db, config });
   registerTelemetryIngestRoutes(app, { db, config });
 
   app.addHook('onClose', async () => {
+    await topologyEvents.close();
     await db.close();
   });
 

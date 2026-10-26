@@ -6,7 +6,7 @@ import { useDevice, useRoomLabel } from '@/hooks/useDevice';
 import { cn } from '@/lib/utils';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useOfflineQueue } from '@/mqtt/offlineQueue';
-import { useHomeStore } from '@/store/homeStore';
+import { selectIsHydrating, useHomeStore } from '@/store/homeStore';
 import { AvailabilityBadge } from './AvailabilityBadge';
 import { CameraCard } from './CameraCard';
 import { ClimateCard } from './ClimateCard';
@@ -33,6 +33,8 @@ interface DeviceCardProps {
  * - `isAvailable === false` (LWT offline o watchdog `stale`) disabilita il
  *   sottoalbero con `inert` + `pointer-events-none`, mostra il badge e scarta
  *   i comandi: nessuna pubblicazione MQTT verso un device muto.
+ * - Durante il Safe Boot (`isHydrating`) il sottoalbero è bloccato allo stesso
+ *   modo: l'utente non deve toccare un relè il cui stato retained è in arrivo.
  */
 export const DeviceCard = memo(function DeviceCard({
   deviceId,
@@ -50,10 +52,13 @@ export const DeviceCard = memo(function DeviceCard({
   const pending = useOfflineQueue((state) =>
     state.commands.some((command) => command.deviceId === deviceId),
   );
+  // Booleano primitivo: la card si ridisegna solo a inizio/fine idratazione.
+  const hydrating = useHomeStore(selectIsHydrating);
 
   if (!device) return null;
 
   const unavailable = device.isAvailable === false;
+  const blocked = unavailable || hydrating;
 
   const favorite = showFavorite
     ? () => {
@@ -64,7 +69,7 @@ export const DeviceCard = memo(function DeviceCard({
   const onAction = (action: Parameters<typeof sendAction>[1]) => {
     // Barriera finale: anche un event handler sfuggito a `inert` (o un tap di
     // un widget per cui la card è già disabilitata) non genera comandi a vuoto.
-    if (unavailable) return;
+    if (blocked) return;
     if (device.protected) {
       requestPin({
         title: t('guard.title'),
@@ -142,11 +147,14 @@ export const DeviceCard = memo(function DeviceCard({
       <div
         // `inert` spegne focus, click e slider dell'intero sottoalbero: un solo
         // punto di blocco per tutti i widget, nessun `disabled` da propagare.
-        inert={unavailable}
-        aria-disabled={unavailable || undefined}
+        // Vale sia per un device muto sia durante l'idratazione del Safe Boot.
+        inert={blocked}
+        aria-disabled={blocked || undefined}
+        aria-busy={hydrating || undefined}
         className={cn(
           'h-full',
           unavailable && 'pointer-events-none select-none opacity-55 grayscale',
+          hydrating && !unavailable && 'pointer-events-none select-none opacity-60',
         )}
       >
         {card}

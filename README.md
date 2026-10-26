@@ -153,6 +153,16 @@ docker compose logs -f api
 - Broker: il pannello usa `ws://<host>:9001` (MQTT WebSocket), i dispositivi
   `1883`. La configurazione `docker/mosquitto.conf` è **anonima**: abilita
   `password_file` e ACL per topic prima di esporla fuori dalla LAN.
+- **Eventi di topologia in tempo reale**: il container `api` parla con il broker
+  dello stack sul listener **TCP** (`1883`), non sul WebSocket. Nel
+  `docker-compose.yml` è già impostato
+  `MQTT_SERVER_URL=mqtt://mqtt:1883`; per un broker esterno usa
+  `MQTT_SERVER_URL=mqtt://<ip>:1883` (oppure `MQTT_HOST` + `MQTT_SERVER_PORT`,
+  vedi §4). Senza queste variabili il server logga un warning e i pannelli
+  ricevono gli aggiornamenti solo via SSE. Le variabili `MQTT_*` del **browser**
+  (`MQTT_HOST`, `MQTT_PORT=9001`, `MQTT_PATH=/mqtt`, `MQTT_BASE_TOPIC`) sono
+  invece lette da Vite al momento del `npm run build`: vanno passate alla build
+  del frontend, non al container `api`.
 - `COOKIE_SECURE=false` solo in HTTP locale; con TLS metti `true` e
   `AUTH_TRUST_PROXY=true` dietro il reverse proxy.
 - In produzione il servizio rifiuta i PIN demo: `ADMIN_PIN` e `KIOSK_PIN`
@@ -596,6 +606,121 @@ proxy deve essere HTTPS: i browser bloccano i flussi HTTP come mixed content.
 
 In `demoMode` l'effetto non apre socket: un simulatore locale aggiorna potenze,
 temperature e sensori; i comandi restano ottimistici e coerenti.
+
+### Sincronizzazione topologia in tempo reale
+
+Ogni mutazione confermata su PostgreSQL (creazione, modifica, eliminazione o
+riordino di **stanze, dispositivi e scenari**) viene diffusa a tutti i pannelli
+della casa in meno di un secondo: nessun tocco, nessun reload, nessuna attesa
+dello `staleTime` di TanStack Query.
+
+**Canale primario — MQTT.** A ogni CRUD completata il server pubblica su
+`<baseTopic>/wallos/system/topology_changed` un payload compatto:
+
+```json
+{
+  "event": "device_updated",
+  "entity": "device",
+  "id": "light-living-main",
+  "timestamp": 1730000000000,
+  "sourceClientId": "admin-pc"
+}
+```
+
+- `event` è `<entity>_<created|updated|deleted|reordered>`: `reordered`
+  distingue il solo cambio di `displayOrder`;
+- `sourceClientId` arriva dall'header `X-Client-Id` che il browser allega alle
+  CRUD: quel pannello ha già invalidato in locale e ignora il messaggio, così
+  una modifica non produce due refetch;
+- la pubblicazione avviene **dopo** il commit, con QoS 1 e coda lato
+  `server/services/topologyEvents.ts`: un broker momentaneamente giù non perde
+  l'evento; il topic è uguale a lato client perché entrambi leggono
+  `MQTT_BASE_TOPIC`.
+
+**Canale di ripiego — SSE.** Quando la socket MQTT non è viva (broker in
+manutenzione, porta WebSocket bloccata, demo mode) il client apre
+`GET /api/topology/events` (`text/event-stream`, stessa sessione delle altre
+rotte, `retry: 3000` gestito dal browser). Lo stream porta lo stesso payload e
+viene chiuso appena MQTT torna connesso: **mai due canali attivi insieme**.
+
+**Schema dei due canali**:
+
+```text
+CRUD admin
+   │  POST / PATCH / DELETE su /api/rooms, /api/devices, /api/scenarios
+   ▼
+Fastify · routes/topology.ts
+   │  commit PostgreSQL (annuncio post-commit)
+   ▼
+topologyEvents.publish(event)
+   ├─▶ MQTT   QoS 1, retain=false
+   │      <base>/wallos/system/topology_changed → broker :1883
+   │      → pannelli con socket MQTT viva
+   └─▶ SSE    frame `data: {...}`
+          GET /api/topology/events · text/event-stream · retry 3000
+          → pannelli senza broker (o in demo mode)
+
+useTopologySync · debounce 300 ms (Impostazioni)
+   ▼
+invalidate ['topology'] → refetch GET /api/topology
+```
+
+Un pannello usa **un solo canale per volta**: lo stream SSE si apre solo se
+`connection.status !== 'connected'` (o in demo mode) e si chiude appena MQTT
+ritorna; qualunque sia la sorgente, l'evento finisce nella stessa coda con
+debounce. Il server non ha bisogno di sapere quali pannelli sono su MQTT: il
+payload è identico sui due canali.
+
+**Lato client** (`src/hooks/useTopologySync.ts`, montato in `App.tsx` dentro
+`<MqttProvider>`):
+
+1. ogni evento, da qualunque canale, entra in una coda con **debounce**
+   configurabile da Impostazioni → *Sincronizzazione topologia* (`0 … 2 s`,
+   default **300 ms**): una raffica di modifiche produce un solo
+   `queryClient.invalidateQueries({ queryKey: ['topology'] })`;
+2. `['topology']` è l'unica chiave della topologia: stanze, dispositivi e
+   scenari vivono sotto quella chiave (`select` nei vari hook), quindi il
+   refetch riallinea tutto;
+3. a refetch avvenuto `refreshSubscriptions()` sottoscrive i `state_topic` dei
+   device appena creati, senza riaprire la connessione;
+4. se l'evento proviene da un altro client compare un toast non bloccante
+   “Topologia aggiornata in tempo reale”;
+5. **riconnessione** MQTT o **riapertura** dello stream SSE → refetch di
+   sicurezza senza toast, per allineare il client anche se durante il blackout
+   sono persi eventi (il topic non è retained).
+
+**Variabili d'ambiente del server** (il `.env` è letto sia da Vite sia da
+`server/index.ts` con `loadEnvFile`):
+
+| Variabile | Default | Descrizione |
+| --- | --- | --- |
+| `MQTT_SERVER_URL` | — | Endpoint usato dal server per pubblicare gli eventi. Ha precedenza su tutto e accetta `mqtt://`, `mqtts://`, `ws://`, `wss://` (es. `mqtt://192.168.0.10:1883`, il **listener TCP**: il 9001 è il WebSocket del browser). |
+| `MQTT_SERVER_PORT` | `1883` | Porta TCP con cui viene composto l'endpoint da `MQTT_HOST`. |
+| `MQTT_HOST` | — | Host del broker, condiviso con il browser (dove compone l'URL WebSocket con `MQTT_PORT`). Se né `MQTT_SERVER_URL` né `MQTT_HOST` sono impostati la pubblicazione MQTT resta disabilitata: il server avverte nel log e gli eventi arrivano comunque via SSE. |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | — | Credenziali del broker, condivise tra server e browser (utenza dedicata con ACL topic). |
+| `MQTT_BASE_TOPIC` | — | Prefisso applicato a tutti i topic, identico a lato client. |
+
+**Verifica rapida** (due finestre affiancate sullo stesso pannello):
+
+```bash
+# 1. osserva gli eventi di sistema sul broker
+mosquitto_sub -h 192.168.0.10 -p 1883 -t 'wallos/system/#' -v
+
+# 2. genera una mutazione autenticata: l'altra finestra si riallinea da sola
+curl -s -c /tmp/w.cookies -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"..."}' http://localhost:3000/api/auth/login
+curl -s -b /tmp/w.cookies -H 'Content-Type: application/json' \
+  -H 'X-Client-Id: admin_cli' -X PATCH \
+  -d '{"name":"Salotto","shortLabel":"Salotto","icon":"sofa","displayOrder":0}' \
+  http://localhost:3000/api/rooms/living
+```
+
+Per simulare un evento senza toccare il server:
+
+```bash
+mosquitto_pub -h 192.168.0.10 -p 1883 -t 'wallos/system/topology_changed' \
+  -m '{"event":"device_updated","entity":"device","id":"light-living-main","timestamp":1730000000000}'
+```
 
 ### Come si collega un nuovo dispositivo
 

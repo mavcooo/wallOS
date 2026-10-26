@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { DEFAULT_BROKER, KIOSK_DEFAULTS } from '@/config/app.config';
+import { APP_BOOT_AT, DEFAULT_BROKER, KIOSK_DEFAULTS } from '@/config/app.config';
 import { normalizeBurnInSettings } from '@/lib/burnIn';
 import { mergeDecodedRealtime, seedDeviceRealtimeState } from '@/lib/deviceState';
 import { normalizeTelemetrySettings } from '@/lib/telemetry';
+import { normalizeTopologySyncSettings } from '@/lib/topologySync';
 import type { BurnInSettings } from '@/types/kiosk';
 import type {
   DecodedState,
@@ -16,7 +17,9 @@ import type {
 } from '@/types/device';
 import type { BrokerSettings, ConnectionMetrics, ConnectionStatus } from '@/types/mqtt';
 import type { RawMqttMessage } from '@/types/mqtt';
+import type { RecoveryState } from '@/types/recovery';
 import type { TelemetrySettings, TelemetryUpdate } from '@/types/telemetry';
+import type { TopologySyncSettings } from '@/types/topologySync';
 
 export type ViewId = 'overview' | 'rooms' | 'energy' | 'settings' | 'users' | 'admin';
 
@@ -67,6 +70,26 @@ export interface HomeState {
   toggleFavorite(deviceId: string): void;
   /** Tick del simulatore locale (solo modalità demo). */
   simulateTelemetry(): void;
+  /**
+   * Segna un pacchetto realmente ricevuto dal broker (pong, echo, qualsiasi
+   * messaggio). È la base del watchdog anti-freeze: se resta fermo mentre
+   * `status === 'connected'`, la socket è zombie.
+   */
+  noteNetworkActivity(at?: number): void;
+  /** Socket dichiarata congelata dal watchdog: badge ambra e riconnessione. */
+  markConnectionFrozen(silenceMs: number): void;
+
+  // ── Safe boot (idratazione dopo un riavvio) ─────────────────────────────
+  recovery: RecoveryState;
+  /**
+   * Chiude la finestra di idratazione. `hadConnection: false` segnala che il
+   * broker non è mai stato visto: al primo CONNACK si riarma.
+   */
+  finishHydration(hadConnection?: boolean): void;
+  /** Riapre la finestra (primo CONNACK dopo un tetto scaduto offline). */
+  startHydration(): void;
+  /** Un retained dal broker: progresso + base del debounce di quiete. */
+  noteRetainedMessage(at?: number): void;
 
   // ── Connessione ──────────────────────────────────────────────────────────
   connection: ConnectionMetrics;
@@ -85,6 +108,9 @@ export interface HomeState {
   /** Finestra di throttle e soglia di variazione significativa. */
   telemetry: TelemetrySettings;
   setTelemetrySettings(patch: Partial<TelemetrySettings>): void;
+  /** Accorpamento degli eventi di topologia (MQTT/SSE) in un solo refetch. */
+  topologySync: TopologySyncSettings;
+  setTopologySyncSettings(patch: Partial<TopologySyncSettings>): void;
   /** Protezione burn-in: strategia, intervallo e opacità dell'orologio. */
   burnIn: BurnInSettings;
   setBurnInSettings(patch: Partial<BurnInSettings>): void;
@@ -102,9 +128,23 @@ const initialConnection: ConnectionMetrics = {
   latencyMs: null,
   reconnectAttempts: 0,
   connectedAt: null,
+  lastNetworkActivityAt: null,
+  frozenSince: null,
   lastError: null,
   messagesIn: 0,
   messagesOut: 0,
+};
+
+/**
+ * Il pannello parte in idratazione: nessun comando può uscire prima che i
+ * retained abbiano popolato lo stato reale della casa.
+ */
+const initialRecovery: RecoveryState = {
+  bootedAt: APP_BOOT_AT,
+  isHydrating: true,
+  retainedMessagesReceived: 0,
+  lastRetainedAt: null,
+  awaitingFirstConnect: false,
 };
 
 const initialUi: UiState = {
@@ -148,7 +188,10 @@ function jitter(value: number, amplitude: number, min: number): number {
   return Math.max(min, value + (Math.random() - 0.5) * amplitude);
 }
 
-type PersistedHome = Pick<HomeState, 'broker' | 'ui' | 'telemetry' | 'burnIn'>;
+type PersistedHome = Pick<
+  HomeState,
+  'broker' | 'ui' | 'telemetry' | 'burnIn' | 'topologySync'
+>;
 
 export const useHomeStore = create<HomeState>()(
   persist(
@@ -283,6 +326,33 @@ export const useHomeStore = create<HomeState>()(
         });
       },
 
+      noteNetworkActivity(at = Date.now()) {
+        set((state) => ({
+          connection: {
+            ...state.connection,
+            lastNetworkActivityAt: at,
+            // Un pacchetto reale è la prova che la socket è viva: se il
+            // watchdog l'aveva dichiarata congelata, si torna in verde.
+            ...(state.connection.status === 'stale'
+              ? { status: 'connected' as ConnectionStatus, frozenSince: null }
+              : {}),
+          },
+        }));
+      },
+
+      markConnectionFrozen(silenceMs) {
+        const since = Date.now() - silenceMs;
+        set((state) => ({
+          connection: {
+            ...state.connection,
+            status: 'stale',
+            frozenSince: state.connection.frozenSince ?? since,
+            lastError: `Nessun pacchetto da ${Math.round(silenceMs / 1_000)} s`,
+            latencyMs: null,
+          },
+        }));
+      },
+
       simulateTelemetry() {
         set((state) => {
           const now = Date.now();
@@ -370,6 +440,42 @@ export const useHomeStore = create<HomeState>()(
         }));
       },
 
+      recovery: initialRecovery,
+      finishHydration(hadConnection = true) {
+        // Idempotente: chiamate ripetute (quiete + tetto) non notificano nulla.
+        set((state) =>
+          state.recovery.isHydrating
+            ? {
+                recovery: {
+                  ...state.recovery,
+                  isHydrating: false,
+                  awaitingFirstConnect: !hadConnection,
+                },
+              }
+            : state,
+        );
+      },
+      startHydration() {
+        set((state) => ({
+          recovery: {
+            ...state.recovery,
+            isHydrating: true,
+            awaitingFirstConnect: false,
+            retainedMessagesReceived: 0,
+            lastRetainedAt: null,
+          },
+        }));
+      },
+      noteRetainedMessage(at = Date.now()) {
+        set((state) => ({
+          recovery: {
+            ...state.recovery,
+            retainedMessagesReceived: state.recovery.retainedMessagesReceived + 1,
+            lastRetainedAt: at,
+          },
+        }));
+      },
+
       connection: initialConnection,
       patchConnection(patch) {
         set((state) => ({ connection: { ...state.connection, ...patch } }));
@@ -417,6 +523,13 @@ export const useHomeStore = create<HomeState>()(
         }));
       },
 
+      topologySync: normalizeTopologySyncSettings(),
+      setTopologySyncSettings(patch) {
+        set((state) => ({
+          topologySync: normalizeTopologySyncSettings({ ...state.topologySync, ...patch }),
+        }));
+      },
+
       burnIn: normalizeBurnInSettings(),
       setBurnInSettings(patch) {
         set((state) => ({
@@ -456,6 +569,7 @@ export const useHomeStore = create<HomeState>()(
         ui: { ...state.ui, screenDimmed: false },
         telemetry: state.telemetry,
         burnIn: state.burnIn,
+        topologySync: state.topologySync,
       }),
       migrate: (persisted) => persisted as PersistedHome,
       merge: (persisted, current) => {
@@ -467,6 +581,10 @@ export const useHomeStore = create<HomeState>()(
           ui: { ...current.ui, ...(saved.ui ?? {}), screenDimmed: false },
           telemetry: normalizeTelemetrySettings(saved.telemetry ?? current.telemetry),
           burnIn: normalizeBurnInSettings(saved.burnIn ?? current.burnIn),
+          // Chiave assente nella persistenza precedente: resta il default.
+          topologySync: normalizeTopologySyncSettings(
+            saved.topologySync ?? current.topologySync,
+          ),
         };
       },
     },
@@ -482,6 +600,8 @@ export const selectDeviceState =
   (state: HomeState): DeviceRealtimeState | undefined =>
     state.deviceStates[deviceId];
 export const selectTelemetrySettings = (state: HomeState) => state.telemetry;
+/** Selettore primitivo: i widget si ridisegnano solo al cambio di idratazione. */
+export const selectIsHydrating = (state: HomeState) => state.recovery.isHydrating;
 export const selectConnection = (state: HomeState) => state.connection;
 export const selectBroker = (state: HomeState) => state.broker;
 export const selectUi = (state: HomeState) => state.ui;

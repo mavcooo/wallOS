@@ -1,7 +1,13 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 
 import type { Database, DeviceFields } from '../db.js';
 import { HttpError, asRecord, readBoolean, readString } from '../http.js';
+import {
+  topologyEventName,
+  type TopologyChangeKind,
+  type TopologyEntity,
+  type TopologyEventBus,
+} from '../services/topologyEvents.js';
 import type { AuthConfig, DeviceRow, RoomRow, ScenarioRow } from '../types.js';
 import { requireAuth, requireRole } from '../session.js';
 import type {
@@ -24,6 +30,41 @@ import type {
 export interface TopologyDeps {
   db: Database;
   config: AuthConfig;
+  /** Pubblicazione post-commit su `wallos/system/topology_changed`. */
+  events: TopologyEventBus;
+}
+
+/**
+ * Id del pannello che ha inviato la richiesta: il client lo manda in
+ * `X-Client-Id`, il server lo riecheggia nel payload così quell'unico client
+ * (che ha già invalidato la cache in locale) non fa un secondo refetch.
+ */
+function sourceClientId(request: FastifyRequest): string | undefined {
+  const value = request.headers['x-client-id'];
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim().slice(0, 64);
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Annuncia la mutazione **dopo** che la scrittura su PostgreSQL è stata
+ * confermata: un evento non può mai precedere il dato che descrive.
+ */
+function announce(
+  request: FastifyRequest,
+  deps: TopologyDeps,
+  entity: TopologyEntity,
+  kind: TopologyChangeKind,
+  id: string,
+): void {
+  const sourceClientIdValue = sourceClientId(request);
+  deps.events.publish({
+    event: topologyEventName(entity, kind),
+    entity,
+    id,
+    timestamp: Date.now(),
+    ...(sourceClientIdValue ? { sourceClientId: sourceClientIdValue } : {}),
+  });
 }
 
 interface RoomDto {
@@ -567,13 +608,14 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
       throw new HttpError(409, 'ROOM_EXISTS', 'Esiste già una stanza con questo id');
     }
     await deps.db.createRoom(input);
+    announce(request, deps, 'room', 'created', input.id);
     return reply.code(201).send({ room: toRoom(await roomOr404(deps.db, input.id)) });
   });
 
   app.patch('/api/rooms/:id', { preHandler: adminOnly }, async (request, reply) => {
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
-    await roomOr404(deps.db, id);
+    const existing = await roomOr404(deps.db, id);
     const input = roomInput(asRecord(request.body));
     await deps.db.updateRoom(id, {
       name: input.name,
@@ -581,6 +623,14 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
       icon: input.icon,
       displayOrder: input.displayOrder,
     });
+    // Solo l'ordine cambia → riordino; il resto è un aggiornamento normale.
+    announce(
+      request,
+      deps,
+      'room',
+      input.displayOrder !== existing.display_order ? 'reordered' : 'updated',
+      id,
+    );
     return reply.send({ room: toRoom(await roomOr404(deps.db, id)) });
   });
 
@@ -597,6 +647,7 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
       );
     }
     await deps.db.deleteRoom(id);
+    announce(request, deps, 'room', 'deleted', id);
     return reply.code(204).send();
   });
 
@@ -618,13 +669,14 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
       fieldMap: input.fieldMap ?? null,
       metadata: input.metadata ?? {},
     });
+    announce(request, deps, 'device', 'created', id);
     return reply.code(201).send({ device: toDevice(await deviceOr404(deps.db, id)) });
   });
 
   app.patch('/api/devices/:id', { preHandler: adminOnly }, async (request, reply) => {
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
-    await deviceOr404(deps.db, id);
+    const existing = await deviceOr404(deps.db, id);
     const input = deviceInput(asRecord(request.body));
     if (!(await deps.db.findRoomById(input.roomId))) {
       throw new HttpError(400, 'ROOM_NOT_FOUND', 'La stanza indicata non esiste', {
@@ -633,6 +685,13 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
     }
     // fieldMap/metadata assenti = il valore corrente resta intatto (stato runtime).
     await deps.db.updateDevice(id, input);
+    announce(
+      request,
+      deps,
+      'device',
+      input.displayOrder !== existing.display_order ? 'reordered' : 'updated',
+      id,
+    );
     return reply.send({ device: toDevice(await deviceOr404(deps.db, id)) });
   });
 
@@ -641,6 +700,7 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
     const id = typeof params.id === 'string' ? params.id : '';
     await deviceOr404(deps.db, id);
     await deps.db.deleteDevice(id);
+    announce(request, deps, 'device', 'deleted', id);
     return reply.code(204).send();
   });
 
@@ -650,6 +710,7 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
       throw new HttpError(409, 'SCENARIO_EXISTS', 'Esiste già uno scenario con questo id');
     }
     await deps.db.createScenario(input);
+    announce(request, deps, 'scenario', 'created', input.id);
     return reply
       .code(201)
       .send({ scenario: toScenario(await scenarioOr404(deps.db, input.id)) });
@@ -658,7 +719,7 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
   app.patch('/api/scenarios/:id', { preHandler: adminOnly }, async (request, reply) => {
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
-    await scenarioOr404(deps.db, id);
+    const existing = await scenarioOr404(deps.db, id);
     const input = scenarioInput(asRecord(request.body));
     await deps.db.updateScenario(id, {
       name: input.name,
@@ -668,6 +729,13 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
       actions: input.actions,
       displayOrder: input.displayOrder,
     });
+    announce(
+      request,
+      deps,
+      'scenario',
+      input.displayOrder !== existing.display_order ? 'reordered' : 'updated',
+      id,
+    );
     return reply.send({ scenario: toScenario(await scenarioOr404(deps.db, id)) });
   });
 
@@ -676,6 +744,7 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
     const id = typeof params.id === 'string' ? params.id : '';
     await scenarioOr404(deps.db, id);
     await deps.db.deleteScenario(id);
+    announce(request, deps, 'scenario', 'deleted', id);
     return reply.code(204).send();
   });
 }

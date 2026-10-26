@@ -136,6 +136,19 @@ export interface AttemptPolicy {
   windowMs: number;
 }
 
+/**
+ * Pubblicazione degli eventi di topologia sul broker MQTT condiviso.
+ * `url: null` (nessuna variabile impostata) disabilita la pubblicazione.
+ */
+export interface MqttEventsConfig {
+  /** Es. `mqtt://192.168.0.10:1883` (listener TCP del broker). */
+  url: string | null;
+  username: string | null;
+  password: string | null;
+  /** Prefisso applicato a tutti i topic, come `MQTT_BASE_TOPIC` sul client. */
+  baseTopic: string;
+}
+
 export interface SeedConfig {
   adminUsername: string;
   adminDisplayName: string;
@@ -175,5 +188,6 @@ export interface AuthConfig {
   bcryptRounds: number;
   pinPolicy: PinPolicy & { windowMs: number };
   loginPolicy: AttemptPolicy;
+  mqtt: MqttEventsConfig;
   seed: SeedConfig;
 }

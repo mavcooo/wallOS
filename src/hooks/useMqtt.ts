@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import mqtt, { type IClientOptions, type MqttClient } from 'mqtt';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
-import { DISCOVERY, OFFLINE_QUEUE } from '@/config/app.config';
+import { DISCOVERY, MQTT_WATCHDOG, OFFLINE_QUEUE } from '@/config/app.config';
 import { useRooms } from '@/hooks/useTopologyQuery';
 import i18n from '@/i18n';
 import { availabilityChannels, parseAvailabilityPayload } from '@/lib/availability';
@@ -35,6 +35,18 @@ import {
   type QueuedCommand,
 } from '@/mqtt/offlineQueue';
 import { isValidTopicFilter } from '@/mqtt/sniffer';
+import {
+  emitTopologyChanged,
+  parseTopologyChanged,
+  TOPOLOGY_CHANGED_TOPIC,
+} from '@/mqtt/topologyEvents';
+import {
+  createMqttWatchdog,
+  heartbeatPingPayload,
+  parseHeartbeatEcho,
+  type MqttWatchdog,
+} from '@/services/mqttWatchdog';
+import { useEmergencyReloadStore } from '@/store/emergencyReloadStore';
 import { buildBrokerUrl, stripBaseTopic, withBaseTopic } from '@/mqtt/topics';
 import { buildTopicIndex } from '@/mqtt/topicIndex';
 import { TelemetryUpdateBuffer } from '@/mqtt/updateBuffer';
@@ -270,6 +282,82 @@ export function useMqtt(
     const activeAlarms = new Set<string>();
     let brokerOfflineSince: number | null = null;
     let brokerAlertId: string | null = null;
+    // Toast "freeze" già mostrato: un blackout lungo non deve ripetere il messaggio.
+    let freezeToastShown = false;
+
+    /**
+     * Watchdog anti-freeze: heartbeat applicativo ogni 30 s + controllo di
+     * silenzio ogni 10 s. `noteActivity` è chiamato da ogni pacchetto reale
+     * (pong, echo, telemetria), così il clock si azzera anche senza un servizio
+     * di echo dedicato: il loopback del topic di ping basta per calcolare il RTT.
+     */
+    const heartbeat: MqttWatchdog = createMqttWatchdog({
+      sendHeartbeat: () => {
+        // Il publish è disponibile solo dopo l'apertura della socket; senza
+        // socket il silenzio è già coperto dal watchdog di connessione.
+        if (!clientRef.current?.connected) return;
+        publishRef.current?.(base(MQTT_WATCHDOG.heartbeatTopic), heartbeatPingPayload(settings.clientId), {
+          qos: 0,
+        });
+      },
+      onFreeze: (silenceMs) => {
+        if (disposed) return;
+        // Socket zombie: `end(true)` chiude forzatamente la WebSocket e
+        // `openSocket` riparte da zero con backoff controllato.
+        const frozenAt = Date.now() - silenceMs;
+        useHomeStore.getState().markConnectionFrozen(silenceMs);
+        useEmergencyReloadStore.getState().setFrozen(true, frozenAt);
+        logRaw(
+          'system',
+          'watchdog',
+          `Freeze rilevato: nessun pacchetto da ${Math.round(silenceMs / 1_000)} s · riconnessione forzata`,
+        );
+        if (!freezeToastShown) {
+          freezeToastShown = true;
+          useToastStore.getState().push({
+            title: i18n.t('watchdog.freezeTitle'),
+            description: i18n.t('watchdog.freezeDescription', {
+              seconds: Math.round(silenceMs / 1_000),
+            }),
+            priority: 'warning',
+          });
+        }
+        // Riapre subito: niente attesa del backoff (che riparte comunque da 1 s).
+        attempts = 0;
+        openSocket();
+        // `openSocket` imposta `connecting`: si ripristina `stale` così il
+        // badge resta ambra ("Congelato") per tutta la rinegoziazione, fino al
+        // CONNACK che riporta lo stato a `connected`.
+        setStatus('stale');
+      },
+      onRetry: () => {
+        if (disposed) return;
+        logRaw('system', 'watchdog', 'Retry manuale della connessione');
+        attempts = 0;
+        openSocket();
+      },
+      onCountdown: (remainingMs) => {
+        const seconds = Math.max(0, Math.round(remainingMs / 1_000));
+        const since =
+          useEmergencyReloadStore.getState().blackoutSince ??
+          Date.now() - MQTT_WATCHDOG.blackoutTimeoutMs;
+        if (useEmergencyReloadStore.getState().reloadAt === null) {
+          useEmergencyReloadStore.getState().startCountdown(since, Date.now() + remainingMs);
+        } else {
+          useEmergencyReloadStore.getState().setRemaining(seconds);
+        }
+      },
+      onReload: () => {
+        // Il blackout supera i 10 minuti: probabilmente heap corrotto o
+        // WebSocket stack di Chromium irrecuperabile. Il reload pulisce tutto.
+        logRaw('system', 'watchdog', 'Blackout prolungato · riavvio applicazione');
+        window.location.reload();
+      },
+    });
+    // La modal "Riprova Ora" / "Annulla Riavvio" richiede l'accesso al
+    // watchdog senza passare da React.
+    useEmergencyReloadStore.getState().registerRetryHandler(() => heartbeat.retryNow());
+    useEmergencyReloadStore.getState().registerCancelHandler(() => heartbeat.cancelReload());
 
     function detachQueueRuntime() {
       queueRuntimeCleanup?.();
@@ -345,7 +433,14 @@ export function useMqtt(
      * Lo sniffer contribuisce con i propri filtri finché è aperto.
      */
     function subscribeAll(instance: MqttClient) {
-      const desired = new Set<string>([base(PROBE_TOPIC)]);
+      const desired = new Set<string>([
+        base(PROBE_TOPIC),
+        // Heartbeat: pong esterno (se presente) + loopback del proprio ping.
+        base(MQTT_WATCHDOG.heartbeatTopic),
+        base(MQTT_WATCHDOG.pongTopic),
+        // Eventi di topologia: il server li pubblica dopo ogni CRUD su DB.
+        base(TOPOLOGY_CHANGED_TOPIC),
+      ]);
       for (const prefix of DISCOVERY.prefixes) {
         // `<prefix>/<component>/<object_id>/config` e la variante con node_id.
         desired.add(`${prefix}/+/+/config`);
@@ -382,7 +477,12 @@ export function useMqtt(
      * `availability`/`isAvailable`: le metriche restano quelle dell'ultima
      * lettura, così la card mostra il dato congelato ma non interattivo.
      */
-    function handleDeviceMessage(device: Device, topic: string, payload: string): void {
+    function handleDeviceMessage(
+      device: Device,
+      topic: string,
+      payload: string,
+      retained = false,
+    ): void {
       const channel = availabilityChannels(device).find((entry) => entry.topic === topic);
       if (channel) {
         const state = parseAvailabilityPayload(payload, {
@@ -419,6 +519,15 @@ export function useMqtt(
       if (!decoded) return;
       // Se lo `stat` conferma un comando in coda, il comando è già applicato.
       reconcileQueuedCommands(device.id, decoded);
+
+      // Retained = snapshot iniziale del broker, non una transizione live:
+      // entra subito nello store senza passare dal buffer di telemetria, che
+      // esiste per coalescere e animare gli aggiornamenti in tempo reale.
+      if (retained) {
+        useHomeStore.getState().applyDecoded(device.id, decoded);
+        return;
+      }
+
       // Il buffer separa campi critici (flush immediato) da telemetria
       // (coalescing + finestra configurabile). Riusa lo snapshot già composto
       // per il decode: nessuna seconda composizione lungo il percorso caldo.
@@ -511,9 +620,25 @@ export function useMqtt(
         if (disposed || client !== instance) return;
         attempts = 0;
         setStatus('connected');
-        patchConnection({ connectedAt: Date.now(), reconnectAttempts: 0, lastError: null });
+        patchConnection({
+          connectedAt: Date.now(),
+          reconnectAttempts: 0,
+          lastError: null,
+          // Il socket è di nuovo vivo: azzera il riferimento del freeze.
+          frozenSince: null,
+        });
         logRaw('system', 'client', 'Connesso · sottoscrizione topic');
         subscribeAll(instance);
+        // Un CONNACK è la prova più forte che la socket è viva: azzera il
+        // watchdog e ripristina eventuali stati "congelati".
+        heartbeat.noteActivity();
+        freezeToastShown = false;
+        useEmergencyReloadStore.getState().setFrozen(false, null);
+        // Il primo ping immediatamente dopo il CONNACK: l'echo del loopback
+        // porta la latenza a schermo senza aspettare il primo intervallo.
+        publishRef.current?.(base(MQTT_WATCHDOG.heartbeatTopic), heartbeatPingPayload(settings.clientId), {
+          qos: 0,
+        });
         window.clearInterval(probeTimer);
         probeTimer = window.setInterval(() => {
           if (!client?.connected) return;
@@ -527,9 +652,29 @@ export function useMqtt(
         if (disposed) return;
         const rawPayload = payload.toString();
 
+        // Qualsiasi payload reale prova che la socket non è zombie: anche una
+        // telemetria non richiesta tiene vivo il clock del watchdog.
+        heartbeat.noteActivity();
+
+        // Retained: burst che il broker consegna subito dopo il CONNACK. Il
+        // conteggio alimenta la finestra di idratazione (`useBootRecovery`).
+        if (packet.retain) useHomeStore.getState().noteRetainedMessage();
+
         // Annuncio Home Assistant: config nuova, aggiornata o ritirata ("").
         if (discoveryBridge.matches(topic)) {
           discoveryBridge.handleMessage(topic, rawPayload);
+          return;
+        }
+
+        // Heartbeat: pong esterno o loopback del proprio ping (RTT del broker).
+        if (topic === base(MQTT_WATCHDOG.heartbeatTopic) || topic === base(MQTT_WATCHDOG.pongTopic)) {
+          const echo = parseHeartbeatEcho(rawPayload);
+          if (echo) {
+            useHomeStore.getState().noteNetworkActivity(Date.now());
+            patchConnection({
+              latencyMs: Math.max(0, Math.min(30_000, Date.now() - echo.timestamp)),
+            });
+          }
           return;
         }
 
@@ -538,6 +683,14 @@ export function useMqtt(
           if (Number.isFinite(sentAt)) {
             patchConnection({ latencyMs: Math.max(0, Date.now() - sentAt) });
           }
+          return;
+        }
+
+        // Mutazione topologia su PostgreSQL: passa l'evento a `useTopologySync`,
+        // che con debounce invalida la cache TanStack Query.
+        if (topic === base(TOPOLOGY_CHANGED_TOPIC)) {
+          const event = parseTopologyChanged(rawPayload);
+          if (event) emitTopologyChanged(event);
           return;
         }
 
@@ -556,7 +709,7 @@ export function useMqtt(
 
         const localTopic = device.discovery ? topic : stripBaseTopic(settings, topic);
         logRaw('in', localTopic, rawPayload, packet.qos as 0 | 1 | 2, packet.retain);
-        handleDeviceMessage(device, localTopic, rawPayload);
+        handleDeviceMessage(device, localTopic, rawPayload, packet.retain === true);
       });
 
       instance.on('close', () => {
@@ -579,6 +732,15 @@ export function useMqtt(
         }
       });
       instance.on('packetreceive', (packet) => {
+        // PINGRESP e PUBACK sono traffico applicativo reale: tengono vivo il
+        // clock del watchdog anche senza messaggi pubblicati sulle nostre
+        // subscription (es. un solo PUBACK al comando appena inviato).
+        if (packet.cmd === 'pingresp' || packet.cmd === 'puback' || packet.cmd === 'suback') {
+          heartbeat.noteActivity();
+          useHomeStore
+            .getState()
+            .noteNetworkActivity(Date.now());
+        }
         if (
           packet.cmd === 'pingresp' &&
           'messageId' in packet &&
@@ -624,7 +786,26 @@ export function useMqtt(
       openSocket();
     };
 
+    // Eventi browser: `offline` segnala la perdita di rete (il watchdog non
+    // deve aspettare il tick successivo), `online` riparte subito la socket.
+    const handleBrowserOffline = () => {
+      if (disposed) return;
+      logRaw('system', 'watchdog', 'Browser offline · valutazione immediata del watchdog');
+      heartbeat.checkNow();
+    };
+    const handleBrowserOnline = () => {
+      if (disposed) return;
+      logRaw('system', 'watchdog', 'Browser online · riconnessione forzata');
+      reconnectRef.current?.();
+      heartbeat.checkNow();
+    };
+    window.addEventListener('offline', handleBrowserOffline);
+    window.addEventListener('online', handleBrowserOnline);
+
     if (settings.demoMode) {
+      // In demo non esiste una socket: il watchdog anti-freeze non deve
+      // segnalare freeze né aprire connessioni reali.
+      heartbeat.stop();
       setStatus('connecting');
       publishRef.current = () => {
         /* il simulatore applica i comandi in locale */
@@ -671,6 +852,7 @@ export function useMqtt(
         window.clearTimeout(startTimer);
         window.clearInterval(demoTimer);
         window.clearInterval(watchdogTimer);
+        useEmergencyReloadStore.getState().reset();
         if (brokerAlertId) useToastStore.getState().acknowledgeCritical(brokerAlertId);
       };
     }
@@ -689,6 +871,12 @@ export function useMqtt(
       window.clearTimeout(reconnectTimer);
       window.clearInterval(probeTimer);
       window.clearInterval(watchdogTimer);
+      heartbeat.stop();
+      useEmergencyReloadStore.getState().registerRetryHandler(null);
+      useEmergencyReloadStore.getState().registerCancelHandler(null);
+      useEmergencyReloadStore.getState().reset();
+      window.removeEventListener('offline', handleBrowserOffline);
+      window.removeEventListener('online', handleBrowserOnline);
       if (brokerAlertId) useToastStore.getState().acknowledgeCritical(brokerAlertId);
       closeClient();
     };
@@ -750,6 +938,8 @@ export function useMqtt(
         snifferFiltersRef.current.delete(filter);
         const topologyTopic =
           filter === withBaseTopic(settings, PROBE_TOPIC) ||
+          filter === withBaseTopic(settings, MQTT_WATCHDOG.heartbeatTopic) ||
+          filter === withBaseTopic(settings, MQTT_WATCHDOG.pongTopic) ||
           DISCOVERY.prefixes.some(
             (prefix) =>
               filter === `${prefix}/+/+/config` || filter === `${prefix}/+/+/+/config`,
@@ -776,6 +966,12 @@ export function useMqtt(
   }, []);
 
   const sendAction = useCallback((deviceId: string, action: ControlAction) => {
+    // Safe boot: durante l'idratazione la UI è bloccata; questa barriera copre
+    // anche scenari, script e tap arrivati prima del re-render.
+    if (useHomeStore.getState().recovery.isHydrating) {
+      logRaw('system', 'recovery', `Comando ignorato durante l'idratazione (${deviceId})`);
+      return;
+    }
     const metadata = deviceIndexRef.current.get(deviceId);
     const realtime = useHomeStore.getState().deviceStates[deviceId];
     const device = combineDevice(metadata, realtime);

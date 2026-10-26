@@ -1,6 +1,7 @@
 import i18n from '@/i18n';
 import { ApiError, refreshSession } from '@/lib/authApi';
 import type { RoomConfig } from '@/lib/rooms';
+import { useHomeStore } from '@/store/homeStore';
 import type {
   AdapterId,
   CameraAspectRatio,
@@ -68,13 +69,21 @@ async function request<T>(
   method: 'POST' | 'PATCH' | 'DELETE',
   body?: unknown,
 ): Promise<T> {
-  const send = () =>
-    fetch(`${API_BASE}${path}`, {
+  const send = () => {
+    const headers: Record<string, string> = {};
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+    // Identifica il pannello che origina la mutazione: il server riecheggia
+    // l'id in `wallos/system/topology_changed` e questo client, che ha già
+    // invalidato in locale, non rifà subito lo stesso refetch.
+    const clientId = useHomeStore.getState().broker.clientId.trim();
+    if (clientId) headers['X-Client-Id'] = clientId;
+    return fetch(`${API_BASE}${path}`, {
       method,
       credentials: 'include',
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      headers,
       body: body === undefined ? undefined : JSON.stringify(body),
     });
+  };
 
   let response = await send();
   if (response.status === 401 && (await refreshSession())) response = await send();

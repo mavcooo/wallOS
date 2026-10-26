@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn } from '@/lib/utils';
+import { selectIsHydrating, useHomeStore } from '@/store/homeStore';
 import type { Scenario } from '@/types/device';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -28,6 +29,9 @@ export function ScenarioButton({ scenario }: { scenario: Scenario }) {
   const { runScenario } = useMqttApi();
   const requestPin = usePinGuard();
   const [running, setRunning] = useState(false);
+  // Safe boot: gli scenari mandano comandi in raffica, quindi restano fermi
+  // finché la casa non è idratata. `sendAction` blocca comunque ogni step.
+  const hydrating = useHomeStore(selectIsHydrating);
   // L'icona è un dato del DB: uno slug sconosciuto non deve rompere il widget.
   const Icon = ICONS[scenario.icon] ?? Sparkles;
 
@@ -59,7 +63,8 @@ export function ScenarioButton({ scenario }: { scenario: Scenario }) {
     <button
       type="button"
       onClick={handleClick}
-      disabled={running}
+      disabled={running || hydrating}
+      aria-busy={hydrating || undefined}
       className={cn(
         'group relative flex h-full min-h-[104px] flex-col items-start justify-between gap-3 rounded-[var(--radius-card)] border border-line bg-panel p-4 text-left transition-all',
         'hover:border-line-strong hover:bg-panel-2 active:scale-[0.99] disabled:opacity-70',

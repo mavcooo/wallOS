@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { OFFLINE_QUEUE } from '@/config/app.config';
+import { APP_BOOT_AT, BOOT_RECOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import i18n from '@/i18n';
 import { rollbackState } from '@/mqtt/optimistic';
+import { logRecovery } from '@/mqtt/recoveryLog';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
 import type { ControlAction, DecodedState } from '@/types/device';
@@ -260,6 +261,63 @@ export function reconcileQueuedCommands(deviceId: string, decoded: DecodedState)
   }
 }
 
+export interface BootPurgeResult {
+  /** Comandi rimossi dalla coda: non verranno mai trasmessi. */
+  discarded: number;
+  /** Nati in una sessione precedente (blackout, refresh, crash). */
+  previousSession: number;
+  /** Troppo vecchi, anche se dello stesso avvio (orologio sfasato, backup). */
+  tooOld: number;
+}
+
+/**
+ * Safe boot: scarta i comandi rimasti in storage da una sessione precedente.
+ *
+ * Deve girare **prima** di qualsiasi connessione o flush: un comando nato prima
+ * del blackout rappresenta un'intenzione di ore fa, non lo stato attuale dei
+ * relè. Oltre al confronto con il timestamp di boot, la soglia `maxCommandTtlMs`
+ * copre orologi sfasati e storage ripristinati da un backup.
+ */
+export function purgeStaleCommandsOnBoot(
+  options: { bootedAt?: number; now?: number; maxAgeMs?: number } = {},
+): BootPurgeResult {
+  const now = options.now ?? Date.now();
+  const bootedAt = options.bootedAt ?? APP_BOOT_AT;
+  const maxAgeMs = options.maxAgeMs ?? BOOT_RECOVERY.maxCommandTtlMs;
+
+  const commands = useOfflineQueue.getState().commands;
+  const result: BootPurgeResult = { discarded: 0, previousSession: 0, tooOld: 0 };
+  if (commands.length === 0) return result;
+
+  const kept = commands.filter((command) => {
+    if (command.timestamp < bootedAt) {
+      result.previousSession += 1;
+      return false;
+    }
+    if (now - command.timestamp > maxAgeMs) {
+      result.tooOld += 1;
+      return false;
+    }
+    return true;
+  });
+
+  result.discarded = result.previousSession + result.tooOld;
+  if (result.discarded === 0) return result;
+
+  useOfflineQueue.setState({ commands: kept });
+  // Diagnostica visibile nel pannello, non solo in console.
+  const detail = [
+    result.previousSession > 0 ? `${result.previousSession} pre-blackout` : null,
+    result.tooOld > 0 ? `${result.tooOld} oltre ${Math.round(maxAgeMs / 60_000)} min` : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(', ');
+  logRecovery(
+    `Scartati ${result.discarded} comandi obsoleti risalenti alla sessione pre-blackout (${detail})`,
+  );
+  return result;
+}
+
 /** Dopo un refresh accidentale riallinea la UI ai comandi ancora in coda. */
 export function restorePendingOptimisticState(): void {
   for (const command of useOfflineQueue.getState().commands) {
@@ -293,6 +351,11 @@ export async function flushOfflineQueue(options?: { announce?: boolean }): Promi
     rerunRequested = true;
     return result;
   }
+
+  // Safe boot: la coda resta in pausa finché la casa non è idratata dai
+  // retained. Un comando inviato ora potrebbe invertire lo stato appena
+  // ricostruito dai relè dopo un blackout.
+  if (useHomeStore.getState().recovery.isHydrating) return result;
 
   const ctx = runtime;
   if (!ctx || !ctx.isConnected()) return result;
