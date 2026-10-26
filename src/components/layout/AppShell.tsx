@@ -1,4 +1,4 @@
-import { useEffect, type ComponentProps, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 import { KioskDimmerOverlay } from '@/components/kiosk/KioskDimmerOverlay';
@@ -7,6 +7,7 @@ import { usePixelShift } from '@/hooks/usePixelShift';
 import { useHomeStore } from '@/store/homeStore';
 import { selectCriticalCount, useToastStore } from '@/store/toastStore';
 import { Header } from './Header';
+import { ScrollContainerProvider } from './ScrollContainerContext';
 import { Sidebar } from './Sidebar';
 
 interface AppShellProps {
@@ -16,6 +17,29 @@ interface AppShellProps {
 }
 
 export function AppShell({ children, mainProps }: AppShellProps) {
+  // Le griglie virtualizzate scrollano insieme alla pagina: ricevono il <main>
+  // tramite contesto, mentre `revision` le avvisa quando una di loro cambia
+  // altezza e sposta l'offset delle successive.
+  const mainRef = useRef<HTMLElement>(null);
+  // `mainProps` porta anche il ref di react-swipeable: va concatenato, non
+  // sovrascritto, altrimenti la gesture orizzontale perde il suo listener.
+  const externalMainRef = mainProps?.ref;
+  const setMainRef = useCallback(
+    (node: HTMLElement | null) => {
+      mainRef.current = node;
+      if (typeof externalMainRef === 'function') externalMainRef(node);
+      else if (externalMainRef) externalMainRef.current = node;
+    },
+    [externalMainRef],
+  );
+
+  const [revision, setRevision] = useState(0);
+  const notifyLayoutChange = useCallback(() => setRevision((value) => value + 1), []);
+  const scrollContext = useMemo(
+    () => ({ ref: mainRef, revision, notifyLayoutChange }),
+    [revision, notifyLayoutChange],
+  );
+
   const timeoutMs = useHomeStore((state) => state.ui.dimmerTimeoutMs);
   const burnIn = useHomeStore((state) => state.burnIn);
   // Ponte store → dimmer: un allarme critico attivo blocca il countdown.
@@ -56,12 +80,13 @@ export function AppShell({ children, mainProps }: AppShellProps) {
           <Header onStandby={sleep} />
           <main
             {...mainProps}
+            ref={setMainRef}
             className={cn(
               'kiosk-scroll min-h-0 flex-1 px-4 pb-8 pt-4 lg:px-6',
               mainProps?.className,
             )}
           >
-            {children}
+            <ScrollContainerProvider value={scrollContext}>{children}</ScrollContainerProvider>
           </main>
         </div>
       </div>

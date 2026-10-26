@@ -4,8 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
-import { DeviceCard } from '@/components/widgets/DeviceCard';
 import { CarouselDots } from '@/components/ui/carousel-dots';
+import { VirtualizedDeviceGrid } from '@/components/ui/VirtualizedDeviceGrid';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { useDevices, useRooms } from '@/hooks/useTopologyQuery';
@@ -179,6 +179,19 @@ export function RoomsPage() {
     () => roomDevices.map((device) => device.id),
     [roomDevices],
   );
+  // Id per gruppo: la griglia virtuale riceve solo stringhe stabili, non i
+  // metadati, e non si ridisegna quando arriva telemetria.
+  const groupIds = useMemo(
+    () => ({
+      climates: groups.climates.map((device) => device.id),
+      lights: groups.lights.map((device) => device.id),
+      powers: groups.powers.map((device) => device.id),
+      cameras: groups.cameras.map((device) => device.id),
+      media: groups.media.map((device) => device.id),
+      sensors: groups.sensors.map((device) => device.id),
+    }),
+    [groups],
+  );
 
   if (!active) {
     return (
@@ -252,61 +265,66 @@ export function RoomsPage() {
 
         {groups.climates.length > 0 ? (
           <Group title={t('rooms.groups.climate')} count={groups.climates.length}>
-            <div className="grid grid-cols-1 gap-3 2xl:grid-cols-2">
-              {groups.climates.map((device) => (
-                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
-              ))}
-            </div>
+            <VirtualizedDeviceGrid
+              deviceIds={groupIds.climates}
+              columnsCount={{ sm: 1, xl: 2 }}
+              estimatedCardHeight={280}
+              showFavorite
+            />
           </Group>
         ) : null}
 
         {groups.lights.length > 0 ? (
           <Group title={t('rooms.groups.lights')} count={groups.lights.length}>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-              {groups.lights.map((device) => (
-                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
-              ))}
-            </div>
+            <VirtualizedDeviceGrid
+              deviceIds={groupIds.lights}
+              columnsCount={{ sm: 1, md: 2, xl: 3 }}
+              estimatedCardHeight={240}
+              showFavorite
+            />
           </Group>
         ) : null}
 
         {groups.powers.length > 0 ? (
           <Group title={t('rooms.groups.powers')} count={groups.powers.length}>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-              {groups.powers.map((device) => (
-                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
-              ))}
-            </div>
+            <VirtualizedDeviceGrid
+              deviceIds={groupIds.powers}
+              columnsCount={{ sm: 1, md: 2, xl: 3 }}
+              estimatedCardHeight={200}
+              showFavorite
+            />
           </Group>
         ) : null}
 
         {groups.cameras.length > 0 ? (
           <Group title={t('rooms.groups.cameras')} count={groups.cameras.length}>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-              {groups.cameras.map((device) => (
-                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
-              ))}
-            </div>
+            <VirtualizedDeviceGrid
+              deviceIds={groupIds.cameras}
+              columnsCount={{ sm: 1, lg: 2, xl: 3 }}
+              estimatedCardHeight={360}
+              showFavorite
+            />
           </Group>
         ) : null}
 
         {groups.media.length > 0 ? (
           <Group title={t('rooms.groups.media')} count={groups.media.length}>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {groups.media.map((device) => (
-                <DeviceCard key={device.id} deviceId={device.id} showFavorite />
-              ))}
-            </div>
+            <VirtualizedDeviceGrid
+              deviceIds={groupIds.media}
+              columnsCount={{ sm: 1, md: 2 }}
+              estimatedCardHeight={200}
+              showFavorite
+            />
           </Group>
         ) : null}
 
         {groups.sensors.length > 0 ? (
           <Group title={t('rooms.groups.sensors')} count={groups.sensors.length}>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {groups.sensors.map((device) => (
-                <DeviceCard key={device.id} deviceId={device.id} />
-              ))}
-            </div>
+            <VirtualizedDeviceGrid
+              deviceIds={groupIds.sensors}
+              columnsCount={{ sm: 2, xl: 3 }}
+              estimatedCardHeight={100}
+            />
           </Group>
         ) : null}
 

@@ -15,7 +15,7 @@ import { useDevices, useRooms, useScenarios } from '@/hooks/useTopologyQuery';
 import { cn, formatTemp, formatWatts } from '@/lib/utils';
 import { SummaryCard } from '@/components/widgets/SummaryCard';
 import { ScenarioButton } from '@/components/widgets/ScenarioButton';
-import { DeviceCard } from '@/components/widgets/DeviceCard';
+import { VirtualizedDeviceGrid } from '@/components/ui/VirtualizedDeviceGrid';
 import type { DeviceMetadata, RoomId } from '@/types/device';
 import type { RoomConfig } from '@/lib/rooms';
 
@@ -185,20 +185,18 @@ function FavoriteDevices() {
     ),
   );
 
-  if (favoriteIds.length === 0) {
-    return (
-      <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
-        {t('overview.favorites.empty')}
-      </p>
-    );
-  }
-
   return (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-      {favoriteIds.map((deviceId) => (
-        <DeviceCard key={deviceId} deviceId={deviceId} showFavorite />
-      ))}
-    </div>
+    <VirtualizedDeviceGrid
+      deviceIds={favoriteIds}
+      columnsCount={{ sm: 1, md: 2, xl: 3 }}
+      estimatedCardHeight={240}
+      showFavorite
+      emptyPlaceholder={
+        <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
+          {t('overview.favorites.empty')}
+        </p>
+      }
+    />
   );
 }
 
