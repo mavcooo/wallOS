@@ -209,7 +209,10 @@
     "silence": "{{seconds}}s di silenzio",
     "rx": "{{count}} rx"
   },
-  "database": {
+  "health": {
+    "heapWarnTitle": "Memoria del pannello al limite",
+    "heapWarnDescription": "Heap JavaScript al {{percent}}% ({{used}} di {{limit}}): riavvia il pannello o ricarica la pagina per liberare memoria."
+  },  "database": {
     "badge": {
       "ok": "DB ok",
       "offline": "DB offline",

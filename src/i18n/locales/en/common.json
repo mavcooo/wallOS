@@ -209,7 +209,10 @@
     "silence": "{{seconds}}s silence",
     "rx": "{{count}} rx"
   },
-  "database": {
+  "health": {
+    "heapWarnTitle": "Panel memory near its limit",
+    "heapWarnDescription": "JavaScript heap at {{percent}}% ({{used}} of {{limit}}): restart the panel or reload the page to free memory."
+  },  "database": {
     "badge": {
       "ok": "DB ok",
       "offline": "DB offline",

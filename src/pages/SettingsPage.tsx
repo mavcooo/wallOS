@@ -14,6 +14,7 @@ import {
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { DeviceHealthCard } from '@/components/settings/DeviceHealthCard';
 import { KioskIdentityCard } from '@/components/settings/KioskIdentityCard';
 import { useKioskQuery, useUpdateKiosk } from '@/hooks/useKioskProfile';
 import { getKioskId } from '@/utils/kioskIdentity';
@@ -575,6 +576,10 @@ export function SettingsPage() {
           {/* Identità del pannello: il nome e il `kiosk_id` con cui questo
               tablet si registra e riceve la configurazione dall'amministratore. */}
           <KioskIdentityCard />
+
+          {/* Diagnostica H24: batteria (fascia 20-80%), heap del browser,
+              frame rate e latenza verso il broker. */}
+          <DeviceHealthCard />
 
           <Card>
             <CardHeader>

@@ -121,7 +121,42 @@
     "idApplied": "Identificativo aggiornato",
     "idAppliedHint": "Il pannello carica {{id}} al prossimo avvio."
   },
-  "pin": {
+  "health": {
+    "title": "Salute dispositivo",
+    "description": "Batteria, memoria heap e latenza del pannello in tempo reale",
+    "unavailable": "n/d",
+    "api": {
+      "supported": "Battery API nativa",
+      "supportedHint": "Il browser espone la Battery Status API: la telemetria della batteria viene pubblicata sul broker.",
+      "unsupported": "Battery API non disponibile",
+      "unsupportedHint": "Questo browser non espone la Battery Status API (es. Safari/iPadOS): nessun dato inventato e nessuna telemetria pubblicata."
+    },
+    "battery": {
+      "title": "Batteria",
+      "charging": "In carica",
+      "discharging": "A batteria",
+      "chargingEta": "Completa in ~{{minutes}} min",
+      "band": {
+        "ok": "In fascia di protezione 20-80%",
+        "low": "Sotto il 20%: l’alimentatore resta attivo",
+        "high": "Sopra l’80%: stacca l’alimentatore"
+      }
+    },
+    "memory": {
+      "title": "Memoria heap",
+      "used": "{{used}} / {{total}}",
+      "hint": "Heap JavaScript del browser: oltre l’85% il pannello rallenta e conviene riavviarlo.",
+      "unavailableHint": "performance.memory non è esposta da questo browser (solo Chromium): il dato non è disponibile."
+    },
+    "network": {
+      "latency": "Latenza broker",
+      "fps": "Frame rate"
+    },
+    "telemetry": {
+      "note": "Telemetria batteria per la presa smart: ogni {{seconds}} s su {{topic}} (QoS 1, retained), oltre che a ogni cambio di livello o di carica."
+    },
+    "sampledAt": "Ultimo campionamento: {{when}}"
+  },  "pin": {
     "title": "PIN pannello",
     "description": "Protegge carichi, reset e scenari critici",
     "newPin": "Nuovo PIN (4-6 cifre)",

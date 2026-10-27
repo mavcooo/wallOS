@@ -36,6 +36,18 @@ export function formatKwh(kwh: number, digits = 2): string {
   }).format(kwh)} kWh`;
 }
 
+/**
+ * Byte in MB/GB leggibili: usato dalla diagnostica (heap del browser, cache).
+ * Binario (1024) come i task manager, non decimale.
+ */
+export function formatBytes(bytes: number): string {
+  const megabytes = bytes / 1024 / 1024;
+  if (megabytes >= 1024) {
+    return `${numberFormat('gb', { maximumFractionDigits: 1 }).format(megabytes / 1024)} GB`;
+  }
+  return `${numberFormat('mb', { maximumFractionDigits: 0 }).format(Math.max(0, megabytes))} MB`;
+}
+
 export function formatTemp(value: number): string {
   return `${numberFormat('temp', {
     minimumFractionDigits: 1,

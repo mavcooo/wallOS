@@ -105,6 +105,39 @@ export const HEALTH_MONITOR = {
 } as const;
 
 /**
+ * Battery Guardian e salute del display a parete.
+ *
+ * Il tablet resta alimentato H24: la batteria degli ioni di litio va tenuta
+ * nella fascia 20-80% (fuori banda si degrada e può gonfiarsi) e il browser,
+ * dopo settimane di esecuzione continua, va sorvegliato su heap e frame rate.
+ * Queste soglie sono condivise da monitor, telemetria MQTT e pannello
+ * diagnostico.
+ */
+export const BATTERY_GUARDIAN = {
+  /** Fascia di protezione: la presa smart stacca all'80% e riattiva al 20%. */
+  protectMinPercent: 20,
+  protectMaxPercent: 80,
+  /**
+   * Pubblicazione periodica della telemetria batteria: gli eventi non
+   * arrivano se il browser ha perso il focus per ore, il retained deve
+   * restare fresco per la presa smart.
+   */
+  publishIntervalMs: 60_000,
+  /** Campionamento di heap, frame rate e latenza nel pannello diagnostico. */
+  sampleIntervalMs: 30_000,
+  /** Durata della misura del frame rate: breve, per non pesare sul loop di render. */
+  fpsWindowMs: 1_000,
+  /** Sotto questo frame rate il pannello è "lento" (diagnostica). */
+  minHealthyFps: 24,
+  /** Oltre questa quota di heap scatta l'avviso (0,85 = 85% del limite). */
+  heapWarnRatio: 0.85,
+  /** Un solo toast per finestra: un heap saturo non deve generare raffiche. */
+  heapAlertCooldownMs: 10 * 60_000,
+  /** Il frame rate basso è un dato diagnostico, non un allarme da toast. */
+  fpsLogCooldownMs: 5 * 60_000,
+} as const;
+
+/**
  * Heartbeat applicativo MQTT e watchdog anti-freeze.
  *
  * Un socket "half-open" (AP o broker che azzera la sessione TCP senza FIN/RST)

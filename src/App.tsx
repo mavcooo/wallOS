@@ -16,8 +16,10 @@ import { CarouselDots } from '@/components/ui/carousel-dots';
 import { CriticalAlertOverlay } from '@/components/ui/CriticalAlertOverlay';
 import { useBootRecovery } from '@/hooks/useBootRecovery';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useDeviceHealth } from '@/hooks/useDeviceHealth';
 import { useKioskBootstrap } from '@/hooks/useKioskBootstrap';
 import { useKioskSync } from '@/hooks/useKioskSync';
+import { useKioskTelemetry } from '@/hooks/useKioskTelemetry';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { usePerformanceMode } from '@/hooks/usePerformanceMode';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
@@ -232,6 +234,21 @@ function KioskProfile() {
   return null;
 }
 
+/**
+ * Battery Guardian e salute del dispositivo.
+ *
+ * Montato a livello root perché deve girare **sempre**, non solo mentre
+ * Impostazioni è aperta: la telemetria batteria fa staccare la presa smart
+ * all'80% (e la riattiva al 20%) anche a pannello in standby, e il watchdog di
+ * heap/frame rate serve proprio durante le settimane di esecuzione continua in
+ * cui nessuno guarda la diagnostica.
+ */
+function KioskDeviceHealth() {
+  useDeviceHealth();
+  useKioskTelemetry();
+  return null;
+}
+
 export default function App() {
   // Il tema alto contrasto vive a livello applicazione: `data-contrast` su
   // <html> è già attivo sul lock screen, prima che l'utente faccia login.
@@ -268,6 +285,7 @@ export default function App() {
             <MqttProvider>
               <TopologySync />
               <KioskProfile />
+              <KioskDeviceHealth />
               <AppNavigation />
             </MqttProvider>
           </TopologyGate>

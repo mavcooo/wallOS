@@ -121,7 +121,42 @@
     "idApplied": "Identifier updated",
     "idAppliedHint": "The panel loads {{id}} at the next start."
   },
-  "pin": {
+  "health": {
+    "title": "Device health",
+    "description": "Battery, JS heap and MQTT latency of this panel, live",
+    "unavailable": "n/a",
+    "api": {
+      "supported": "Native Battery API",
+      "supportedHint": "This browser exposes the Battery Status API: battery telemetry is published to the broker.",
+      "unsupported": "Battery API unavailable",
+      "unsupportedHint": "This browser does not expose the Battery Status API (e.g. Safari/iPadOS): no invented numbers and no telemetry published."
+    },
+    "battery": {
+      "title": "Battery",
+      "charging": "Charging",
+      "discharging": "On battery",
+      "chargingEta": "Full in ~{{minutes}} min",
+      "band": {
+        "ok": "Inside the 20-80% protection band",
+        "low": "Below 20%: keep the charger on",
+        "high": "Above 80%: cut the charger"
+      }
+    },
+    "memory": {
+      "title": "JS heap",
+      "used": "{{used}} / {{total}}",
+      "hint": "Browser JavaScript heap: above 85% the panel gets slow and should be reloaded.",
+      "unavailableHint": "performance.memory is not exposed by this browser (Chromium only): the value is unavailable."
+    },
+    "network": {
+      "latency": "Broker latency",
+      "fps": "Frame rate"
+    },
+    "telemetry": {
+      "note": "Battery telemetry for the smart plug: every {{seconds}} s on {{topic}} (QoS 1, retained), plus on every level or charging change."
+    },
+    "sampledAt": "Last sample: {{when}}"
+  },  "pin": {
     "title": "Panel PIN",
     "description": "Protects loads, resets and critical scenarios",
     "newPin": "New PIN (4-6 digits)",

@@ -766,6 +766,114 @@ Misurato end-to-end su PostgreSQL + broker reali: auto-registrazione, `PUT` con
 notifica consegnata in **16 ms** (soglia del criterio: 1 s) e rilettura della
 configurazione salvata da una nuova richiesta, come dopo un riavvio.
 
+### Battery Guardian e salute del dispositivo
+
+Il pannello resta alimentato **H24**: tenere la batteria al 100% per mesi deforma
+le celle, e la pagina aperta per settimane satura l'heap del browser fino a
+rallentare o impallare il display. Il pannello pubblica quindi la propria carica
+sul broker e sorveglia la propria salute.
+
+| Pezzo | Dove |
+| --- | --- |
+| Livello e stato alimentazione | `src/hooks/useBatteryStatus.ts` — Battery Status API (`navigator.getBattery()`), eventi `levelchange`/`chargingchange` |
+| Telemetria MQTT | `src/hooks/useKioskTelemetry.ts` + `src/services/kioskTelemetry.ts` |
+| Watchdog heap/FRR | `src/hooks/useDeviceHealth.ts` + `src/lib/deviceHealth.ts` (`performance.memory`, misura rAF) |
+| Store condiviso | `src/store/deviceHealthStore.ts` — un solo campionamento, letto dalla card |
+| Pannello | **Impostazioni → Salute dispositivo** (`src/components/settings/DeviceHealthCard.tsx`) |
+| Montaggio | `KioskDeviceHealth` in `App.tsx`, dentro `MqttProvider`: gira anche a Impostazioni chiusa |
+
+**Topic e payload** (sotto il base topic della casa, come tutti i topic del pannello):
+
+topic `wallos/kiosk/<kiosk_id>/battery` · QoS **1** · `retain: true`
+
+```json
+{ "kioskId": "tablet_ingresso", "level": 80, "charging": true, "timestamp": 1730000000000 }
+```
+
+Il pannello pubblica all'avvio, a ogni cambio di livello o di stato di carica e
+comunque ogni **60 s** (con la scheda in background il browser può non consegnare
+gli eventi, e il retained deve restare fresco: è l'ultimo valore che la presa
+legge). La fascia di protezione è **20-80%** (`BATTERY_GUARDIAN` in
+`src/config/app.config.ts`): la presa stacca all'80% e riattacca al 20%.
+
+Dove la Battery Status API non esiste (Safari/iPadOS, permesso negato) l'hook
+resta silenzioso — `isSupported: false`, nessuna eccezione, rendering intatto — e
+il pannello **non pubblica nulla**: meglio nessun dato che un livello inventato
+che farebbe staccare la presa. La card lo dichiara con il badge “Battery API non
+disponibile”.
+
+**Diagnostica**: ogni 30 s si campionano heap JavaScript (`performance.memory`,
+solo Chromium), frame rate (finestra rAF di 1 s, non un contatore perpetuo) e la
+latenza verso il broker (RTT dell'heartbeat). Oltre l'**85%** di heap scatta un
+`console.warn` strutturato **e** un toast di livello warning (uno ogni 10 minuti:
+un heap saturo non deve generare raffiche); il frame rate sotto i 24 fps resta nel
+log. La card mostra batteria con barra colorata (verde in fascia, arancione fuori),
+heap usato/limite, frame rate, latenza e il topic pubblicato.
+
+#### Regole di automazione per la presa smart
+
+Con il motore di wallOS (**Admin → Automazioni**), due regole `mqtt_state` sui
+due bordi della fascia:
+
+```jsonc
+// POST /api/automations — stacca la carica all'80%
+{
+  "name": "Tablet ingresso · stacca la carica all’80%",
+  "description": "Battery Guardian: mantiene le celle nella fascia 20-80%.",
+  "isActive": true,
+  "triggerType": "mqtt_state",
+  "triggerConfig": {
+    "topic": "wallos/kiosk/tablet_ingresso/battery",
+    "payloadKey": "level",
+    "expectedValue": 80
+  },
+  "conditions": [],
+  "conditionGroups": [],
+  "actions": [
+    {
+      "type": "mqtt",
+      "topic": "shellies/plug_tablet/rpc",
+      "payload": "{\"id\":1,\"src\":\"domus-kiosk\",\"method\":\"Switch.Set\",\"params\":{\"id\":0,\"on\":false}}",
+      "delayMs": 0
+    }
+  ]
+}
+```
+
+La seconda regola è identica con `"expectedValue": 20` e lo stesso comando con
+`"on": true` (riattiva l'alimentatore). Il payload è quello che si aspetta una
+**Shelly Gen2** (RPC su `shellies/<id>/rpc`), la stessa forma che invia l'adapter
+`shelly` del pannello quando si tocca il widget della presa. Il trigger di wallOS scatta sul **cambio** del valore
+osservato: con l'1% di granularità degli eventi batteria l'80% e il 20% vengono
+visti, ma per una soglia “maggiore di” è più solido lasciar decidere la presa o
+Home Assistant, che leggono lo stesso retained:
+
+```yaml
+# Home Assistant — presa Zigbee/Tasmota alimentata dal pannello
+- alias: "Tablet ingresso · protezione batteria 20-80%"
+  triggers:
+    - trigger: mqtt
+      topic: casa/wallos/kiosk/tablet_ingresso/battery
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.payload_json.charging }}"
+  actions:
+    - choose:
+        - conditions: "{{ trigger.payload_json.level >= 80 }}"
+          sequence:
+            - action: switch.turn_off
+              target: { entity_id: switch.presa_tablet }
+        - conditions: "{{ trigger.payload_json.level <= 20 }}"
+          sequence:
+            - action: switch.turn_on
+              target: { entity_id: switch.presa_tablet }
+```
+
+Con broker e plug Zigbee2MQTT lo stesso comando è
+`zigbee2mqtt/presa_tablet/set` con payload `{"state":"OFF"}` / `{"state":"ON"}`;
+per una presa Tasmota `cmnd/presa_tablet/POWER` con `OFF`/`ON`. Entrambi i topic
+vanno scritti **relativi** al base topic, come nelle azioni delle regole sopra.
+
 ### `useKioskDimmer`
 - timeout configurabile (default **2 min**) con countdown interno;
 - attività reale: `pointerdown`, `touchstart`, `keydown`, `wheel`, tab visibile;
@@ -1024,6 +1132,15 @@ un impianto reale:
   95%, funzioni 100%, rami 80%. I payload reali dei firmware stanno in
   `src/test/fixtures/mqtt.ts` (JSON validi, numeri come stringa, payload vuoti
   e malformati).
+- Battery Guardian e salute dispositivo: 44 test — hook batteria (eventi,
+  `Infinity`, degrado su Safari, pulizia dei listener), contratto di telemetria
+  (topic, payload alle soglie 80/20, firma del campione, fascia 20-80), lettura
+  di heap e frame rate, watchdog (soglia 85%, quiete dei toast, frame rate basso,
+  stop allo smontaggio) e card diagnostica (percentuali, bande, badge API,
+  fallback “n/d”). L'integrazione `useKioskTelemetry` gira sul vero `useMqtt`
+  con un transport finto e verifica topic sotto base topic, payload, `qos: 1`,
+  `retain: true`, il refresh a 60 s e il silenzio totale dove la Battery API non
+  esiste.
 - Adapter: 78 test su Zigbee2MQTT, Shelly Gen2, Tasmota e custom JSON, con
   decode, edge-case e encoding dei comandi (`Switch.Set`, `/POWER`, `/Dimmer`,
   `cmd.*`).
