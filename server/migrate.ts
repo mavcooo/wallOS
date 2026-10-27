@@ -1,31 +1,51 @@
-import { Pool } from 'pg';
+import { loadEnvFile } from 'node:process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Load configuration from .env
-const config = {
-  host: process.env.DB_HOST || '192.168.0.59',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  database: process.env.DB_NAME || 'wallos',
-  user: process.env.DB_USER || 'wallos_user',
-  password: process.env.DB_PASSWORD || 's3cret',
-};
+import { Pool } from 'pg';
 
-// Determine migration directory
-const migrationDir = process.env.MIGRATION_DIR || path.resolve(process.cwd(), 'server/migrations');
+import { loadDatabaseConfig } from './config.js';
 
-// Ensure migration directory exists
-if (!fs.existsSync(migrationDir)) {
-  fs.mkdirSync(migrationDir, { recursive: true });
+/**
+ * Directory delle migrazioni. Letta a ogni chiamata e non a import-time, così
+ * `MIGRATION_DIR` definita nel `.env` vale anche per `npm run migrate:up`.
+ */
+function getMigrationDir(): string {
+  return process.env.MIGRATION_DIR || path.resolve(process.cwd(), 'server/migrations');
 }
 
-// Create PostgreSQL pool
-const pool = new Pool({
-  connectionString: `postgres://${config.user}:${config.password}@${config.host}:${config.port}/${config.database}`,
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+// Ensure migration directory exists
+function ensureMigrationDir(): string {
+  const migrationDir = getMigrationDir();
+  if (!fs.existsSync(migrationDir)) {
+    fs.mkdirSync(migrationDir, { recursive: true });
+  }
+  return migrationDir;
+}
+
+let pool: Pool | null = null;
+
+/**
+ * Pool creato alla prima migrazione, non a import-time: `server/index.ts`
+ * carica il `.env` nel corpo del proprio modulo (dopo l'import di questo
+ * file), quindi leggere `process.env` durante l'import vedrebbe solo
+ * l'ambiente del processo e ripiegherebbe su valori sbagliati. La
+ * configurazione arriva da `loadDatabaseConfig`, l'unica sorgente usata anche
+ * da `db:check` e dal servizio: `DATABASE_URL` con precedenza sulle `DB_*`.
+ */
+function getPool(): Pool {
+  if (pool) return pool;
+  const config = loadDatabaseConfig();
+  pool = new Pool({
+    connectionString: config.url,
+    max: config.poolMax,
+    ssl: config.ssl,
+    idleTimeoutMillis: config.idleTimeoutMs,
+    connectionTimeoutMillis: config.connectTimeoutMs,
+  });
+  return pool;
+}
 
 /**
  * Solo la sezione UP di un file di migrazione.
@@ -43,6 +63,7 @@ export function extractUpSection(sql: string): string {
 
 // Get all migration files sorted by name
 function getMigrationFiles(): string[] {
+  const migrationDir = ensureMigrationDir();
   const files = fs.readdirSync(migrationDir);
   const sqlFiles = files.filter(f => f.endsWith('.sql'));
   return sqlFiles.sort();
@@ -50,8 +71,9 @@ function getMigrationFiles(): string[] {
 
 // Run migrations up
 export async function migrateUp(): Promise<{ success: boolean; error?: string; applied?: number }> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
+    const migrationDir = ensureMigrationDir();
     const migrations = getMigrationFiles();
     let applied = 0;
 
@@ -75,7 +97,7 @@ export async function migrateUp(): Promise<{ success: boolean; error?: string; a
 
 // Run migrations down (rollback last applied)
 export async function migrateDown(): Promise<{ success: boolean; error?: string; rolledBack?: string }> {
-  const client = await pool.connect();
+  const client = await getPool().connect();
   try {
     const migrations = getMigrationFiles().reverse();
     console.log('[migrate] Rollback: would run DOWN block of last migration');
@@ -99,7 +121,7 @@ export async function createMigration(name: string): Promise<{ success: boolean;
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
     const safeName = (name || 'migration').replace(/[^a-z0-9]/gi, '') || 'migration';
     const filename = `${timestamp}_${safeName}.sql`;
-    const filePath = path.resolve(migrationDir, filename);
+    const filePath = path.resolve(ensureMigrationDir(), filename);
 
     // Check if file already exists
     if (fs.existsSync(filePath)) {
@@ -139,8 +161,23 @@ export async function bootstrapMigrations(): Promise<{ success: boolean; error?:
   }
 }
 
+// Confronto fra percorsi assoluti: costruire la URL a mano (`file://` +
+// `process.argv[1]`) non regge su Windows, dove il percorso è `C:\...`, e la
+// CLI restava muta (nessun comando eseguito, exit code 0).
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const isDirectRun = invokedPath !== '' && fileURLToPath(import.meta.url) === invokedPath;
+
 // If run directly, execute migrations
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectRun) {
+  try {
+    // Stesso caricamento del servizio (`server/index.ts`), eseguito prima di
+    // qualunque lettura della configurazione: `migrate:up` da riga di comando
+    // deve vedere lo stesso `.env` di `npm run start:server`.
+    loadEnvFile();
+  } catch {
+    // Nessun `.env` locale: valgono le variabili già presenti nell'ambiente.
+  }
+
   const command = process.argv[2];
   switch (command) {
     case 'up':

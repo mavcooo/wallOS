@@ -42,20 +42,13 @@ CREATE TABLE IF NOT EXISTS cameras (
 CREATE INDEX IF NOT EXISTS idx_cameras_device ON cameras(device_id);
 CREATE INDEX IF NOT EXISTS idx_cameras_stream_type ON cameras(stream_type);
 
--- Update devices type check to ensure 'camera' type has corresponding camera row
--- (enforced at application level; trigger optional for extra safety)
-CREATE OR REPLACE RULE camera_insert_rule AS ON INSERT TO devices
-  WHERE NEW.type = 'camera' DO INSTEAD
-  INSERT INTO devices (
-    id, room_id, name, type, adapter, model, state_topic, command_topic,
-    availability_topic, field_map, stream_url, snapshot_url, stream_protocol,
-    aspect_ratio, metadata, favorite, protected, display_order
-  ) VALUES (
-    NEW.id, NEW.room_id, NEW.name, NEW.type, NEW.adapter, NEW.model,
-    NEW.state_topic, NEW.command_topic, NEW.availability_topic,
-    NEW.field_map, NEW.stream_url, NEW.snapshot_url, NEW.stream_protocol,
-    NEW.aspect_ratio, NEW.metadata, NEW.favorite, NEW.protected, NEW.display_order
-  );
+-- Corrispondenza device ↔ cameras: resta a livello applicativo.
+-- La vecchia regola `camera_insert_rule` reindirizzava l'INSERT di un device
+-- `camera` di nuovo su `devices`, quindi si auto-invocava: qualunque
+-- inserimento di una telecamera falliva con
+-- `infinite recursion detected in rules for relation "devices"` (seed compreso).
+-- La si elimina anche sui database dove era già stata creata.
+DROP RULE IF EXISTS camera_insert_rule ON devices;
 
 -- Update scenarios/rows comment for camera support documentation
 COMMENT ON TABLE cameras IS 'Metadati e configurazione stream per dispositivi di tipo camera (WebRTC/RTSP/HLS)';
@@ -72,7 +65,7 @@ DROP INDEX IF EXISTS idx_cameras_stream_type;
 DROP INDEX IF EXISTS idx_cameras_device;
 DROP TABLE IF EXISTS cameras;
 
-DROP RULE IF EXISTS camera_insert_rule;
+DROP RULE IF EXISTS camera_insert_rule ON devices;
 
 -- Revert the type check constraint to exclude 'camera' (original state)
 DO $$

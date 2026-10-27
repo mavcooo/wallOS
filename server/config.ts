@@ -1,4 +1,10 @@
-import type { AttemptPolicy, AuthConfig, MqttEventsConfig, PinPolicy } from './types.js';
+import type {
+  AttemptPolicy,
+  AuthConfig,
+  AutomationConfig,
+  MqttEventsConfig,
+  PinPolicy,
+} from './types.js';
 
 const DEV_JWT_SECRET = 'dev-only-secret-change-me-domus-kiosk-auth-0001';
 
@@ -223,6 +229,53 @@ function resolveDatabase(env: NodeJS.ProcessEnv, issues: string[]): ResolvedData
   return { url, source: 'DB_*', host, port: granularPort, name, user };
 }
 
+/** Connessione PostgreSQL risolta, con i parametri del pool già validati. */
+export interface DatabaseConfig {
+  /** URL effettivamente passata a `pg.Pool`. */
+  url: string;
+  source: DatabaseUrlSource;
+  host: string;
+  port: number;
+  name: string;
+  user: string;
+  poolMax: number;
+  ssl: boolean;
+  connectTimeoutMs: number;
+  idleTimeoutMs: number;
+}
+
+/**
+ * Risoluzione condivisa della connessione PostgreSQL: gli issue vengono
+ * accodati all'elenco del chiamante, così `loadConfig` continua a riportare
+ * tutti i problemi di configurazione in un unico messaggio.
+ */
+function resolveDatabaseConfig(env: NodeJS.ProcessEnv, issues: string[]): DatabaseConfig {
+  const database = resolveDatabase(env, issues);
+  return {
+    ...database,
+    poolMax: boundedInteger(env, 'DATABASE_POOL_MAX', 10, issues, 1, 100),
+    ssl: strictBoolean(env, 'DATABASE_SSL', false, issues),
+    connectTimeoutMs: boundedInteger(env, 'DATABASE_CONNECT_TIMEOUT_MS', 5_000, issues, 1_000, 300_000),
+    idleTimeoutMs: boundedInteger(env, 'DATABASE_IDLE_TIMEOUT_MS', 30_000, issues, 1_000, 3_600_000),
+  };
+}
+
+/**
+ * Solo la connessione PostgreSQL, con le stesse regole di `loadConfig`
+ * (`DATABASE_URL` ha la precedenza sulle `DB_*`, niente credenziali
+ * hardcoded). La usano gli script che non hanno bisogno di JWT, PIN e policy
+ * di autenticazione — in primis le migrazioni — così host, database e
+ * credenziali restano definiti in un unico punto.
+ */
+export function loadDatabaseConfig(env: NodeJS.ProcessEnv = process.env): DatabaseConfig {
+  const issues: string[] = [];
+  const config = resolveDatabaseConfig(env, issues);
+  if (issues.length > 0) {
+    throw new Error(`Configurazione non valida:\n- ${issues.join('\n- ')}`);
+  }
+  return config;
+}
+
 /**
  * Broker MQTT usato dal server per pubblicare gli eventi di topologia
  * (`wallos/system/topology_changed`). Non è lo stesso endpoint del browser:
@@ -268,6 +321,49 @@ function resolveMqttEvents(env: NodeJS.ProcessEnv, issues: string[]): MqttEvents
 }
 
 /**
+ * Parametri del motore di automazioni che non hanno un default sensato:
+ * le coordinate servono ad alba/tramonto, il topic di presenza alla condizione
+ * `user_present`. Un valore malformato è un errore di configurazione (blocca
+ * l'avvio come gli altri), un parametro assente disabilita solo quella parte:
+ * il server resta pienamente utilizzabile senza automazioni solari.
+ */
+function resolveAutomationConfig(env: NodeJS.ProcessEnv, issues: string[]): AutomationConfig {
+  const coordinates: Record<string, number | null> = {};
+  for (const [key, keyName, limit] of [
+    ['AUTOMATION_LATITUDE', 'latitude', 90],
+    ['AUTOMATION_LONGITUDE', 'longitude', 180],
+  ] as const) {
+    const raw = text(env[key]);
+    if (raw === undefined) {
+      coordinates[keyName] = null;
+      continue;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || Math.abs(parsed) > limit) {
+      issues.push(`${key} deve essere una coordinata tra -${limit} e ${limit}, ricevuto "${raw}"`);
+      coordinates[keyName] = null;
+      continue;
+    }
+    coordinates[keyName] = parsed;
+  }
+
+  // Mezza coppia è quasi sempre un refuso: alba/tramonto senza longitudine
+  // darebbero un orario sbagliato di ore, non un'approssimazione.
+  if ((coordinates['latitude'] === null) !== (coordinates['longitude'] === null)) {
+    issues.push(
+      'AUTOMATION_LATITUDE e AUTOMATION_LONGITUDE vanno impostate insieme: ' +
+        'senza entrambe le automazioni alba/tramonto sono disabilitate',
+    );
+  }
+
+  return {
+    latitude: coordinates['latitude'] ?? null,
+    longitude: coordinates['longitude'] ?? null,
+    presenceTopic: text(env.AUTOMATION_PRESENCE_TOPIC) ?? null,
+  };
+}
+
+/**
  * Legge la configurazione dall'ambiente. Il server rifiuta di partire in
  * produzione con un segreto JWT debole o credenziali di seed mancanti.
  */
@@ -282,11 +378,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
   }
 
   // Nessun default hardcoded: host, database e credenziali vengono solo dal .env.
-  const database = resolveDatabase(env, issues);
-  const dbPoolMax = boundedInteger(env, 'DATABASE_POOL_MAX', 10, issues, 1, 100);
-  const dbIdleTimeoutMs = boundedInteger(env, 'DATABASE_IDLE_TIMEOUT_MS', 30_000, issues, 1_000, 3_600_000);
-  const dbConnectTimeoutMs = boundedInteger(env, 'DATABASE_CONNECT_TIMEOUT_MS', 5_000, issues, 1_000, 300_000);
-  const dbSsl = strictBoolean(env, 'DATABASE_SSL', false, issues);
+  const database = resolveDatabaseConfig(env, issues);
 
   const adminPassword = requireInProduction(env, 'ADMIN_PASSWORD', 'admin-demo-1234', issues);
   const adminPin = requireInProduction(env, 'ADMIN_PIN', '2468', issues);
@@ -308,6 +400,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
 
   // Broker per la pubblicazione degli eventi di topologia (opzionale).
   const mqtt = resolveMqttEvents(env, issues);
+
+  // Coordinate solari e topic di presenza del motore di automazioni.
+  const automation = resolveAutomationConfig(env, issues);
 
   if (!/^\d{4,6}$/.test(adminPin)) issues.push('ADMIN_PIN deve avere 4-6 cifre');
   if (!/^\d{4,6}$/.test(kioskPin)) issues.push('KIOSK_PIN deve avere 4-6 cifre');
@@ -338,10 +433,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
     dbPort: database.port,
     dbName: database.name,
     dbUser: database.user,
-    dbPoolMax,
-    dbSsl,
-    dbConnectTimeoutMs,
-    dbIdleTimeoutMs,
+    dbPoolMax: database.poolMax,
+    dbSsl: database.ssl,
+    dbConnectTimeoutMs: database.connectTimeoutMs,
+    dbIdleTimeoutMs: database.idleTimeoutMs,
     jwtSecret,
     cookieSecure: boolean(env.COOKIE_SECURE, production),
     // Solo dietro un reverse proxy fidato: altrimenti X-Forwarded-For è spoofabile.
@@ -356,6 +451,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
     pinPolicy,
     loginPolicy,
     mqtt,
+    automation,
     seed: {
       adminUsername: (text(env.ADMIN_USERNAME) ?? 'admin').toLowerCase(),
       adminDisplayName: text(env.ADMIN_DISPLAY_NAME) ?? 'Amministratore',

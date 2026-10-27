@@ -161,3 +161,70 @@ CREATE TABLE IF NOT EXISTS climate_runtime_states (
   last_sent_at          TIMESTAMPTZ,
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Motore di automazioni (vedi migrations/004_automations.sql): Trigger →
+-- Conditions → Actions. `trigger_config`, `conditions` e `actions` sono JSONB,
+-- validati da Zod nelle route; il motore ne tiene una copia in memoria.
+CREATE TABLE IF NOT EXISTS automations (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name              VARCHAR(128) NOT NULL,
+  description       TEXT,
+  is_active         BOOLEAN NOT NULL DEFAULT true,
+  trigger_type      VARCHAR(32) NOT NULL
+                      CHECK (trigger_type IN ('mqtt_state', 'time_cron', 'sun_event')),
+  trigger_config    JSONB NOT NULL,
+  conditions        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  actions           JSONB NOT NULL DEFAULT '[]'::jsonb,
+  last_triggered_at TIMESTAMPTZ,
+  execution_count   INTEGER NOT NULL DEFAULT 0,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_automations_active_trigger
+  ON automations (is_active, trigger_type);
+CREATE INDEX IF NOT EXISTS idx_automations_trigger_topic
+  ON automations USING gin (trigger_config);
+
+-- Storico esecuzioni: esito, azioni inviate, latenza totale ed errore.
+CREATE TABLE IF NOT EXISTS automation_logs (
+  id                BIGSERIAL PRIMARY KEY,
+  automation_id     UUID NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+  triggered_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  trigger_source    TEXT NOT NULL,
+  conditions_met    BOOLEAN NOT NULL,
+  actions_executed  JSONB,
+  execution_time_ms INTEGER NOT NULL,
+  error_message     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_logs_lookup
+  ON automation_logs (automation_id, triggered_at DESC);
+
+-- Retention dei log: finestra temporale più limite rotativo per regola.
+CREATE OR REPLACE FUNCTION cleanup_automation_logs(
+  retention_days INTEGER DEFAULT 90,
+  keep_per_automation INTEGER DEFAULT 500
+) RETURNS INTEGER AS $$
+DECLARE
+  removed INTEGER := 0;
+BEGIN
+  DELETE FROM automation_logs
+  WHERE triggered_at < now() - make_interval(days => retention_days);
+  GET DIAGNOSTICS removed = ROW_COUNT;
+
+  DELETE FROM automation_logs
+  WHERE id IN (
+    SELECT id FROM (
+      SELECT id,
+             row_number() OVER (
+               PARTITION BY automation_id ORDER BY triggered_at DESC, id DESC
+             ) AS position
+      FROM automation_logs
+    ) ranked
+    WHERE position > keep_per_automation
+  );
+
+  RETURN removed;
+END;
+$$ LANGUAGE plpgsql;
