@@ -106,6 +106,21 @@
     "wakeLockUnsupported": "WakeLock not supported by this browser",
     "wakeLockError": "WakeLock error: {{error}}"
   },
+  "display": {
+    "title": "This display",
+    "description": "Name and identifier this panel uses to load its configuration from PostgreSQL.",
+    "name": "Display name",
+    "namePlaceholder": "Panel name",
+    "save": "Save",
+    "saved": "Name updated",
+    "saveError": "Unable to update the name",
+    "id": "Kiosk id",
+    "idHint": "Generated at first boot and stored in a ten-year cookie. A new id applies at the next start, when the panel adopts that display's configuration.",
+    "applyId": "Use this id",
+    "invalidId": "Invalid id: letters, digits, dot, dash, colon or underscore (max 64).",
+    "idApplied": "Identifier updated",
+    "idAppliedHint": "The panel loads {{id}} at the next start."
+  },
   "pin": {
     "title": "Panel PIN",
     "description": "Protects loads, resets and critical scenarios",

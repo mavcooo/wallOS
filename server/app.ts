@@ -6,11 +6,19 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { loadConfig } from './config.js';
 import { Database, shortVersion } from './db.js';
 import { HttpError } from './http.js';
+import type { MqttLink } from './mqttClient.js';
+import { createAutomationEngine, type AutomationEngine } from './services/automationEngine.js';
+import { registerAutomationRoutes } from './routes/automations.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerClimateRoutes } from './routes/climate.js';
+import { registerKioskRoutes } from './routes/kiosk.js';
 import { registerTopologyRoutes } from './routes/topology.js';
 import { registerTopologyEventRoutes } from './routes/topologyEvents.js';
 import { registerUserRoutes } from './routes/users.js';
+import {
+  createKioskConfigPublisher,
+  type KioskConfigPublisher,
+} from './services/kioskEvents.js';
 import {
   createTopologyEventBus,
   type TopologyEventBus,
@@ -31,11 +39,26 @@ export interface BuildAppOptions {
   db?: Database;
   /** Bus degli eventi di topologia: nei test si inietta un falso spia. */
   topologyEvents?: TopologyEventBus;
+  /**
+   * Collegamento MQTT del motore di automazioni. In produzione il motore lo
+   * costruisce da sé in `start()` (chiamato solo da `server/index.ts`), mentre
+   * nei test si inietta un falso per osservare i comandi pubblicati senza
+   * aprire socket.
+   */
+  mqttLink?: MqttLink;
+  /**
+   * Notifica MQTT delle modifiche di configurazione dei display. In produzione
+   * la costruisce `buildApp` dal `.env`; nei test si inietta un falso spia per
+   * verificare il topic senza aprire socket.
+   */
+  kioskPublisher?: KioskConfigPublisher;
 }
 
 export interface BuiltApp {
   app: FastifyInstance;
   db: Database;
+  /** Motore delle automazioni: `start()`/`stop()` li pilota `server/index.ts`. */
+  automations: AutomationEngine;
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -203,6 +226,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
 
   const topologyEvents =
     options.topologyEvents ?? createTopologyEventBus(config, app.log);
+  const kioskPublisher =
+    options.kioskPublisher ?? createKioskConfigPublisher(config, app.log);
+
+  // Motore di automazioni: qui si costruisce solo l'istanza (cache vuota, nessun
+  // timer e nessuna socket MQTT). Il ciclo di vita lo avvia `server/index.ts`
+  // con `start()`, così i test possono chiamare `tick()` e `handleMessage()`
+  // senza processi in background.
+  const automations = createAutomationEngine({
+    db,
+    config,
+    log: app.log,
+    ...(options.mqttLink ? { link: options.mqttLink } : {}),
+  });
 
   registerAuthRoutes(app, { db, config, dummyPasswordHash });
   registerUserRoutes(app, { db, config });
@@ -215,11 +251,19 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   // Cronotermostato: solo persistenza, i comandi li pubblica il job periodico
   // (`createClimateScheduler`, avviato da `server/index.ts`).
   registerClimateRoutes(app, { db, config });
+  // Automazioni: le route scrivono su PostgreSQL e ricaricano la cache del
+  // motore; il broker lo tocca solo il motore.
+  registerAutomationRoutes(app, { db, config, automations });
+  // Display a parete: auto-registrazione all'avvio, configurazione centralizzata
+  // e sync real-time via `wallos/system/kiosk/:id/config_updated`.
+  registerKioskRoutes(app, { db, config, publisher: kioskPublisher });
 
   app.addHook('onClose', async () => {
+    await automations.stop();
+    await kioskPublisher.close();
     await topologyEvents.close();
     await db.close();
   });
 
-  return { app, db };
+  return { app, db, automations };
 }

@@ -1,6 +1,9 @@
+import { QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { createTestQueryClient } from '@/test/query';
 
 vi.mock('@/components/settings/TopologyManager', () => ({
   TopologyManager: () => null,
@@ -26,6 +29,17 @@ const { useHomeStore } = await import('@/store/homeStore');
 
 beforeEach(() => {
   localStorage.clear();
+  // La pagina ora contiene la card del display, che idrata da `/api/kiosk/:id`:
+  // un server finto evita richieste reali e risposte non JSON.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      new Response(JSON.stringify({ display: null }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ),
+  );
   delete document.documentElement.dataset.performanceMode;
   useHomeStore.getState().setPerformanceMode(false);
   useHomeStore.getState().setBurnInSettings({
@@ -35,8 +49,16 @@ beforeEach(() => {
   });
 });
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 function renderPage() {
-  return render(<SettingsPage />);
+  return render(
+    <QueryClientProvider client={createTestQueryClient()}>
+      <SettingsPage />
+    </QueryClientProvider>,
+  );
 }
 
 describe('SettingsPage · protezione burn-in', () => {

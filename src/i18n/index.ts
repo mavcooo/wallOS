@@ -3,11 +3,13 @@ import LanguageDetector from 'i18next-browser-languagedetector';
 import { initReactI18next } from 'react-i18next';
 
 import enAuth from './locales/en/auth.json';
+import enAutomations from './locales/en/automations.json';
 import enCommon from './locales/en/common.json';
 import enDevices from './locales/en/devices.json';
 import enEnergy from './locales/en/energy.json';
 import enSettings from './locales/en/settings.json';
 import itAuth from './locales/it/auth.json';
+import itAutomations from './locales/it/automations.json';
 import itCommon from './locales/it/common.json';
 import itDevices from './locales/it/devices.json';
 import itEnergy from './locales/it/energy.json';
@@ -32,6 +34,7 @@ export const resources = {
     energy: itEnergy,
     settings: itSettings,
     auth: itAuth,
+    automations: itAutomations,
   },
   en: {
     common: enCommon,
@@ -39,10 +42,18 @@ export const resources = {
     energy: enEnergy,
     settings: enSettings,
     auth: enAuth,
+    automations: enAutomations,
   },
 } as const;
 
-export const NAMESPACES = ['common', 'devices', 'energy', 'settings', 'auth'] as const;
+export const NAMESPACES = [
+  'common',
+  'devices',
+  'energy',
+  'settings',
+  'auth',
+  'automations',
+] as const;
 
 /** Locale BCP 47 usata da Intl: 'en' → inglese britannico, con date
  * giorno-mese e orologio a 24 ore come sul pannello italiano. */

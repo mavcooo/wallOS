@@ -14,6 +14,9 @@ import {
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { KioskIdentityCard } from '@/components/settings/KioskIdentityCard';
+import { useKioskQuery, useUpdateKiosk } from '@/hooks/useKioskProfile';
+import { getKioskId } from '@/utils/kioskIdentity';
 import { LanguageSwitcher } from '@/components/settings/LanguageSwitcher';
 import { PerformanceModeCard } from '@/components/settings/PerformanceModeCard';
 import { SunlightModeCard } from '@/components/settings/SunlightModeCard';
@@ -82,6 +85,18 @@ export function SettingsPage() {
   const clearRaw = useHomeStore((state) => state.clearRaw);
   const dimmerTimeoutMs = useHomeStore((state) => state.ui.dimmerTimeoutMs);
   const setDimmerTimeout = useHomeStore((state) => state.setDimmerTimeout);
+  // Il timeout del dimmer è anche un parametro del display: cambiarlo dal
+  // pannello deve finire in PostgreSQL, altrimenti alla prima idratazione (o
+  // dopo un riavvio) tornerebbe il valore centralizzato.
+  const kioskId = getKioskId();
+  const { data: kioskDisplay } = useKioskQuery(kioskId);
+  const updateKiosk = useUpdateKiosk();
+
+  const changeDimmerTimeout = (ms: number) => {
+    setDimmerTimeout(ms);
+    if (!kioskDisplay) return;
+    updateKiosk.mutate({ id: kioskId, patch: { dimmerTimeoutSec: Math.round(ms / 1000) } });
+  };
   const burnIn = useHomeStore((state) => state.burnIn);
   const setBurnInSettings = useHomeStore((state) => state.setBurnInSettings);
   const topologySync = useHomeStore((state) => state.topologySync);
@@ -424,7 +439,7 @@ export function SettingsPage() {
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setDimmerTimeout(option.value)}
+                      onClick={() => changeDimmerTimeout(option.value)}
                       className={cn(
                         'h-10 rounded-xl border text-[11px] font-medium transition-colors',
                         dimmerTimeoutMs === option.value
@@ -556,6 +571,10 @@ export function SettingsPage() {
               </button>
             </CardContent>
           </Card>
+
+          {/* Identità del pannello: il nome e il `kiosk_id` con cui questo
+              tablet si registra e riceve la configurazione dall'amministratore. */}
+          <KioskIdentityCard />
 
           <Card>
             <CardHeader>

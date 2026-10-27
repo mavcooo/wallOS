@@ -3,10 +3,12 @@ import { useTranslation } from 'react-i18next';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { useDevice, useRoomLabel } from '@/hooks/useDevice';
+import { isKioskPinRequired } from '@/lib/kioskPolicy';
 import { cn } from '@/lib/utils';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { useOfflineQueue } from '@/mqtt/offlineQueue';
 import { selectIsHydrating, useHomeStore } from '@/store/homeStore';
+import { AutomationBadge } from './AutomationBadge';
 import { AvailabilityBadge } from './AvailabilityBadge';
 import { CameraCard } from './CameraCard';
 import { ClimateCard } from './ClimateCard';
@@ -35,6 +37,8 @@ interface DeviceCardProps {
  *   i comandi: nessuna pubblicazione MQTT verso un device muto.
  * - Durante il Safe Boot (`isHydrating`) il sottoalbero è bloccato allo stesso
  *   modo: l'utente non deve toccare un relè il cui stato retained è in arrivo.
+ * - `AutomationBadge` spiega i cambiamenti che nessuno ha toccato: quando il
+ *   motore del server comanda il device, la card lo dichiara in basso.
  */
 export const DeviceCard = memo(function DeviceCard({
   deviceId,
@@ -70,7 +74,10 @@ export const DeviceCard = memo(function DeviceCard({
     // Barriera finale: anche un event handler sfuggito a `inert` (o un tap di
     // un widget per cui la card è già disabilitata) non genera comandi a vuoto.
     if (blocked) return;
-    if (device.protected) {
+    // `pin_required` del display: l'amministratore può dichiarare che su questo
+    // pannello i device protetti si comandano senza PIN. Non vale per le azioni
+    // amministrative (broker, profili): quelle restano protette sempre.
+    if (device.protected && isKioskPinRequired()) {
       requestPin({
         title: t('guard.title'),
         description: t('guard.description', { name: device.name }),
@@ -162,6 +169,10 @@ export const DeviceCard = memo(function DeviceCard({
       {unavailable ? (
         <AvailabilityBadge device={device} className="absolute right-2 top-2 z-[1]" />
       ) : null}
+      <AutomationBadge
+        deviceId={device.id}
+        className="absolute bottom-2 left-2 z-[1]"
+      />
     </div>
   );
 });

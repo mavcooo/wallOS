@@ -1,17 +1,21 @@
 import {
   Cpu,
   DoorOpen,
+  MonitorSmartphone,
   Pencil,
   Plus,
   Sparkles,
   Trash2,
   TriangleAlert,
+  Workflow,
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { AutomationsTab } from '@/components/admin/AutomationsTab';
 import { DeviceForm } from '@/components/admin/DeviceForm';
+import { KioskManagerTab } from '@/components/admin/KioskManagerTab';
 import { RoomForm } from '@/components/admin/RoomForm';
 import { ScenarioForm } from '@/components/admin/ScenarioForm';
 import {
@@ -31,7 +35,13 @@ import { roomLabel, type RoomConfig } from '@/lib/rooms';
 import { useToastStore } from '@/store/toastStore';
 import type { DeviceMetadata, Scenario } from '@/types/device';
 
-type Tab = 'rooms' | 'devices' | 'scenarios';
+type Tab = 'rooms' | 'devices' | 'scenarios' | 'automations' | 'displays';
+
+/**
+ * Le tab con il CRUD a dialog: automazioni e display hanno i propri controlli
+ * (il display non si crea a mano: si auto-registra al primo avvio).
+ */
+type CrudTab = Exclude<Tab, 'automations' | 'displays'>;
 
 type Editing =
   | { kind: 'room'; item?: RoomConfig }
@@ -44,14 +54,14 @@ interface PendingDelete {
   label: string;
 }
 
-const EDIT_TAB: Record<Editing['kind'], Tab> = {
+const EDIT_TAB: Record<Editing['kind'], CrudTab> = {
   room: 'rooms',
   device: 'devices',
   scenario: 'scenarios',
 };
 
 // Le tab sono plurali, le chiavi i18n delle entità sono singolari.
-const ENTITY_KEY: Record<Tab, 'room' | 'device' | 'scenario'> = {
+const ENTITY_KEY: Record<CrudTab, 'room' | 'device' | 'scenario'> = {
   rooms: 'room',
   devices: 'device',
   scenarios: 'scenario',
@@ -164,24 +174,32 @@ export function AdminPage() {
             <TabsTrigger value="scenarios">
               <Sparkles className="size-4" /> {t('admin.tabs.scenarios')}
             </TabsTrigger>
+            <TabsTrigger value="automations">
+              <Workflow className="size-4" /> {t('admin.tabs.automations')}
+            </TabsTrigger>
+            <TabsTrigger value="displays">
+              <MonitorSmartphone className="size-4" /> {t('admin.tabs.displays')}
+            </TabsTrigger>
           </TabsList>
-          <Button
-            type="button"
-            variant="primary"
-            size="sm"
-            onClick={() =>
-              setEditing(
-                tab === 'rooms'
-                  ? { kind: 'room' }
-                  : tab === 'devices'
-                    ? { kind: 'device' }
-                    : { kind: 'scenario' },
-              )
-            }
-          >
-            <Plus className="size-4" />
-            {t(`admin.create.${ENTITY_KEY[tab]}`)}
-          </Button>
+          {tab === 'automations' || tab === 'displays' ? null : (
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              onClick={() =>
+                setEditing(
+                  tab === 'rooms'
+                    ? { kind: 'room' }
+                    : tab === 'devices'
+                      ? { kind: 'device' }
+                      : { kind: 'scenario' },
+                )
+              }
+            >
+              <Plus className="size-4" />
+              {t(`admin.create.${ENTITY_KEY[tab]}`)}
+            </Button>
+          )}
         </div>
 
         <TabsContent value="rooms">
@@ -311,6 +329,14 @@ export function AdminPage() {
               </ul>
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="automations">
+          <AutomationsTab />
+        </TabsContent>
+
+        <TabsContent value="displays">
+          <KioskManagerTab />
         </TabsContent>
       </Tabs>
 

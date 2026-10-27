@@ -162,9 +162,10 @@ CREATE TABLE IF NOT EXISTS climate_runtime_states (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Motore di automazioni (vedi migrations/004_automations.sql): Trigger →
--- Conditions → Actions. `trigger_config`, `conditions` e `actions` sono JSONB,
--- validati da Zod nelle route; il motore ne tiene una copia in memoria.
+-- Motore di automazioni (vedi migrations/004_automations.sql e
+-- migrations/005_automation_condition_groups.sql): Trigger → Conditions →
+-- Actions. `trigger_config`, `conditions`, `condition_groups` e `actions` sono
+-- JSONB, validati da Zod nelle route; il motore ne tiene una copia in memoria.
 CREATE TABLE IF NOT EXISTS automations (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name              VARCHAR(128) NOT NULL,
@@ -173,7 +174,11 @@ CREATE TABLE IF NOT EXISTS automations (
   trigger_type      VARCHAR(32) NOT NULL
                       CHECK (trigger_type IN ('mqtt_state', 'time_cron', 'sun_event')),
   trigger_config    JSONB NOT NULL,
+  -- Primo gruppo di condizioni (AND).
   conditions        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Altri gruppi: AND dentro il gruppo, OR fra i gruppi.
+  condition_groups  JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Comandi MQTT e/o scenari, eseguiti in sequenza.
   actions           JSONB NOT NULL DEFAULT '[]'::jsonb,
   last_triggered_at TIMESTAMPTZ,
   execution_count   INTEGER NOT NULL DEFAULT 0,
@@ -228,3 +233,35 @@ BEGIN
   RETURN removed;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ── Display a parete (Kiosk Profiles) ───────────────────────────────────────
+-- Vedi migrations/006_kiosk_displays.sql. Le preferenze hardware del tablet
+-- (timeout del dimmer, alto contrasto, performance mode, orientamento, stanza
+-- iniziale) erano solo nel localStorage del browser; qui diventano server-state,
+-- idratate dal pannello e modificabili da Admin -> Display.
+CREATE TABLE IF NOT EXISTS kiosk_displays (
+  id                      VARCHAR(64) PRIMARY KEY,
+  name                    VARCHAR(128) NOT NULL,
+  default_room_id         VARCHAR(64) REFERENCES rooms(id) ON DELETE SET NULL,
+  dimmer_timeout_sec      INTEGER NOT NULL DEFAULT 120,
+  dimmer_screensaver_mode VARCHAR(32) NOT NULL DEFAULT 'clock_float',
+  performance_mode        BOOLEAN NOT NULL DEFAULT FALSE,
+  high_contrast           BOOLEAN NOT NULL DEFAULT FALSE,
+  pin_required            BOOLEAN NOT NULL DEFAULT TRUE,
+  screen_orientation      VARCHAR(16) NOT NULL DEFAULT 'landscape',
+  is_active               BOOLEAN NOT NULL DEFAULT TRUE,
+  last_seen_at            TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT kiosk_displays_id_format
+    CHECK (id ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'),
+  CONSTRAINT kiosk_displays_dimmer_range
+    CHECK (dimmer_timeout_sec BETWEEN 30 AND 600),
+  CONSTRAINT kiosk_displays_screensaver
+    CHECK (dimmer_screensaver_mode IN ('clock_float', 'black', 'off')),
+  CONSTRAINT kiosk_displays_orientation
+    CHECK (screen_orientation IN ('landscape', 'portrait'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_kiosk_displays_active ON kiosk_displays (is_active);
+CREATE INDEX IF NOT EXISTS idx_kiosk_displays_room ON kiosk_displays (default_room_id);

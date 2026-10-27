@@ -319,7 +319,43 @@
     "tabs": {
       "rooms": "Rooms",
       "devices": "Devices",
-      "scenarios": "Scenarios"
+      "scenarios": "Scenarios",
+      "automations": "Automations",
+      "displays": "Displays"
+    },
+    "kiosk": {
+      "description": "Wall tablets register themselves on first boot and read their hardware settings from PostgreSQL. Every save is published on the broker, so the panel applies it within a second: no touch, no reload, and no lost preferences after a cache wipe.",
+      "empty": "No display has connected yet: open the panel on the tablet to register it.",
+      "loading": "Loading registered displays…",
+      "loadError": "Unable to load the registered displays.",
+      "online": "Online",
+      "offline": "Offline",
+      "inactive": "Inactive",
+      "lastSeen": "last contact {{when}}",
+      "neverSeen": "never connected",
+      "name": "Name",
+      "room": "Initial room",
+      "roomOverview": "Overview",
+      "dimmer": "Standby timeout",
+      "dimmerValue": "{{seconds}} s",
+      "dimmerHint": "Inactivity before the screen dims (30-600 s).",
+      "performance": "Performance mode",
+      "performanceHint": "Removes blur, shadows and animations on low-power panels.",
+      "contrast": "High contrast",
+      "contrastHint": "Sunlight mode (WCAG AAA) for panels facing a window.",
+      "pin": "PIN on protected devices",
+      "pinHint": "When off, protected devices on this panel can be controlled without a PIN. Admin actions stay protected.",
+      "orientation": "Orientation",
+      "landscape": "Landscape",
+      "portrait": "Portrait",
+      "save": "Save",
+      "saving": "Saving…",
+      "saved": "Display updated",
+      "savedDescription": "{{name}} applies the configuration within a second.",
+      "ping": "Send configuration",
+      "pushed": "Configuration sent",
+      "pushedDescription": "The panel confirms on screen if the broker delivered it.",
+      "error": "Unable to save the display configuration"
     },
     "create": {
       "room": "New room",
@@ -507,5 +543,9 @@
       "enable": "Enable",
       "disable": "Disable"
     }
+  },
+  "kioskSync": {
+    "title": "Display configuration updated",
+    "description": "New settings applied for {{name}}."
   }
 }

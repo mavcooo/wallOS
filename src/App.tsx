@@ -16,6 +16,8 @@ import { CarouselDots } from '@/components/ui/carousel-dots';
 import { CriticalAlertOverlay } from '@/components/ui/CriticalAlertOverlay';
 import { useBootRecovery } from '@/hooks/useBootRecovery';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useKioskBootstrap } from '@/hooks/useKioskBootstrap';
+import { useKioskSync } from '@/hooks/useKioskSync';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { usePerformanceMode } from '@/hooks/usePerformanceMode';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
@@ -218,6 +220,18 @@ function TopologySync() {
   return null;
 }
 
+/**
+ * Profilo del display: idratazione da PostgreSQL all'avvio (`/api/kiosk/:id`) e
+ * applicazione a caldo delle modifiche fatte dall'amministratore, che arrivano
+ * su `wallos/system/kiosk/<id>/config_updated`. Vive accanto a `TopologySync`
+ * perché usa gli stessi store e la stessa cache TanStack Query.
+ */
+function KioskProfile() {
+  useKioskBootstrap();
+  useKioskSync();
+  return null;
+}
+
 export default function App() {
   // Il tema alto contrasto vive a livello applicazione: `data-contrast` su
   // <html> è già attivo sul lock screen, prima che l'utente faccia login.
@@ -253,6 +267,7 @@ export default function App() {
           <TopologyGate>
             <MqttProvider>
               <TopologySync />
+              <KioskProfile />
               <AppNavigation />
             </MqttProvider>
           </TopologyGate>

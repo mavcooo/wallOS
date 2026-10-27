@@ -5,10 +5,17 @@ import { Pool } from 'pg';
 import type {
   AttemptPolicy,
   AttemptRow,
+  AutomationActionOutcome,
+  AutomationLogRow,
+  AutomationRow,
+  AutomationTriggerType,
+  AutomationWithLastLogRow,
   ClimatePreset,
   ClimateRuntimeRow,
   ClimateScheduleRow,
   DeviceRow,
+  KioskDisplayFields,
+  KioskDisplayRow,
   RefreshTokenRow,
   RoomRow,
   ScenarioRow,
@@ -172,6 +179,32 @@ export interface ClimateOverrideInput {
   targetTemp: number | null;
   preset: ClimatePreset | null;
   until: Date | null;
+}
+
+/** Campi di una regola di automazione, già validati dalle route. */
+export interface AutomationFields {
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  triggerType: AutomationTriggerType;
+  triggerConfig: unknown;
+  /** Primo gruppo di condizioni (AND). */
+  conditions: unknown;
+  /** Altri gruppi di condizioni (OR fra i gruppi). */
+  conditionGroups: unknown;
+  actions: unknown;
+}
+
+/** Esito di una valutazione, pronto per `automation_logs`. */
+export interface NewAutomationLog {
+  automationId: string;
+  triggerSource: string;
+  conditionsMet: boolean;
+  actionsExecuted: AutomationActionOutcome[];
+  executionTimeMs: number;
+  errorMessage: string | null;
+  /** Istante della ricezione del trigger (default: adesso). */
+  triggeredAt?: Date;
 }
 
 export type AuthDb = Database;
@@ -742,6 +775,82 @@ export class Database {
     return Number(rows[0]?.count ?? 0);
   }
 
+  // ── Display a parete (Kiosk Profiles) ────────────────────────────────────
+
+  async listKioskDisplays(): Promise<KioskDisplayRow[]> {
+    const { rows } = await this.client.query<KioskDisplayRow>(
+      `SELECT id, name, default_room_id, dimmer_timeout_sec, dimmer_screensaver_mode,
+              performance_mode, high_contrast, pin_required, screen_orientation,
+              is_active, last_seen_at, created_at, updated_at
+       FROM kiosk_displays
+       ORDER BY is_active DESC, name`,
+    );
+    return rows;
+  }
+
+  async findKioskDisplay(id: string): Promise<KioskDisplayRow | undefined> {
+    const { rows } = await this.client.query<KioskDisplayRow>(
+      'SELECT * FROM kiosk_displays WHERE id = $1',
+      [id],
+    );
+    return rows[0];
+  }
+
+  /**
+   * Auto-registrazione al primo avvio del pannello: crea la riga con i default
+   * e riscrive `last_seen_at`. `ON CONFLICT` rende l'operazione idempotente
+   * anche se due schede dello stesso tablet si presentano insieme.
+   */
+  async registerKioskDisplay(id: string, name: string): Promise<KioskDisplayRow> {
+    const { rows } = await this.client.query<KioskDisplayRow>(
+      `INSERT INTO kiosk_displays (id, name, last_seen_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (id) DO UPDATE SET last_seen_at = NOW()
+       RETURNING *`,
+      [id, name],
+    );
+    return rows[0] as KioskDisplayRow;
+  }
+
+  /**
+   * Aggiornamento completo: il chiamante ha già validato i campi, `updated_at`
+   * è l'unica cosa che questa query decide da sola.
+   */
+  async updateKioskDisplay(
+    id: string,
+    fields: KioskDisplayFields,
+  ): Promise<KioskDisplayRow | undefined> {
+    const { rows } = await this.client.query<KioskDisplayRow>(
+      `UPDATE kiosk_displays SET
+         name = $2,
+         default_room_id = $3,
+         dimmer_timeout_sec = $4,
+         dimmer_screensaver_mode = $5,
+         performance_mode = $6,
+         high_contrast = $7,
+         pin_required = $8,
+         screen_orientation = $9,
+         is_active = $10,
+         last_seen_at = COALESCE(last_seen_at, NOW()),
+         updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        id,
+        fields.name,
+        fields.default_room_id,
+        fields.dimmer_timeout_sec,
+        fields.dimmer_screensaver_mode,
+        fields.performance_mode,
+        fields.high_contrast,
+        fields.pin_required,
+        fields.screen_orientation,
+        fields.is_active,
+      ],
+    );
+    return rows[0];
+  }
+
   // ── Cronotermostato ─────────────────────────────────────────────────────
 
   /** Tutti i dispositivi che possono ricevere un setpoint programmato. */
@@ -1091,5 +1200,173 @@ export class Database {
         scenario.displayOrder,
       ],
     );
+  }
+
+  // ── Automazioni ──────────────────────────────────────────────────────────
+
+  /**
+   * Tutte le regole con l'esito dell'ultima esecuzione: una sola query con
+   * LATERAL, così la lista del pannello non fa N+1 richieste per i badge.
+   */
+  async listAutomations(): Promise<AutomationWithLastLogRow[]> {
+    const { rows } = await this.client.query<AutomationWithLastLogRow>(
+      `SELECT a.*,
+              l.triggered_at       AS last_log_at,
+              l.conditions_met     AS last_log_conditions_met,
+              l.execution_time_ms  AS last_log_execution_time_ms,
+              l.error_message      AS last_log_error
+       FROM automations a
+       LEFT JOIN LATERAL (
+         SELECT triggered_at, conditions_met, execution_time_ms, error_message
+         FROM automation_logs
+         WHERE automation_id = a.id
+         ORDER BY triggered_at DESC, id DESC
+         LIMIT 1
+       ) l ON TRUE
+       ORDER BY a.created_at ASC, a.name`,
+    );
+    return rows;
+  }
+
+  /**
+   * Regole attive: la cache in-memory del motore (e le sottoscrizioni MQTT)
+   * nasce solo da qui, quindi le regole disattivate restano visibili nel
+   * pannello ma non consumano nulla.
+   */
+  async listActiveAutomations(): Promise<AutomationRow[]> {
+    const { rows } = await this.client.query<AutomationRow>(
+      `SELECT * FROM automations WHERE is_active = TRUE ORDER BY created_at ASC`,
+    );
+    return rows;
+  }
+
+  async findAutomationById(id: string): Promise<AutomationRow | undefined> {
+    const { rows } = await this.client.query<AutomationRow>(
+      'SELECT * FROM automations WHERE id = $1::uuid',
+      [id],
+    );
+    return rows[0];
+  }
+
+  async createAutomation(rule: AutomationFields): Promise<AutomationRow | undefined> {
+    const { rows } = await this.client.query<AutomationRow>(
+      `INSERT INTO automations (
+         name, description, is_active, trigger_type, trigger_config, conditions,
+         condition_groups, actions
+       ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb)
+       RETURNING *`,
+      [
+        rule.name,
+        rule.description,
+        rule.isActive,
+        rule.triggerType,
+        JSON.stringify(rule.triggerConfig),
+        JSON.stringify(rule.conditions),
+        JSON.stringify(rule.conditionGroups),
+        JSON.stringify(rule.actions),
+      ],
+    );
+    return rows[0];
+  }
+
+  /** Aggiornamento completo: la regola viene sostituita, non patchata a metà. */
+  async updateAutomation(
+    id: string,
+    rule: AutomationFields,
+  ): Promise<AutomationRow | undefined> {
+    const { rows } = await this.client.query<AutomationRow>(
+      `UPDATE automations SET
+         name = $2, description = $3, is_active = $4, trigger_type = $5,
+         trigger_config = $6::jsonb, conditions = $7::jsonb,
+         condition_groups = $8::jsonb, actions = $9::jsonb,
+         updated_at = now()
+       WHERE id = $1::uuid
+       RETURNING *`,
+      [
+        id,
+        rule.name,
+        rule.description,
+        rule.isActive,
+        rule.triggerType,
+        JSON.stringify(rule.triggerConfig),
+        JSON.stringify(rule.conditions),
+        JSON.stringify(rule.conditionGroups),
+        JSON.stringify(rule.actions),
+      ],
+    );
+    return rows[0];
+  }
+
+  /** Interruttore rapido del pannello: cambia solo `is_active`. */
+  async setAutomationActive(id: string, active: boolean): Promise<AutomationRow | undefined> {
+    const { rows } = await this.client.query<AutomationRow>(
+      `UPDATE automations SET is_active = $2, updated_at = now()
+       WHERE id = $1::uuid
+       RETURNING *`,
+      [id, active],
+    );
+    return rows[0];
+  }
+
+  async deleteAutomation(id: string): Promise<boolean> {
+    const result = await this.client.query(
+      'DELETE FROM automations WHERE id = $1::uuid',
+      [id],
+    );
+    return result.rowCount > 0;
+  }
+
+  /** Contatore e timestamp dell'ultimo scatto (i log restano la cronologia). */
+  async recordAutomationRun(id: string, at: Date): Promise<void> {
+    await this.client.query(
+      `UPDATE automations
+       SET last_triggered_at = $2, execution_count = execution_count + 1, updated_at = now()
+       WHERE id = $1::uuid`,
+      [id, at],
+    );
+  }
+
+  async insertAutomationLog(log: NewAutomationLog): Promise<AutomationLogRow | undefined> {
+    const { rows } = await this.client.query<AutomationLogRow>(
+      `INSERT INTO automation_logs (
+         automation_id, triggered_at, trigger_source, conditions_met,
+         actions_executed, execution_time_ms, error_message
+       ) VALUES ($1::uuid, $2, $3, $4, $5::jsonb, $6, $7)
+       RETURNING *`,
+      [
+        log.automationId,
+        log.triggeredAt ?? new Date(),
+        log.triggerSource,
+        log.conditionsMet,
+        JSON.stringify(log.actionsExecuted),
+        Math.max(0, Math.round(log.executionTimeMs)),
+        log.errorMessage,
+      ],
+    );
+    return rows[0];
+  }
+
+  /** Ultime esecuzioni di una regola, dalla più recente. */
+  async listAutomationLogs(automationId: string, limit = 10): Promise<AutomationLogRow[]> {
+    const { rows } = await this.client.query<AutomationLogRow>(
+      `SELECT * FROM automation_logs
+       WHERE automation_id = $1::uuid
+       ORDER BY triggered_at DESC, id DESC
+       LIMIT $2`,
+      [automationId, Math.min(Math.max(Math.trunc(limit), 1), 200)],
+    );
+    return rows;
+  }
+
+  /** Retention: finestra temporale più limite rotativo per regola. */
+  async cleanupAutomationLogs(
+    retentionDays = 90,
+    keepPerAutomation = 500,
+  ): Promise<number> {
+    const { rows } = await this.client.query<{ removed: number | string | null }>(
+      'SELECT cleanup_automation_logs($1::int, $2::int) AS removed',
+      [retentionDays, keepPerAutomation],
+    );
+    return Number(rows[0]?.removed ?? 0);
   }
 }

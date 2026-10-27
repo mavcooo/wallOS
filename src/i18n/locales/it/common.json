@@ -319,7 +319,43 @@
     "tabs": {
       "rooms": "Stanze",
       "devices": "Dispositivi",
-      "scenarios": "Scenari"
+      "scenarios": "Scenari",
+      "automations": "Automazioni",
+      "displays": "Display"
+    },
+    "kiosk": {
+      "description": "I tablet a parete si registrano da soli al primo avvio e leggono da PostgreSQL i propri parametri hardware. Ogni salvataggio viene pubblicato sul broker, quindi il pannello lo applica entro un secondo: nessun tocco, nessun reload e nessuna preferenza persa dopo una pulizia della cache.",
+      "empty": "Nessun display si è ancora collegato: apri il pannello sul tablet per registrarlo.",
+      "loading": "Caricamento display registrati…",
+      "loadError": "Impossibile caricare i display registrati.",
+      "online": "Online",
+      "offline": "Offline",
+      "inactive": "Disattivato",
+      "lastSeen": "ultimo contatto {{when}}",
+      "neverSeen": "mai collegato",
+      "name": "Nome",
+      "room": "Stanza iniziale",
+      "roomOverview": "Panoramica",
+      "dimmer": "Timeout di standby",
+      "dimmerValue": "{{seconds}} s",
+      "dimmerHint": "Inattività prima dell'oscuramento (30-600 s).",
+      "performance": "Modalità prestazioni",
+      "performanceHint": "Rimuove blur, ombre e animazioni sui pannelli con hardware modesto.",
+      "contrast": "Alto contrasto",
+      "contrastHint": "Modalità luce solare (WCAG AAA) per i pannelli davanti a una finestra.",
+      "pin": "PIN sui dispositivi protetti",
+      "pinHint": "Se disattivato, su questo pannello i dispositivi protetti si comandano senza PIN. Le azioni amministrative restano protette.",
+      "orientation": "Orientamento",
+      "landscape": "Orizzontale",
+      "portrait": "Verticale",
+      "save": "Salva",
+      "saving": "Salvataggio…",
+      "saved": "Display aggiornato",
+      "savedDescription": "{{name}} applica la configurazione entro un secondo.",
+      "ping": "Invia configurazione",
+      "pushed": "Configurazione inviata",
+      "pushedDescription": "Il pannello conferma a schermo se il broker l'ha consegnata.",
+      "error": "Impossibile salvare la configurazione del display"
     },
     "create": {
       "room": "Nuova stanza",
@@ -507,5 +543,9 @@
       "enable": "Attiva",
       "disable": "Disattiva"
     }
+  },
+  "kioskSync": {
+    "title": "Configurazione display aggiornata",
+    "description": "Nuove impostazioni applicate a {{name}}."
   }
 }

@@ -36,6 +36,12 @@ import {
 } from '@/mqtt/offlineQueue';
 import { isValidTopicFilter } from '@/mqtt/sniffer';
 import {
+  emitKioskConfig,
+  isKioskConfigTopic,
+  KIOSK_CONFIG_WILDCARD,
+  parseKioskConfig,
+} from '@/mqtt/kioskEvents';
+import {
   emitTopologyChanged,
   parseTopologyChanged,
   TOPOLOGY_CHANGED_TOPIC,
@@ -440,6 +446,9 @@ export function useMqtt(
         base(MQTT_WATCHDOG.pongTopic),
         // Eventi di topologia: il server li pubblica dopo ogni CRUD su DB.
         base(TOPOLOGY_CHANGED_TOPIC),
+        // Configurazione dei display: una sola sottoscrizione wildcard, così la
+        // rinomina del `kiosk_id` non richiede di riallineare i topic.
+        base(KIOSK_CONFIG_WILDCARD),
       ]);
       for (const prefix of DISCOVERY.prefixes) {
         // `<prefix>/<component>/<object_id>/config` e la variante con node_id.
@@ -691,6 +700,16 @@ export function useMqtt(
         if (topic === base(TOPOLOGY_CHANGED_TOPIC)) {
           const event = parseTopologyChanged(rawPayload);
           if (event) emitTopologyChanged(event);
+          return;
+        }
+
+        // Configurazione display modificata dall'amministratore: `useKioskSync`
+        // applica le preferenze del pannello a caldo. Il confronto è una
+        // `startsWith` sul topic: nessuna decodifica JSON per la telemetria.
+        const receivedTopic = stripBaseTopic(settings, topic);
+        if (isKioskConfigTopic(receivedTopic)) {
+          const event = parseKioskConfig(receivedTopic, rawPayload);
+          if (event) emitKioskConfig(event);
           return;
         }
 

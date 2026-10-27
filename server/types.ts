@@ -178,6 +178,253 @@ export interface MqttEventsConfig {
   baseTopic: string;
 }
 
+// ── Display a parete (Kiosk Profiles) ──────────────────────────────────────
+
+/** Modalità dello screensaver del pannello. */
+export type KioskScreensaverMode = 'clock_float' | 'black' | 'off';
+
+export type KioskOrientation = 'landscape' | 'portrait';
+
+/** Riga di `kiosk_displays`: la configurazione hardware di un tablet. */
+export interface KioskDisplayRow {
+  id: string;
+  name: string;
+  default_room_id: string | null;
+  dimmer_timeout_sec: number;
+  dimmer_screensaver_mode: KioskScreensaverMode;
+  performance_mode: boolean;
+  high_contrast: boolean;
+  pin_required: boolean;
+  screen_orientation: KioskOrientation;
+  is_active: boolean;
+  last_seen_at: Date | string | null;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+/** Campi modificabili dal pannello o dall'amministratore. */
+export interface KioskDisplayFields {
+  name: string;
+  default_room_id: string | null;
+  dimmer_timeout_sec: number;
+  dimmer_screensaver_mode: KioskScreensaverMode;
+  performance_mode: boolean;
+  high_contrast: boolean;
+  pin_required: boolean;
+  screen_orientation: KioskOrientation;
+  is_active: boolean;
+}
+
+/** Payload pubblicato su `wallos/system/kiosk/:id/config_updated`. */
+export interface KioskConfigEvent {
+  id: string;
+  config: unknown;
+  timestamp: number;
+  /** Pannello che ha fatto la modifica: quello stesso client può saltare il toast. */
+  sourceClientId?: string;
+}
+
+// ── Motore di automazioni (Trigger → Conditions → Actions) ──────────────────
+
+/** Tipo di trigger: messaggio MQTT, espressione cron, evento solare. */
+export type AutomationTriggerType = 'mqtt_state' | 'time_cron' | 'sun_event';
+
+export type SunEventName = 'sunrise' | 'sunset';
+
+/**
+ * `trigger_config` è JSONB e la forma dipende da `trigger_type`: il motore
+ * ricostruisce la variante prima di valutarla, così una riga scritta a mano nel
+ * database non fa esplodere il tick.
+ */
+export interface MqttStateTriggerConfig {
+  topic: string;
+  /** Chiave da estrarre dal payload JSON (assente = confronto sul payload). */
+  payloadKey?: string;
+  expectedValue?: string | number | boolean;
+}
+
+export interface TimeCronTriggerConfig {
+  /** Espressione cron a 5 campi: minuto ora giorno-del-mese mese giorno-sett. */
+  cron: string;
+}
+
+export interface SunEventTriggerConfig {
+  event: SunEventName;
+  /** Sfasamento in minuti rispetto all'effemeride (negativo = prima). */
+  offsetMinutes?: number;
+}
+
+export type AutomationTriggerConfig =
+  | MqttStateTriggerConfig
+  | TimeCronTriggerConfig
+  | SunEventTriggerConfig;
+
+export interface TimeRangeCondition {
+  type: 'time_range';
+  /** `HH:MM`; un intervallo che scavalca la mezzanotte (23:00 → 06:00) è valido. */
+  start: string;
+  end: string;
+}
+
+export interface DeviceStateCondition {
+  type: 'device_state';
+  deviceId: string;
+  expectedState: string;
+}
+
+export interface UserPresentCondition {
+  type: 'user_present';
+  requireHome: boolean;
+}
+
+export type AutomationCondition =
+  | TimeRangeCondition
+  | DeviceStateCondition
+  | UserPresentCondition;
+
+/**
+ * Comando MQTT diretto. `type` è opzionale perché le regole salvate prima della
+ * migrazione 005 non lo hanno: assente vale `mqtt`.
+ */
+export interface MqttAutomationAction {
+  type?: 'mqtt';
+  topic: string;
+  payload: string;
+  /** Attesa prima dell'invio (0 = subito). */
+  delayMs?: number;
+}
+
+/**
+ * Esecuzione di uno scenario salvato in `scenarios`: è il pulsante "one-touch"
+ * del pannello, eseguito dal motore anche a schermo spento. I comandi li
+ * traduce `server/services/commandEncoder.ts`, con gli stessi dialetti degli
+ * adapter del client.
+ */
+export interface ScenarioAutomationAction {
+  type: 'scenario';
+  scenarioId: string;
+  /** Attesa prima di iniziare lo scenario (0 = subito). */
+  delayMs?: number;
+}
+
+export type AutomationAction = MqttAutomationAction | ScenarioAutomationAction;
+
+/** Riga di `automations`: la forma delle colonne JSONB è validata dalle route. */
+export interface AutomationRow {
+  id: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  trigger_type: string;
+  trigger_config: unknown;
+  /** Primo gruppo di condizioni, in AND. */
+  conditions: unknown;
+  /** Altri gruppi di condizioni: AND dentro il gruppo, OR fra i gruppi. */
+  condition_groups: unknown;
+  actions: unknown;
+  last_triggered_at: Date | string | null;
+  execution_count: number;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+/** Riga di `automations` più l'esito dell'ultima esecuzione registrata. */
+export interface AutomationWithLastLogRow extends AutomationRow {
+  last_log_at: Date | string | null;
+  last_log_conditions_met: boolean | null;
+  last_log_execution_time_ms: number | null;
+  last_log_error: string | null;
+}
+
+/** Riga di `automation_logs`. */
+export interface AutomationLogRow {
+  id: string | number;
+  automation_id: string;
+  triggered_at: Date | string;
+  trigger_source: string;
+  conditions_met: boolean;
+  actions_executed: unknown;
+  execution_time_ms: number;
+  error_message: string | null;
+}
+
+/** Esito di un singolo comando pubblicato (o non pubblicato) sul broker. */
+export interface AutomationCommandOutcome {
+  /** Assenti quando il passo è stato scartato prima di avere un comando. */
+  topic?: string;
+  payload?: string;
+  /** Dispositivo riconosciuto dal topic di comando, quando la mappa lo conosce. */
+  deviceId?: string;
+  status: 'sent' | 'skipped' | 'failed';
+  error?: string;
+  durationMs: number;
+}
+
+/**
+ * Esito registrato per una azione della sequenza: un comando MQTT diretto
+ * (`commands` con una sola voce) oppure tutti i comandi di uno scenario.
+ */
+export interface AutomationActionOutcome {
+  type: 'mqtt' | 'scenario';
+  status: 'sent' | 'skipped' | 'failed';
+  commands: AutomationCommandOutcome[];
+  /** Presenti solo per le azioni di tipo scenario. */
+  scenarioId?: string;
+  scenarioLabel?: string;
+  error?: string;
+  durationMs: number;
+}
+
+/**
+ * Ultimo comando inviato a un dispositivo, per il badge nel pannello:
+ * risponde alla domanda "quale automazione ha comandato questo device?".
+ * Vive solo in memoria nel processo del motore. `at` è epoch in millisecondi.
+ */
+export interface DeviceAutomationActivity {
+  deviceId: string;
+  automationId: string;
+  automationName: string;
+  triggerSource: string;
+  scenarioId: string | null;
+  scenarioLabel: string | null;
+  topic: string;
+  payload: string;
+  at: number;
+}
+
+/**
+ * Automazioni viste dal motore: configurazione risolta da `resolveAutomation`
+ * (`server/services/automationEngine.ts`) e pronta per la valutazione.
+ */
+export interface ResolvedAutomation {
+  id: string;
+  name: string;
+  isActive: boolean;
+  triggerType: AutomationTriggerType;
+  /** `null` quando `trigger_config` non è utilizzabile: la regola resta visibile ma inerte. */
+  trigger: AutomationTriggerConfig | null;
+  /** Primo gruppo di condizioni, in AND. */
+  conditions: AutomationCondition[];
+  /** Altri gruppi: AND dentro il gruppo, OR fra i gruppi (e con `conditions`). */
+  conditionGroups: AutomationCondition[][];
+  actions: AutomationAction[];
+  /** Motivo dello scarto, per log e diagnostica. */
+  invalidReason: string | null;
+}
+
+/**
+ * Parametri del motore di automazioni che non hanno un default sensato:
+ * coordinate per alba/tramonto e topic di presenza.
+ */
+export interface AutomationConfig {
+  /** Latitudine in gradi decimali; `null` = regole solari disabilitate. */
+  latitude: number | null;
+  /** Longitudine in gradi decimali (est positiva). */
+  longitude: number | null;
+  /** Topic che veicola la presenza in casa; `null` = condizione `user_present` inerte. */
+  presenceTopic: string | null;
+}
+
 export interface SeedConfig {
   adminUsername: string;
   adminDisplayName: string;
@@ -218,5 +465,6 @@ export interface AuthConfig {
   pinPolicy: PinPolicy & { windowMs: number };
   loginPolicy: AttemptPolicy;
   mqtt: MqttEventsConfig;
+  automation: AutomationConfig;
   seed: SeedConfig;
 }

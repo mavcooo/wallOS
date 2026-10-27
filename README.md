@@ -737,6 +737,35 @@ mosquitto_pub -h 192.168.0.10 -p 1883 -t 'wallos/system/topology_changed' \
 
 ## 5. Kiosk, standby e PIN
 
+### Display a parete (`kiosk_displays`)
+
+I parametri hardware del pannello — timeout del dimmer, screensaver, alto
+contrasto, performance mode, orientamento, stanza iniziale, PIN sui device
+protetti — vivono in **PostgreSQL**, non nel `localStorage` del browser. Un
+tablet formattato, riavviato in incognito o sostituito si riallinea da solo, e
+l'amministratore li cambia da desktop.
+
+| Pezzo | Dove |
+| --- | --- |
+| Identità del pannello | `src/utils/kioskIdentity.ts` — `kiosk_<uuid>` al primo avvio, in `localStorage` **e** in un cookie decennale (`SameSite=Strict`, `Path=/`) |
+| Tabella | `kiosk_displays` (`server/migrations/006_kiosk_displays.sql`, replicata in `schema.sql`) |
+| API | `GET /api/kiosk` (admin), `GET /api/kiosk/:id` (idratazione + auto-registrazione), `PUT /api/kiosk/:id` (validazione Zod + publish MQTT) |
+| Idratazione | `src/hooks/useKioskBootstrap.ts` — applica i valori agli store prima del primo render utile |
+| Sync real-time | `src/hooks/useKioskSync.ts` su `wallos/system/kiosk/<id>/config_updated` (retained: sopravvive al riavvio del tablet) |
+| Amministrazione | Admin → **Display** (`src/components/admin/KioskManagerTab.tsx`) |
+
+`GET /api/kiosk/:id` **crea la riga** se l'id è nuovo (`Nuovo Display (<id>)`, valori
+di default) e riscrive `last_seen_at`: nessun 404 al primo boot, nemmeno in
+incognito. Il `PUT` salva e pubblica contestualmente la notifica MQTT, quindi il
+pannello applica il nuovo timeout o il contrasto entro un secondo, senza tocco né
+reload, mostrando un toast discreto. Nome e attivazione restano in mano
+all'amministratore: un pannello non può ribattezzarsi da solo, e il profilo
+`kiosk` può leggere e modificare **solo** il proprio display (`403` sugli altri).
+
+Misurato end-to-end su PostgreSQL + broker reali: auto-registrazione, `PUT` con
+notifica consegnata in **16 ms** (soglia del criterio: 1 s) e rilettura della
+configurazione salvata da una nuova richiesta, come dopo un riavvio.
+
 ### `useKioskDimmer`
 - timeout configurabile (default **2 min**) con countdown interno;
 - attività reale: `pointerdown`, `touchstart`, `keydown`, `wheel`, tab visibile;
@@ -1110,6 +1139,14 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
   `docker compose up` reale.
 - La UI di amministrazione non gestisce ancora `metadata` (discovery e stato
   iniziale): per adapter complessi si interviene con SQL o col seed.
+- Il motore di automazioni parla solo MQTT: senza `MQTT_HOST` (o
+  `MQTT_SERVER_URL`) il link del server resta disattivato, i trigger temporali
+  continuano a funzionare ma ogni azione viene registrata come non inviata.
+  È lo stato attuale di `.env.example`, che lascia il broker da configurare.
+- Le automazioni non hanno un editor di espressioni: condizioni e azioni sono
+  le tre forme previste (`time_range`, `device_state`, `user_present` e i
+  comandi MQTT). Operatori OR, scene o azioni su più device richiedono più
+  regole, o un'estensione dello schema JSONB.
 - L'editor dei passi non blocca l'eliminazione di un device citato da uno
   scenario: il passo resta ma viene ignorato a runtime finché non lo si corregge
   (manca una foreign key su JSONB).
@@ -1135,6 +1172,9 @@ Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL
 | --- | --- |
 | `001_initial_schema.sql` | Tabelle base: users, rooms, devices, scenarios con FK, indici e JSONB |
 | `002_add_camera_entity.sql` | Colonne stream/metadata camera nella tabella devices + tabella cameras dedicata |
+| `003_add_climate_schedules.sql` | Cronotermostato settimanale: `climate_schedules` e `climate_runtime_states` |
+| `003_telemetry_history.sql` | Storico telemetria: campioni grezzi, aggregati orari/giornalieri e `cleanup_telemetry_history()` |
+| `004_automations.sql` | Motore di automazioni: `automations` (trigger/conditions/actions JSONB) e `automation_logs` con retention rotativa |
 
 ### Script npm
 
@@ -1149,6 +1189,69 @@ Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL
 All'avvio del micro-servizio, il backend esegue automaticamente `migrate:up` prima di ascoltare le richieste HTTP. Se il database è già aggiornato o le migrazioni terminano con successo, il server parte regolarmente. In caso di errore DDL bloccante, il bootstrap si interrompe con `process.exit(1)` per prevenire incoerenze nello schema.
 
 Per ulteriori dettagli consulta `server/migrate.ts` e i file in `server/migrations/`.
+
+---
+
+## Motore di automazioni (trigger → condizioni → azioni)
+
+Le automazioni vivono nel **processo Node**, non nel pannello: un tablet in standby, spento o
+scolpito dalla rete non le interrompe. Si amministrano da **Admin → Automazioni** e si salvano in
+PostgreSQL (`automations`, `automation_logs`), ma la valutazione a caldo usa una cache in memoria.
+
+| Tipo di trigger | `trigger_config` | Quando scatta |
+| --- | --- | --- |
+| `mqtt_state` | `{ "topic": "stat/sensore/MOTION", "payloadKey": "occupancy", "expectedValue": true }` | Sul **cambio** del valore osservato (edge-triggered: un movimento che ripubblica `ON` non riaccende la luce ogni cinque secondi) |
+| `time_cron` | `{ "cron": "0 23 * * *" }` | Al minuto corrispondente dell'orologio locale del server |
+| `sun_event` | `{ "event": "sunset", "offsetMinutes": -15 }` | All'alba/tramonto calcolato dalle coordinate del `.env` |
+
+Condizioni (in AND; un dato mancante vale `false`): `time_range` (`23:00` → `06:00` scavalca la
+mezzanotte, estremo iniziale incluso e finale escluso), `device_state` (stato noto di un device) e
+`user_present` (presenza dal topic configurato). Azioni: comandi MQTT eseguiti in sequenza, con
+`delayMs` fra l'uno e l'altro e QoS 1.
+
+- **motore**: `server/services/automationEngine.ts` (cache, trigger, condizioni, azioni, log)
+- **cron e effemeridi**: `server/services/cron.ts` e `server/services/sun.ts`, senza dipendenze esterne
+- **link MQTT del server**: `server/mqttClient.ts` (sottoscrizioni riallineate a ogni riconnessione)
+- **API**: `GET/POST /api/automations`, `PUT|PATCH /api/automations/:id[/toggle]`, `POST /api/automations/:id/test`, `GET /api/automations/:id/logs`, `DELETE /api/automations/:id`
+
+Il percorso caldo di un trigger MQTT non fa nessuna query prima di pubblicare il comando: la cache
+si carica al boot e a ogni mutazione via API, i log si scrivono dopo. Il comando viene misurato in
+`automation_logs.execution_time_ms` insieme all'esito di ogni azione; una regola in errore non
+interrompe le altre.
+
+Configurazione (`.env`): `AUTOMATION_LATITUDE` e `AUTOMATION_LONGITUDE` per le regole solari (senza
+entrambe restano inerti e il pannello le segnala come non eseguibili) e `AUTOMATION_PRESENCE_TOPIC`
+per `user_present`. Comandi e topic sono **relativi** a `MQTT_BASE_TOPIC`, come i topic dei device.
+
+### Broker del motore: `MQTT_SERVER_URL`
+
+Il browser parla con il broker in WebSocket (`MQTT_HOST`/`MQTT_PORT`, es. `ws://…:9001/mqtt`); il
+motore invece ha bisogno del listener TCP. Va impostato **almeno uno** fra `MQTT_SERVER_URL`
+(`mqtt://…:1883`, ha la precedenza) e `MQTT_HOST` + `MQTT_SERVER_PORT`: senza nessuno dei due il
+server parte lo stesso ma resta in sola lettura e ogni comando fallisce con
+`Broker MQTT non disponibile` nel log dell'esecuzione, così il pannello dice subito perché la luce
+non si è accesa.
+
+```dotenv
+MQTT_SERVER_URL=mqtt://192.168.0.10:1883
+# oppure
+MQTT_HOST=192.168.0.10
+MQTT_SERVER_PORT=1883
+```
+
+Latenza misurata end-to-end su broker locale (sensore → broker → motore → comando → broker, 20
+trigger reali con PostgreSQL vero, comando `zigbee2mqtt/living/main/set`): **p95 0.9 ms** (mediana
+0.8 ms, massimo 1.2 ms), cioè due ordini di grandezza sotto la soglia di 200 ms. Il tempo che il
+motore dichiara in `automation_logs.execution_time_ms` comprende anche la scrittura del log e resta
+sotto i 15 ms.
+
+### Chi ha comandato un device
+
+`GET /api/automations/activity` restituisce l'ultimo comando per device con regola, scenario,
+trigger e istante: `DeviceCard` lo mostra come badge (icona ⚡) in basso a sinistra, così un cambio
+di stato arrivato dal motore non sembra un guasto. Il badge scade dopo due ore, perché oltre quella
+finestra il comando non spiega più lo stato attuale (una luce riaccesa a mano non deve dire
+"Buonanotte"); la cronologia completa resta in Admin → Automazioni → Storico.
 
 ---
 

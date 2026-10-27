@@ -106,6 +106,21 @@
     "wakeLockUnsupported": "WakeLock non supportato dal browser",
     "wakeLockError": "Errore WakeLock: {{error}}"
   },
+  "display": {
+    "title": "Questo display",
+    "description": "Nome e identificativo con cui questo pannello carica la propria configurazione da PostgreSQL.",
+    "name": "Nome del display",
+    "namePlaceholder": "Nome del pannello",
+    "save": "Salva",
+    "saved": "Nome aggiornato",
+    "saveError": "Impossibile aggiornare il nome",
+    "id": "Identificativo kiosk",
+    "idHint": "Generato al primo avvio e conservato in un cookie decennale. Un nuovo id si applica al prossimo avvio, quando il pannello adotta la configurazione di quel display.",
+    "applyId": "Usa questo id",
+    "invalidId": "Id non valido: lettere, cifre, punto, trattino, due punti o underscore (max 64).",
+    "idApplied": "Identificativo aggiornato",
+    "idAppliedHint": "Il pannello carica {{id}} al prossimo avvio."
+  },
   "pin": {
     "title": "PIN pannello",
     "description": "Protegge carichi, reset e scenari critici",

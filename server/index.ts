@@ -71,6 +71,7 @@ const climateScheduler = createClimateScheduler({
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'arresto del servizio auth');
   climateScheduler.stop();
+  await built.automations.stop();
   await climatePublisher.close();
   await app.close();
   process.exit(0);
@@ -85,6 +86,10 @@ try {
     `auth pronta · http://${config.host}:${config.port} · db ${config.databaseUrl}`,
   );
   climateScheduler.start();
+  // Motore di automazioni: cache dal database, sottoscrizioni MQTT e tick al
+  // minuto. Vive qui e non in `buildApp` perché nei test l'istanza Fastify deve
+  // restare senza timer attivi e senza socket verso il broker.
+  built.automations.start();
 } catch (error) {
   app.log.error(error);
   process.exit(1);

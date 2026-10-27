@@ -187,6 +187,10 @@
     "offlineSince": "Offline for {{minutes}} min",
     "staleSince": "No reading for {{minutes}} min"
   },
+  "automation": {
+    "hint": "Commanded by automation “{{name}}” · {{when}}",
+    "scenarioHint": "Commanded by automation “{{name}}” via scenario “{{scenario}}” · {{when}}"
+  },
   "live": {
     "underLoad": "Under load",
     "standby": "Standby"
