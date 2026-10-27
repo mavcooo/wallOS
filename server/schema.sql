@@ -265,3 +265,14 @@ CREATE TABLE IF NOT EXISTS kiosk_displays (
 
 CREATE INDEX IF NOT EXISTS idx_kiosk_displays_active ON kiosk_displays (is_active);
 CREATE INDEX IF NOT EXISTS idx_kiosk_displays_room ON kiosk_displays (default_room_id);
+
+-- ── Ledger delle migrazioni ─────────────────────────────────────────────────
+-- Non è schema applicativo: è il registro di `server/migrate.ts`, che lo crea
+-- da sé (stessa DDL) prima di applicare le migrazioni pendenti. La riga
+-- significa "questo file è già stato eseguito": senza, ogni riavvio
+-- rieseguirebbe tutte le DDL della cartella `migrations/`.
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  id         SERIAL PRIMARY KEY,
+  version    VARCHAR(255) NOT NULL UNIQUE,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

@@ -1051,6 +1051,11 @@ npm run test:all       # frontend + server
   Dockerfile).
 - `npm test` → 49 file, 306 test frontend (jsdom); 1 benchmark è saltato di
   default.
+- `server/migrate.ts` → 17 test: estrazione delle sezioni `UP`/`DOWN`, ledger che impedisce
+  la riesecuzione su due chiamate consecutive, transazione unica (una migrazione
+  fallita non lascia DDL né righe di ledger), rollback reale con rimozione dal
+  ledger, errore esplicito su `DOWN` mancante o vuoto, e concorrenza (due
+  sessioni che applicano/annullano insieme, con advisory lock e `LOCK_TIMEOUT`).
 - `npm run test:server` → 43 test Fastify + PGlite.
 - `npm run test:coverage` → adapters: 96.7% statement, 99.2% righe, 100%
   funzioni, 82.4% rami (sopra le soglie).
@@ -1165,8 +1170,8 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 
 ## Migrazioni versionate del database
 
-Il servizio usa ora **node-pg-migrate** per migrazioni PostgreSQL versionate e sequenziali.
-Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL con blocchi `UP` e `DOWN`:
+Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL con blocchi `UP` e `DOWN`,
+applicati dal runner di `server/migrate.ts`:
 
 | File | Descrizione |
 | --- | --- |
@@ -1175,13 +1180,32 @@ Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL
 | `003_add_climate_schedules.sql` | Cronotermostato settimanale: `climate_schedules` e `climate_runtime_states` |
 | `003_telemetry_history.sql` | Storico telemetria: campioni grezzi, aggregati orari/giornalieri e `cleanup_telemetry_history()` |
 | `004_automations.sql` | Motore di automazioni: `automations` (trigger/conditions/actions JSONB) e `automation_logs` con retention rotativa |
+| `005_automation_condition_groups.sql` | Gruppi di condizioni in OR: `condition_groups` JSONB sulla regola |
+| `006_kiosk_displays.sql` | Profili dei display a parete (`kiosk_displays`): preferenze hardware e di layout sincronizzate dal server |
+
+### Ledger, transazione e lock
+
+Il runner tiene il conto di ciò che ha già applicato in `schema_migrations` (una riga per file, con
+`applied_at`): ogni migrazione gira **una volta sola**, quindi un riavvio del servizio non riesegue DDL
+inutili e non richiede che i file siano idempotenti. La riga nel ledger entra nella **stessa
+transazione** della sua DDL — o entrambe o nessuna — e l'intero ciclo vive in una sola transazione
+protetta da `pg_advisory_xact_lock(hashtext('wallos_migrations'))`: più repliche avviate insieme si
+serializzano invece di contendersi lo schema, e chi arriva secondo trova il ledger già aggiornato
+(se il lock resta occupato oltre 30 s il processo fallisce con un errore `LOCK_TIMEOUT`, senza restare
+appeso in fase di bootstrap).
+
+`migrateDown` esegue davvero la sezione `DOWN` dell'ultima migrazione **registrata nel ledger** e
+cancella la sua riga, sempre dentro la stessa transazione e lo stesso lock. Se il ledger è vuoto, se
+il file non esiste più o se la sezione `DOWN` manca (o contiene solo commenti, come nel template di
+`migrate:create`), l'operazione **fallisce con un errore esplicito**: mai un `success: true` senza
+modifiche.
 
 ### Script npm
 
 | Comando | Descrizione |
 | --- | --- |
-| `npm run migrate:up` | Applica tutte le migrazioni pendenti in ordine cronologico |
-| `npm run migrate:down` | Rollback dell'ultima migrazione applicata |
+| `npm run migrate:up` | Applica le migrazioni non ancora registrate nel ledger, in ordine di nome |
+| `npm run migrate:down` | Rollback reale dell'ultima migrazione applicata (sezione `DOWN` + riga dal ledger) |
 | `npm run migrate:create <nome>` | Crea un nuovo file di migrazione timestamped nella cartella `server/migrations/` |
 
 ### Bootstrap all'avvio
