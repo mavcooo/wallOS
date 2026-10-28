@@ -203,6 +203,7 @@ describe('useMqtt · Home Assistant Discovery', () => {
         'zigbee2mqtt/living/main',
         'zigbee2mqtt/living/main/availability',
       ]),
+      expect.any(Function),
     );
     unmount();
   });
@@ -225,7 +226,10 @@ describe('useMqtt · Home Assistant Discovery', () => {
       stop?.();
     });
 
-    expect(mqtt.client.unsubscribe).toHaveBeenCalledWith(['tele/#', 'shellies/#']);
+    expect(mqtt.client.unsubscribe).toHaveBeenCalledWith(
+      ['tele/#', 'shellies/#'],
+      expect.any(Function),
+    );
     unmount();
   });
 
@@ -248,7 +252,10 @@ describe('useMqtt · Home Assistant Discovery', () => {
     act(() => {
       stop?.();
     });
-    expect(mqtt.client.unsubscribe).toHaveBeenCalledWith(['casa/tele/#']);
+    expect(mqtt.client.unsubscribe).toHaveBeenCalledWith(
+      ['casa/tele/#'],
+      expect.any(Function),
+    );
     unmount();
   });
 

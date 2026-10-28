@@ -370,6 +370,7 @@ export function useMqtt(
       queueRuntimeCleanup = null;
     }
 
+    /** Chiusura forzata: la socket è morta o sta per essere sostituita. */
     function closeClient() {
       detachQueueRuntime();
       clientRef.current = null;
@@ -377,6 +378,47 @@ export function useMqtt(
       client.removeAllListeners();
       client.end(true);
       client = null;
+    }
+
+    /**
+     * Chiusura ordinata allo smontaggio dell'hook.
+     *
+     * `end(true)` scarterebbe la coda in uscita, quindi l'UNSUBSCRIBE non
+     * partirebbe mai: si annullano prima tutti i topic tracciati, poi si chiude
+     * con `end()` (graceful) così il pacchetto arriva al broker. Con
+     * `cleanSession = false` è l'unico modo per non lasciare sul broker una
+     * sessione che continua a inoltrare payload a un client morto.
+     */
+    function teardownClient() {
+      detachQueueRuntime();
+      const instance = client;
+      client = null;
+      clientRef.current = null;
+
+      const topics = [...subscribedTopics];
+      subscribedTopics.clear();
+      if (!instance) return;
+
+      if (topics.length > 0) {
+        try {
+          instance.unsubscribe(topics, (error) => {
+            if (error) {
+              logRaw('system', 'unsubscribe', `Errore alla chiusura: ${error.message}`);
+            }
+          });
+          logRaw('system', 'unsubscribe', `${topics.length} topic rimossi allo smontaggio`);
+        } catch (error) {
+          // Socket già chiusa: non c'è nulla da annullare sul broker.
+          logRaw(
+            'system',
+            'unsubscribe',
+            `Chiusura senza UNSUBSCRIBE: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      instance.removeAllListeners();
+      instance.end();
     }
 
     /**
@@ -460,21 +502,35 @@ export function useMqtt(
 
       const stale = [...subscribedTopics].filter((topic) => !desired.has(topic));
       if (stale.length > 0) {
+        // Il Set viene pulito subito, così un topic tornato desiderato mentre
+        // l'UNSUBSCRIBE è in volo può essere risottoscritto. Se il broker
+        // rifiuta, i topic tornano tracciati e il prossimo reconcile riprova.
         for (const topic of stale) subscribedTopics.delete(topic);
-        instance.unsubscribe(stale);
-        logRaw('system', 'unsubscribe', `${stale.length} topic rimossi`);
+        instance.unsubscribe(stale, (error) => {
+          if (error) {
+            for (const topic of stale) subscribedTopics.add(topic);
+            logRaw('system', 'unsubscribe', `Errore: ${error.message}`);
+            return;
+          }
+          logRaw('system', 'unsubscribe', `${stale.length} topic rimossi`);
+        });
       }
 
       const missing = [...desired].filter((topic) => !subscribedTopics.has(topic));
       if (missing.length === 0) return;
+      // Marcati prima del SUBACK per non duplicare la richiesta se `subscribeAll`
+      // viene richiamato mentre il pacchetto è ancora in volo.
       for (const topic of missing) subscribedTopics.add(topic);
 
       instance.subscribe(missing, { qos: 0 }, (error) => {
-        logRaw(
-          'system',
-          'subscribe',
-          error ? `Errore: ${error.message}` : `${missing.length} topic attivi`,
-        );
+        if (error) {
+          // SUBACK rifiutato o timeout: il topic NON è attivo sul broker, va
+          // rimosso dal Set o resterebbe "fantasma" per tutta la sessione.
+          for (const topic of missing) subscribedTopics.delete(topic);
+          logRaw('system', 'subscribe', `Errore: ${error.message}`);
+          return;
+        }
+        logRaw('system', 'subscribe', `${missing.length} topic attivi`);
       });
     }
 
@@ -897,7 +953,7 @@ export function useMqtt(
       window.removeEventListener('offline', handleBrowserOffline);
       window.removeEventListener('online', handleBrowserOnline);
       if (brokerAlertId) useToastStore.getState().acknowledgeCritical(brokerAlertId);
-      closeClient();
+      teardownClient();
     };
   }, [key, queryClient]);
 
@@ -935,14 +991,20 @@ export function useMqtt(
 
     const brokerFilters = [...new Set(entries.map((entry) => entry.broker))];
     const client = clientRef.current;
-    if (client?.connected && brokerFilters.length > 0) {
-      for (const filter of brokerFilters) subscribedTopicsRef.current.add(filter);
-      client.subscribe(brokerFilters, { qos: 0 }, (error) => {
-        logRaw(
-          'system',
-          'sniffer',
-          error ? `Errore: ${error.message}` : `${brokerFilters.length} filtri in ascolto`,
-        );
+    // Un filtro già attivo (per esempio un topic di device) non va richiesto
+    // una seconda volta al broker.
+    const pending = brokerFilters.filter(
+      (filter) => !subscribedTopicsRef.current.has(filter),
+    );
+    if (client?.connected && pending.length > 0) {
+      for (const filter of pending) subscribedTopicsRef.current.add(filter);
+      client.subscribe(pending, { qos: 0 }, (error) => {
+        if (error) {
+          for (const filter of pending) subscribedTopicsRef.current.delete(filter);
+          logRaw('system', 'sniffer', `Errore: ${error.message}`);
+          return;
+        }
+        logRaw('system', 'sniffer', `${pending.length} filtri in ascolto`);
       });
     }
 
@@ -972,8 +1034,14 @@ export function useMqtt(
 
       const current = clientRef.current;
       if (current?.connected && stale.length > 0) {
-        current.unsubscribe(stale);
-        logRaw('system', 'sniffer', `${stale.length} filtri rimossi`);
+        current.unsubscribe(stale, (error) => {
+          if (error) {
+            for (const filter of stale) subscribedTopicsRef.current.add(filter);
+            logRaw('system', 'sniffer', `Errore: ${error.message}`);
+            return;
+          }
+          logRaw('system', 'sniffer', `${stale.length} filtri rimossi`);
+        });
       }
     };
   }, []);
