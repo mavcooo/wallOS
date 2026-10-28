@@ -146,13 +146,51 @@ export interface NewScenario {
   displayOrder: number;
 }
 
-/** Campi modificabili di una stanza (l'id è la chiave, non si riscrive). */
-export interface RoomFields {
-  name: string;
-  shortLabel: string | null;
-  icon: string;
-  displayOrder: number;
+/**
+ * Campi modificabili di una stanza (l'id è la chiave, non si riscrive).
+ * Tutti opzionali: il PATCH è parziale e i campi assenti restano invariati.
+ */
+export interface RoomUpdate {
+  name?: string;
+  shortLabel?: string | null;
+  icon?: string;
+  displayOrder?: number;
 }
+
+/** Strategia sui dispositivi collegati quando si elimina una stanza. */
+export type RoomOrphanStrategy = 'restrict' | 'unassign' | 'cascade';
+
+/** Stanza di raccolta dei dispositivi senza stanza (seed: “Non assegnati”). */
+export const UNASSIGNED_ROOM_ID = 'unassigned';
+
+/**
+ * Esito della cancellazione di una stanza in transazione.
+ * `not_empty` e `unassigned_room_missing` sono conflitti: la transazione fa
+ * ROLLBACK e il database resta esattamente com'era.
+ */
+export type RoomDeletionResult =
+  | { status: 'deleted'; devices: number }
+  | { status: 'not_found' }
+  | { status: 'not_empty'; devices: number }
+  | { status: 'unassigned_room_missing'; devices: number };
+
+/** Colonna fisica di una chiave API; `json` = parametro castato a jsonb. */
+interface ColumnSpec {
+  column: string;
+  json?: boolean;
+}
+
+/**
+ * Whitelist delle colonne scrivibili via PATCH: l'unica traduzione ammessa tra
+ * payload e SQL. `buildUpdateSet` itera su questa mappa e **mai** sulle chiavi
+ * del body, quindi un campo non censito non può finire nel testo della query.
+ */
+const ROOM_UPDATE_COLUMNS = {
+  name: { column: 'name' },
+  shortLabel: { column: 'short_label' },
+  icon: { column: 'icon' },
+  displayOrder: { column: 'display_order' },
+} as const satisfies Record<keyof RoomUpdate, ColumnSpec>;
 
 /** Campi modificabili di un device; `fieldMap`/`metadata` sono opzionali. */
 export interface DeviceFields {
@@ -173,6 +211,79 @@ export interface DeviceFields {
   displayOrder: number;
   fieldMap?: Record<string, string> | null;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Campi aggiornabili di un device via PATCH parziale: gli stessi che espone il
+ * form admin. Un campo assente non viene toccato (niente reset a NULL).
+ */
+export interface DeviceUpdate {
+  roomId?: string;
+  name?: string;
+  type?: NewDevice['type'];
+  adapter?: string;
+  model?: string | null;
+  stateTopic?: string;
+  commandTopic?: string | null;
+  availabilityTopic?: string | null;
+  favorite?: boolean;
+  protected?: boolean;
+  displayOrder?: number;
+  fieldMap?: Record<string, string> | null;
+  metadata?: Record<string, unknown>;
+  roomPinPosition?: DevicePinPosition;
+  streamUrl?: string | null;
+  snapshotUrl?: string | null;
+  streamProtocol?: 'webrtc' | 'hls' | 'mjpeg' | 'auto' | null;
+  aspectRatio?: '16:9' | '4:3' | null;
+}
+
+/** Whitelist chiave API → colonna SQL per `PATCH /api/devices/:id`. */
+const DEVICE_UPDATE_COLUMNS = {
+  roomId: { column: 'room_id' },
+  name: { column: 'name' },
+  type: { column: 'type' },
+  adapter: { column: 'adapter' },
+  model: { column: 'model' },
+  stateTopic: { column: 'state_topic' },
+  commandTopic: { column: 'command_topic' },
+  availabilityTopic: { column: 'availability_topic' },
+  favorite: { column: 'favorite' },
+  protected: { column: 'protected' },
+  displayOrder: { column: 'display_order' },
+  fieldMap: { column: 'field_map', json: true },
+  metadata: { column: 'metadata', json: true },
+  roomPinPosition: { column: 'room_pin_position', json: true },
+  streamUrl: { column: 'stream_url' },
+  snapshotUrl: { column: 'snapshot_url' },
+  streamProtocol: { column: 'stream_protocol' },
+  aspectRatio: { column: 'aspect_ratio' },
+} as const satisfies Record<keyof DeviceUpdate, ColumnSpec>;
+
+/**
+ * Costruisce la clausola SET di un UPDATE parziale.
+ *
+ * L'iterazione è sulla whitelist, non sul payload: le chiavi che arrivano dal
+ * client servono solo a leggere un valore, mai a comporre SQL. I nomi colonna
+ * provengono da letterali del modulo e i valori sono sempre parametri
+ * posizionali ($1, $2, …).
+ */
+function buildUpdateSet<K extends string>(
+  whitelist: Readonly<Record<K, ColumnSpec>>,
+  values: Partial<Record<K, unknown>>,
+): { assignments: string[]; params: unknown[] } {
+  const assignments: string[] = [];
+  const params: unknown[] = [];
+
+  for (const key of Object.keys(whitelist) as K[]) {
+    const value = values[key];
+    if (value === undefined) continue;
+    const spec = whitelist[key];
+    params.push(spec.json ? JSON.stringify(value) : value);
+    assignments.push(`"${spec.column}" = $${params.length}${spec.json ? '::jsonb' : ''}`);
+  }
+
+  return { assignments, params };
 }
 
 export interface ScenarioFields {
@@ -1235,17 +1346,84 @@ export class Database {
     );
   }
 
-  async updateRoom(id: string, room: RoomFields): Promise<void> {
-    await this.client.query(
+  /**
+   * Aggiornamento parziale: tocca solo le colonne presenti nella whitelist e
+   * valorizzate dal payload. Restituisce `false` se la stanza non esiste più
+   * (cancellata da un altro pannello tra la lettura e la scrittura).
+   */
+  async updateRoom(id: string, patch: RoomUpdate): Promise<boolean> {
+    const { assignments, params } = buildUpdateSet(ROOM_UPDATE_COLUMNS, patch);
+    if (assignments.length === 0) return true;
+
+    const { rowCount } = await this.client.query(
       `UPDATE rooms
-       SET name = $2, short_label = $3, icon = $4, display_order = $5, updated_at = now()
-       WHERE id = $1`,
-      [id, room.name, room.shortLabel, room.icon, room.displayOrder],
+       SET ${assignments.join(', ')}, updated_at = now()
+       WHERE id = $${params.length + 1}`,
+      [...params, id],
     );
+    return rowCount > 0;
   }
 
-  async deleteRoom(id: string): Promise<void> {
-    await this.client.query('DELETE FROM rooms WHERE id = $1', [id]);
+  /**
+   * Cancellazione di una stanza in **una sola transazione**: lock della riga,
+   * conteggio dei dispositivi, azione scelta dal chiamante e DELETE finale.
+   *
+   * - `restrict` (default): con dispositivi collegati non tocca nulla e
+   *   restituisce `not_empty`, così la route risponde 409
+   * - `cascade`: elimina prima i dispositivi della stanza
+   * - `unassign`: li sposta nella stanza `unassigned` (il vincolo
+   *   `devices.room_id NOT NULL` non permette di azzerare la colonna)
+   *
+   * Qualsiasi errore fa scattare il ROLLBACK in `withTransaction`: il database
+   * non resta mai con dispositivi orfani o con la stanza a metà cancellata.
+   */
+  async deleteRoom(
+    id: string,
+    strategy: RoomOrphanStrategy = 'restrict',
+  ): Promise<RoomDeletionResult> {
+    return this.withTransaction<RoomDeletionResult>(async (client) => {
+      // Il lock impedisce a un INSERT concorrente di aggiungere un dispositivo
+      // dopo il conteggio ma prima del DELETE della stanza.
+      const locked = await client.query<{ id: string }>(
+        'SELECT id FROM rooms WHERE id = $1 FOR UPDATE',
+        [id],
+      );
+      // `rows.length`, non `rowCount`: l'adattatore di test (PGlite) riporta
+      // `affectedRows` anche per le SELECT, qui sempre 0.
+      if (locked.rows.length === 0) return { status: 'not_found' };
+
+      const counted = await client.query<{ count: number | string }>(
+        'SELECT count(*)::int AS count FROM devices WHERE room_id = $1',
+        [id],
+      );
+      const devices = Number(counted.rows[0]?.count ?? 0);
+
+      if (devices > 0) {
+        if (strategy === 'restrict') return { status: 'not_empty', devices };
+
+        if (strategy === 'unassign') {
+          // `id <> $2` protegge il caso limite: eliminare proprio la stanza di
+          // raccolta non può spostarne i dispositivi dentro se stessa.
+          const target = await client.query(
+            'SELECT 1 FROM rooms WHERE id = $1 AND id <> $2',
+            [UNASSIGNED_ROOM_ID, id],
+          );
+          if (target.rows.length === 0) {
+            return { status: 'unassigned_room_missing', devices };
+          }
+
+          await client.query(
+            'UPDATE devices SET room_id = $2, updated_at = now() WHERE room_id = $1',
+            [id, UNASSIGNED_ROOM_ID],
+          );
+        } else {
+          await client.query('DELETE FROM devices WHERE room_id = $1', [id]);
+        }
+      }
+
+      await client.query('DELETE FROM rooms WHERE id = $1', [id]);
+      return { status: 'deleted', devices };
+    });
   }
 
   async createDevice(device: NewDevice): Promise<void> {
@@ -1282,45 +1460,23 @@ export class Database {
     );
   }
 
-  async updateDevice(id: string, device: DeviceFields): Promise<void> {
-    const hasFieldMap = device.fieldMap !== undefined;
-    const hasMetadata = device.metadata !== undefined;
-    await this.client.query(
-      `UPDATE devices SET
-         room_id = $2, name = $3, type = $4, adapter = $5, model = $6,
-         state_topic = $7, command_topic = $8, availability_topic = $9,
-         favorite = $10, protected = $11, display_order = $12,
-         field_map = CASE WHEN $13 THEN $14::jsonb ELSE field_map END,
-         stream_url = $15, snapshot_url = $16, stream_protocol = $17,
-         aspect_ratio = $18,
-         metadata = CASE WHEN $19 THEN $20::jsonb ELSE metadata END,
-         updated_at = now()
-       WHERE id = $1`,
-      [
-        id,
-        device.roomId,
-        device.name,
-        device.type,
-        device.adapter,
-        device.model,
-        device.stateTopic,
-        device.commandTopic,
-        device.availabilityTopic,
-        device.favorite,
-        device.protected,
-        device.displayOrder,
-        hasFieldMap,
-        device.fieldMap === undefined || device.fieldMap === null
-          ? null
-          : JSON.stringify(device.fieldMap),
-        device.streamUrl,
-        device.snapshotUrl,
-        device.streamProtocol,
-        device.aspectRatio,
-        hasMetadata,
-        device.metadata === undefined ? null : JSON.stringify(device.metadata),
-      ],
+  /**
+   * Aggiornamento parziale di un dispositivo: la clausola SET nasce dalla
+   * whitelist, i valori restano parametri posizionali. I campi assenti non
+   * vengono riscritti (né azzerati), così la modifica di un nome non cancella
+   * `metadata`, `fieldMap` o i campi camera impostati prima.
+   */
+  async updateDevice(id: string, patch: DeviceUpdate): Promise<boolean> {
+    const { assignments, params } = buildUpdateSet(DEVICE_UPDATE_COLUMNS, patch);
+    if (assignments.length === 0) return true;
+
+    const { rowCount } = await this.client.query(
+      `UPDATE devices
+       SET ${assignments.join(', ')}, updated_at = now()
+       WHERE id = $${params.length + 1}`,
+      [...params, id],
     );
+    return rowCount > 0;
   }
 
   async deleteDevice(id: string): Promise<void> {

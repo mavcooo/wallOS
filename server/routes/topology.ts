@@ -1,6 +1,16 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
-import { normalizeGridLayout, normalizePinPosition, type Database, type DeviceFields } from '../db.js';
+import {
+  UNASSIGNED_ROOM_ID,
+  normalizeGridLayout,
+  normalizePinPosition,
+  type Database,
+  type DeviceFields,
+  type DeviceUpdate,
+  type RoomOrphanStrategy,
+  type RoomUpdate,
+} from '../db.js';
 import { HttpError, asRecord, readBoolean, readString } from '../http.js';
 import {
   topologyEventName,
@@ -112,6 +122,141 @@ const ASPECT_RATIOS = ['16:9', '4:3'] as const;
 const ADAPTERS = ['zigbee2mqtt', 'shelly', 'tasmota', 'custom-json', 'ha-discovery'] as const;
 const CLIMATE_MODES = ['off', 'heat', 'cool', 'auto', 'fan_only', 'dry'] as const;
 const FAN_SPEEDS = ['auto', 'low', 'medium', 'high'] as const;
+
+// ── Schemi PATCH (validazione rigorosa del payload) ────────────────────────
+//
+// I PATCH sono parziali: ogni campo è opzionale e quelli assenti restano
+// invariati. `.strict()` è la difesa contro l'over-posting: una chiave non
+// dichiarata (`role`, `malicious`, …) fa fallire il parse con 400 invece di
+// essere ignorata o, peggio, di raggiungere il database.
+
+const fieldMapSchema = z
+  .record(z.string(), z.string().trim().min(1).max(256))
+  .refine((map) => Object.keys(map).length <= 64, {
+    message: 'fieldMap ha troppi campi (massimo 64)',
+  });
+
+const metadataSchema = z.record(z.string(), z.unknown()).refine(
+  (value) => JSON.stringify(value).length <= 8_192,
+  { message: 'metadata supera gli 8 kB' },
+);
+
+const pinSchema = z
+  .object({
+    x: z.number().min(0).max(100),
+    y: z.number().min(0).max(100),
+  })
+  .strict();
+
+const streamUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_024)
+  .regex(/^(https?|webrtc):\/\/[^\s]+$/i, 'Usa un URL http(s) o webrtc://');
+
+const snapshotUrlSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(1_024)
+  .regex(/^https?:\/\/[^\s]+$/i, 'Usa un URL http(s)');
+
+/** `PATCH /api/devices/:id`: stessi campi del form admin, tutti opzionali. */
+export const UpdateDeviceSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    roomId: z.string().trim().min(1).max(64).optional(),
+    type: z.enum(DEVICE_TYPES).optional(),
+    adapter: z.enum(ADAPTERS).optional(),
+    model: z.string().trim().min(1).max(80).nullable().optional(),
+    stateTopic: z.string().trim().min(1).max(512).optional(),
+    commandTopic: z.string().trim().min(1).max(512).nullable().optional(),
+    availabilityTopic: z.string().trim().min(1).max(512).nullable().optional(),
+    favorite: z.boolean().optional(),
+    protected: z.boolean().optional(),
+    displayOrder: z.number().int().min(0).max(9_999).optional(),
+    fieldMap: fieldMapSchema.nullable().optional(),
+    metadata: metadataSchema.optional(),
+    roomPinPosition: pinSchema.optional(),
+    streamUrl: streamUrlSchema.nullable().optional(),
+    snapshotUrl: snapshotUrlSchema.nullable().optional(),
+    streamProtocol: z.enum(CAMERA_PROTOCOLS).nullable().optional(),
+    aspectRatio: z.enum(ASPECT_RATIOS).nullable().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    // Una telecamera senza endpoint non è configurabile: il campo resta
+    // obbligatorio quando il tipo viene dichiarato nel payload.
+    if (value.type === 'camera' && value.streamUrl === null) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['streamUrl'],
+        message: 'L’URL del flusso non può essere nullo per una telecamera',
+      });
+    }
+  });
+
+/** `PATCH /api/rooms/:id`: i campi che il form stanza può davvero scrivere. */
+export const UpdateRoomSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80).optional(),
+    shortLabel: z.string().trim().min(1).max(24).nullable().optional(),
+    icon: z.string().trim().min(1).max(40).optional(),
+    displayOrder: z.number().int().min(0).max(9_999).optional(),
+  })
+  .strict();
+
+/** Strategie ammesse per `DELETE /api/rooms/:id?orphanStrategy=…`. */
+const ORPHAN_STRATEGIES = ['restrict', 'unassign', 'cascade'] as const;
+const orphanStrategySchema = z.enum(ORPHAN_STRATEGIES);
+
+/**
+ * Valida il body con lo schema dato e lo traduce in `HttpError` 400 con
+ * l'elenco completo delle issue di Zod (mai un messaggio generico).
+ */
+function parsePatch<T>(schema: z.ZodType<T>, body: unknown, label: string): T {
+  const parsed = schema.safeParse(asRecord(body));
+  if (!parsed.success) {
+    const issues = parsed.error.issues.map((issue) => ({
+      path: issue.path.join('.') || 'body',
+      code: issue.code,
+      message: issue.message,
+    }));
+    const first = issues[0];
+    throw new HttpError(
+      400,
+      'INVALID_BODY',
+      `${label}: ${first?.message ?? 'payload non valido'}`,
+      { field: first?.path ?? 'body', issues },
+    );
+  }
+
+  // Un PATCH senza campi non è un no-op silenzioso: il client ha sbagliato.
+  if (Object.keys(parsed.data as object).length === 0) {
+    throw new HttpError(400, 'INVALID_BODY', `${label}: nessun campo da aggiornare`, {
+      field: 'body',
+    });
+  }
+
+  return parsed.data;
+}
+
+/** `?orphanStrategy=` assente = `restrict` (409 se restano dispositivi). */
+function readOrphanStrategy(query: unknown): RoomOrphanStrategy {
+  const raw = asRecord(query).orphanStrategy;
+  if (raw === undefined) return 'restrict';
+  const parsed = orphanStrategySchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      'INVALID_ORPHAN_STRATEGY',
+      `orphanStrategy deve essere uno di: ${ORPHAN_STRATEGIES.join(', ')}`,
+      { field: 'orphanStrategy' },
+    );
+  }
+  return parsed.data;
+}
 
 function slugify(value: string): string {
   return value
@@ -622,40 +767,53 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
   app.patch('/api/rooms/:id', { preHandler: adminOnly }, async (request, reply) => {
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
+    // 404 prima della validazione: un id inesistente resta "non trovato"
+    // anche con un body vuoto o malformato.
     const existing = await roomOr404(deps.db, id);
-    const input = roomInput(asRecord(request.body));
-    await deps.db.updateRoom(id, {
-      name: input.name,
-      shortLabel: input.shortLabel,
-      icon: input.icon,
-      displayOrder: input.displayOrder,
-    });
-    // Solo l'ordine cambia → riordino; il resto è un aggiornamento normale.
-    announce(
-      request,
-      deps,
-      'room',
-      input.displayOrder !== existing.display_order ? 'reordered' : 'updated',
-      id,
-    );
+    const patch: RoomUpdate = parsePatch(UpdateRoomSchema, request.body, 'Stanza non valida');
+
+    await deps.db.updateRoom(id, patch);
+    // Solo un ordine diverso è un riordino; il resto è un aggiornamento.
+    const reordered =
+      patch.displayOrder !== undefined && patch.displayOrder !== existing.display_order;
+    announce(request, deps, 'room', reordered ? 'reordered' : 'updated', id);
     return reply.send({ room: toRoom(await roomOr404(deps.db, id)) });
   });
 
   app.delete('/api/rooms/:id', { preHandler: adminOnly }, async (request, reply) => {
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
+    const strategy = readOrphanStrategy(request.query);
     await roomOr404(deps.db, id);
-    const devices = await deps.db.countDevicesInRoom(id);
-    if (devices > 0) {
-      throw new HttpError(
-        409,
-        'ROOM_NOT_EMPTY',
-        `La stanza contiene ${devices} dispositivi: spostali o eliminali prima`,
-      );
+
+    // Lock, conteggio, spostamento/cancellazione dei dispositivi e DELETE della
+    // stanza vivono in un'unica transazione: o passano tutti o nessuno.
+    const outcome = await deps.db.deleteRoom(id, strategy);
+
+    switch (outcome.status) {
+      case 'not_found':
+        // Cancellata da un altro pannello tra la lettura e il lock.
+        throw new HttpError(404, 'ROOM_NOT_FOUND', 'Stanza non trovata');
+      case 'not_empty':
+        throw new HttpError(
+          409,
+          'ROOM_NOT_EMPTY',
+          `La stanza contiene ${outcome.devices} dispositivi: usa ?orphanStrategy=unassign|cascade oppure spostali prima`,
+          { devices: outcome.devices },
+        );
+      case 'unassigned_room_missing':
+        throw new HttpError(
+          409,
+          'UNASSIGNED_ROOM_MISSING',
+          `Impossibile spostare ${outcome.devices} dispositivi: la stanza "${UNASSIGNED_ROOM_ID}" non esiste`,
+          { devices: outcome.devices },
+        );
+      case 'deleted':
+        // Un solo evento: il client invalida l'intera topologia (stanze,
+        // dispositivi e planimetria) e i device a cascata spariscono con lei.
+        announce(request, deps, 'room', 'deleted', id);
+        return reply.code(204).send();
     }
-    await deps.db.deleteRoom(id);
-    announce(request, deps, 'room', 'deleted', id);
-    return reply.code(204).send();
   });
 
   app.post('/api/devices', { preHandler: adminOnly }, async (request, reply) => {
@@ -684,21 +842,25 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
     const existing = await deviceOr404(deps.db, id);
-    const input = deviceInput(asRecord(request.body));
-    if (!(await deps.db.findRoomById(input.roomId))) {
+    const patch: DeviceUpdate = parsePatch(
+      UpdateDeviceSchema,
+      request.body,
+      'Dispositivo non valido',
+    );
+
+    // Solo se il payload sposta davvero il device si verifica la destinazione:
+    // un PATCH che tocca solo il nome non deve fallire per una stanza non
+    // citata nella richiesta.
+    if (patch.roomId !== undefined && !(await deps.db.findRoomById(patch.roomId))) {
       throw new HttpError(400, 'ROOM_NOT_FOUND', 'La stanza indicata non esiste', {
         field: 'roomId',
       });
     }
-    // fieldMap/metadata assenti = il valore corrente resta intatto (stato runtime).
-    await deps.db.updateDevice(id, input);
-    announce(
-      request,
-      deps,
-      'device',
-      input.displayOrder !== existing.display_order ? 'reordered' : 'updated',
-      id,
-    );
+
+    await deps.db.updateDevice(id, patch);
+    const reordered =
+      patch.displayOrder !== undefined && patch.displayOrder !== existing.display_order;
+    announce(request, deps, 'device', reordered ? 'reordered' : 'updated', id);
     return reply.send({ device: toDevice(await deviceOr404(deps.db, id)) });
   });
 

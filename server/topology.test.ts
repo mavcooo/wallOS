@@ -20,8 +20,9 @@ afterEach(async () => {
   await Promise.all(openEngines.splice(0).map((engine) => engine.close()));
 });
 
-async function setup(): Promise<{ app: FastifyInstance; config: AuthConfig }> {
-  const config = loadConfig({
+/** Variabili minime comuni: il database è sempre PGlite, mai un server reale. */
+function testEnv(): Record<string, string> {
+  return {
     NODE_ENV: 'test',
     JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
     ADMIN_PASSWORD: PASSWORD,
@@ -29,7 +30,11 @@ async function setup(): Promise<{ app: FastifyInstance; config: AuthConfig }> {
     KIOSK_PIN: '1234',
     BCRYPT_ROUNDS: '4',
     DATABASE_URL: 'postgres://test:test@localhost:5432/test',
-  });
+  };
+}
+
+async function setup(): Promise<{ app: FastifyInstance; config: AuthConfig }> {
+  const config = loadConfig(testEnv());
 
   const engine = new PGlite();
   openEngines.push(engine);
@@ -275,8 +280,9 @@ describe('topologia dal database', () => {
       },
     });
     expect(updated.statusCode).toBe(200);
+    // PATCH parziale: `favorite` non era nel payload, quindi resta `true`.
     expect(updated.json()).toMatchObject({
-      device: { name: 'Luce garage 2', protected: true, favorite: false },
+      device: { name: 'Luce garage 2', protected: true, favorite: true },
     });
 
     const deleted = await app.inject({
@@ -525,5 +531,245 @@ describe('topologia dal database', () => {
     const scenarios = await app.inject({ method: 'GET', url: '/api/scenarios', cookies });
     expect(scenarios.statusCode).toBe(200);
     expect(scenarios.json<{ scenarios: unknown[] }>().scenarios).toHaveLength(SCENARIOS.length);
+  });
+});
+
+interface DeviceDto {
+  id: string;
+  room: string;
+  name: string;
+  favorite: boolean;
+  topics: { state: string };
+}
+
+interface RoomDto {
+  id: string;
+}
+
+async function readDevices(app: FastifyInstance, cookies: Record<string, string>) {
+  const response = await app.inject({ method: 'GET', url: '/api/devices', cookies });
+  expect(response.statusCode).toBe(200);
+  return response.json<{ devices: DeviceDto[] }>().devices;
+}
+
+async function readRooms(app: FastifyInstance, cookies: Record<string, string>) {
+  const response = await app.inject({ method: 'GET', url: '/api/rooms', cookies });
+  expect(response.statusCode).toBe(200);
+  return response.json<{ rooms: RoomDto[] }>().rooms;
+}
+
+describe('PATCH strict e cancellazione transazionale', () => {
+  it('rifiuta chiavi estranee con 400 e i dettagli Zod, senza scrivere nulla', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+    const original = (await readDevices(app, cookies)).find(
+      (device) => device.id === 'light-living-main',
+    );
+    expect(original).toBeDefined();
+
+    // Tentativo di over-posting: `role` non esiste nello schema.
+    const escalated = await app.inject({
+      method: 'PATCH',
+      url: '/api/devices/light-living-main',
+      cookies,
+      payload: { role: 'admin' },
+    });
+    expect(escalated.statusCode).toBe(400);
+    const rejected = escalated.json<{
+      error: string;
+      message: string;
+      field: string;
+      issues: { path: string; code: string; message: string }[];
+    }>();
+    expect(rejected.error).toBe('INVALID_BODY');
+    expect(rejected.message).toContain('role');
+    expect(rejected.issues.length).toBeGreaterThan(0);
+
+    // Una chiave sconosciuta invalida l'intero payload, non solo se stessa.
+    const mixed = await app.inject({
+      method: 'PATCH',
+      url: '/api/devices/light-living-main',
+      cookies,
+      payload: { name: 'Lampada dirottata', malicious: 'value' },
+    });
+    expect(mixed.statusCode).toBe(400);
+
+    const after = (await readDevices(app, cookies)).find(
+      (device) => device.id === 'light-living-main',
+    );
+    expect(after?.name).toBe(original?.name);
+  });
+
+  it('rifiuta chiavi estranee sulle stanze e i body senza campi', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const immutableId = await app.inject({
+      method: 'PATCH',
+      url: '/api/rooms/living',
+      cookies,
+      payload: { name: 'Salotto', id: 'hacked' },
+    });
+    expect(immutableId.statusCode).toBe(400);
+    expect(immutableId.json()).toMatchObject({ error: 'INVALID_BODY' });
+
+    for (const url of ['/api/rooms/living', '/api/devices/light-living-main']) {
+      const empty = await app.inject({ method: 'PATCH', url, cookies, payload: {} });
+      expect(empty.statusCode, url).toBe(400);
+      expect(empty.json()).toMatchObject({ error: 'INVALID_BODY', field: 'body' });
+    }
+
+    const blankName = await app.inject({
+      method: 'PATCH',
+      url: '/api/rooms/living',
+      cookies,
+      payload: { name: '   ' },
+    });
+    expect(blankName.statusCode).toBe(400);
+  });
+
+  it('aggiorna solo i campi inviati, lasciando intatto il resto', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+    const before = (await readDevices(app, cookies)).find(
+      (device) => device.id === 'light-living-main',
+    );
+    expect(before).toBeDefined();
+
+    const updated = await app.inject({
+      method: 'PATCH',
+      url: '/api/devices/light-living-main',
+      cookies,
+      payload: { name: 'Luce corridoio' },
+    });
+    expect(updated.statusCode).toBe(200);
+
+    const device = updated.json<{ device: DeviceDto }>().device;
+    expect(device.name).toBe('Luce corridoio');
+    // Nessun reset implicito: stanza, preferito e topic restano quelli di prima.
+    expect(device.room).toBe(before?.room);
+    expect(device.favorite).toBe(before?.favorite);
+    expect(device.topics.state).toBe(before?.topics.state);
+  });
+
+  it('blocca la cancellazione di una stanza popolata con 409 e nessuna modifica', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+    const livingDevices = (await readDevices(app, cookies)).filter(
+      (device) => device.room === 'living',
+    );
+    expect(livingDevices.length).toBeGreaterThan(0);
+
+    const blocked = await app.inject({ method: 'DELETE', url: '/api/rooms/living', cookies });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json()).toMatchObject({
+      error: 'ROOM_NOT_EMPTY',
+      devices: livingDevices.length,
+    });
+
+    // Rollback: stanza e dispositivi sono ancora lì.
+    expect((await readRooms(app, cookies)).some((room) => room.id === 'living')).toBe(true);
+    const ids = new Set((await readDevices(app, cookies)).map((device) => device.id));
+    for (const device of livingDevices) expect(ids.has(device.id)).toBe(true);
+  });
+
+  it('cancella stanza e dispositivi con orphanStrategy=cascade', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+    const livingIds = (await readDevices(app, cookies))
+      .filter((device) => device.room === 'living')
+      .map((device) => device.id);
+    expect(livingIds.length).toBeGreaterThan(0);
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: '/api/rooms/living?orphanStrategy=cascade',
+      cookies,
+    });
+    expect(deleted.statusCode).toBe(204);
+
+    expect((await readRooms(app, cookies)).some((room) => room.id === 'living')).toBe(false);
+    const remaining = new Set((await readDevices(app, cookies)).map((device) => device.id));
+    for (const id of livingIds) expect(remaining.has(id)).toBe(false);
+  });
+
+  it('sposta i dispositivi nella stanza "unassigned" con orphanStrategy=unassign', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+    const kitchenIds = (await readDevices(app, cookies))
+      .filter((device) => device.room === 'kitchen')
+      .map((device) => device.id);
+    expect(kitchenIds.length).toBeGreaterThan(0);
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: '/api/rooms/kitchen?orphanStrategy=unassign',
+      cookies,
+    });
+    expect(deleted.statusCode).toBe(204);
+
+    expect((await readRooms(app, cookies)).some((room) => room.id === 'kitchen')).toBe(false);
+    const moved = (await readDevices(app, cookies)).filter((device) =>
+      kitchenIds.includes(device.id),
+    );
+    expect(moved).toHaveLength(kitchenIds.length);
+    for (const device of moved) expect(device.room).toBe('unassigned');
+  });
+
+  it('rifiuta una orphanStrategy sconosciuta', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/rooms/living?orphanStrategy=delete-everything',
+      cookies,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: 'INVALID_ORPHAN_STRATEGY',
+      field: 'orphanStrategy',
+    });
+  });
+
+  it('fa ROLLBACK completo se il DELETE della stanza fallisce', async () => {
+    const config = loadConfig(testEnv());
+    const engine = new PGlite();
+    openEngines.push(engine);
+
+    // Guasto iniettato sull'ultima istruzione della transazione: i dispositivi
+    // sono già stati cancellati dalla cascade, quindi solo il ROLLBACK può
+    // riportarli indietro.
+    let failRoomDelete = false;
+    const db = new Database({
+      connectionString: config.databaseUrl,
+      client: {
+        async query<T>(sql: string, params?: readonly unknown[]) {
+          if (failRoomDelete && /delete\s+from\s+rooms/i.test(sql)) {
+            throw new Error('guasto simulato sul DELETE della stanza');
+          }
+          const result = await engine.query<T>(sql, params ? [...params] : undefined);
+          return { rows: result.rows, rowCount: result.affectedRows ?? 0 };
+        },
+        async exec(sql: string) {
+          await engine.exec(sql);
+        },
+      },
+    });
+    const { app } = await buildApp({ config, db });
+    openApps.push(app);
+
+    const livingIds = (await db.listDevices())
+      .filter((device) => device.room_id === 'living')
+      .map((device) => device.id);
+    expect(livingIds.length).toBeGreaterThan(0);
+
+    failRoomDelete = true;
+    await expect(db.deleteRoom('living', 'cascade')).rejects.toThrow('guasto simulato');
+    failRoomDelete = false;
+
+    expect((await db.listRooms()).some((room) => room.id === 'living')).toBe(true);
+    const remaining = new Set((await db.listDevices()).map((device) => device.id));
+    for (const id of livingIds) expect(remaining.has(id), id).toBe(true);
   });
 });
