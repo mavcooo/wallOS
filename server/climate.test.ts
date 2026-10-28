@@ -23,6 +23,7 @@ afterEach(async () => {
 async function setup(): Promise<{ app: FastifyInstance; config: AuthConfig; db: Database }> {
   const config = loadConfig({
     NODE_ENV: 'test',
+    AUTO_SEED: 'true',
     JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
     ADMIN_PASSWORD: PASSWORD,
     ADMIN_PIN: '2468',

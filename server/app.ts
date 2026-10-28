@@ -101,7 +101,15 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     });
 
   await db.init();
-  await seedDatabase(db, config);
+  // Seed demo solo se esplicitamente abilitato (`AUTO_SEED=true`), e comunque
+  // `seedDatabase` scrive soltanto su database vuoto. Il default è spento:
+  // riavvii e deploy non possono reintegrare stanze o dispositivi eliminati.
+  // La CLI `npm run db:seed` resta la via per popolare un database di test.
+  if (config.seed.autoSeed) {
+    await seedDatabase(db, config, config.nodeEnv === 'test' ? { log: () => {} } : {});
+  } else if (config.nodeEnv !== 'test') {
+    console.log('[Seed] AUTO_SEED non attivo: nessun dato demo scritto al boot');
+  }
   await db.purgeExpiredRefreshTokens();
 
   // Hash di confronto per il login: evita di distinguere via timing

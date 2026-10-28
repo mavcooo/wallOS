@@ -24,6 +24,7 @@ afterEach(async () => {
 function testEnv(): Record<string, string> {
   return {
     NODE_ENV: 'test',
+    AUTO_SEED: 'true',
     JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
     ADMIN_PASSWORD: PASSWORD,
     ADMIN_PIN: '2468',

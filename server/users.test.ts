@@ -54,6 +54,7 @@ function cookiesOf(response: LightMyRequestResponse): Record<string, string> {
 async function setup(): Promise<{ app: FastifyInstance; config: AuthConfig }> {
   const config = loadConfig({
     NODE_ENV: 'test',
+    AUTO_SEED: 'true',
     JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
     ADMIN_PASSWORD,
     ADMIN_PIN,

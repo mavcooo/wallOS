@@ -47,6 +47,7 @@ async function setup(): Promise<{
 }> {
   const config = loadConfig({
     NODE_ENV: 'test',
+    AUTO_SEED: 'true',
     JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
     ADMIN_PASSWORD: PASSWORD,
     ADMIN_PIN: '2468',
@@ -390,6 +391,7 @@ describe('automazioni · validazione', () => {
   it('una regola senza coordinate solari si salva ma resta inerte e spiegata', async () => {
     const config = loadConfig({
       NODE_ENV: 'test',
+      AUTO_SEED: 'true',
       JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
       ADMIN_PASSWORD: PASSWORD,
       ADMIN_PIN: '2468',

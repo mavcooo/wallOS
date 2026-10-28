@@ -404,6 +404,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
   // Coordinate solari e topic di presenza del motore di automazioni.
   const automation = resolveAutomationConfig(env, issues);
 
+  // Default `false`: il seed è un'operazione esplicita (CLI o `AUTO_SEED=true`),
+  // non una tappa del bootstrap. Letto prima del controllo degli errori, così
+  // un valore ambiguo (`forse`, `yes`) blocca l'avvio invece di passare come
+  // spento.
+  const autoSeed = strictBoolean(env, 'AUTO_SEED', false, issues);
+
   if (!/^\d{4,6}$/.test(adminPin)) issues.push('ADMIN_PIN deve avere 4-6 cifre');
   if (!/^\d{4,6}$/.test(kioskPin)) issues.push('KIOSK_PIN deve avere 4-6 cifre');
   if (adminPassword.length < 10) {
@@ -453,6 +459,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AuthConfig {
     mqtt,
     automation,
     seed: {
+      autoSeed,
       adminUsername: (text(env.ADMIN_USERNAME) ?? 'admin').toLowerCase(),
       adminDisplayName: text(env.ADMIN_DISPLAY_NAME) ?? 'Amministratore',
       adminPassword,

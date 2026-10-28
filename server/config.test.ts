@@ -18,6 +18,23 @@ const GRANULAR = {
   DB_PASSWORD: 'your_secure_password',
 };
 
+describe('seed demo', () => {
+  it('è disattivato per default: il bootstrap non scrive dati mock', () => {
+    expect(loadConfig({ ...BASE_ENV, ...GRANULAR }).seed.autoSeed).toBe(false);
+  });
+
+  it('si attiva solo con AUTO_SEED=true', () => {
+    expect(loadConfig({ ...BASE_ENV, ...GRANULAR, AUTO_SEED: 'true' }).seed.autoSeed).toBe(true);
+    expect(loadConfig({ ...BASE_ENV, ...GRANULAR, AUTO_SEED: 'false' }).seed.autoSeed).toBe(false);
+  });
+
+  it('rifiuta un valore ambiguo invece di interpretarlo come spento', () => {
+    expect(() => loadConfig({ ...BASE_ENV, ...GRANULAR, AUTO_SEED: 'forse' })).toThrowError(
+      /AUTO_SEED deve essere true o false/,
+    );
+  });
+});
+
 describe('configurazione PostgreSQL', () => {
   it('costruisce DATABASE_URL dalle variabili granulari, codificando le credenziali', () => {
     const config = loadConfig({

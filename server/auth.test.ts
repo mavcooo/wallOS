@@ -71,6 +71,7 @@ function cookieHeader(response: LightMyRequestResponse, name: string): string {
 async function setup(): Promise<{ app: FastifyInstance; db: AuthDb; config: AuthConfig }> {
   const config = loadConfig({
     NODE_ENV: 'test',
+    AUTO_SEED: 'true',
     JWT_SECRET: 'test-secret-with-enough-entropy-0123456789abcdef',
     ADMIN_PASSWORD: PASSWORD,
     ADMIN_PIN,

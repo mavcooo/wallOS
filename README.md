@@ -19,8 +19,9 @@ Prerequisito: un PostgreSQL raggiungibile sulla LAN che ospiti il database
 `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`. Nessun parametro o
 credenziale è hardcoded nel codice: se una variabile manca o è malformata
 l'avvio si interrompe elencando tutti i problemi. Parti da `.env.example`.
-Il database deve esistere; schema e seed vengono applicati dal servizio
-all'avvio.
+Il database deve esistere; lo schema viene applicato dal servizio all'avvio.
+I dati demo **non** vengono più scritti a ogni riavvio: servono `AUTO_SEED=true`
+(default `false`) oppure la CLI `npm run db:seed`.
 
 Verifica la raggiungibilità prima di avviare l'applicazione (stesso `.env`,
 nessuna modifica a schema o dati):
@@ -104,8 +105,16 @@ dal telefono apri `http://<IP-del-PC>:3000`, non `localhost`.
   il login non revoca le sessioni già attive, ma le azioni protette chiedono
   comunque il PIN.
 
-Al primo avvio il servizio applica `server/schema.sql` (idempotente) e fa il seed
-del database con stanze, dispositivi, scenari e due profili:
+A ogni avvio il servizio applica `server/schema.sql` (idempotente). Il seed con
+stanze, dispositivi, scenari e due profili viene eseguito **solo su database
+vuoto** e solo con `AUTO_SEED=true`; la CLI resta la via esplicita:
+
+```bash
+npm run db:seed        # scrive solo se il database è vuoto
+npm run db:seed:force  # TRUNCATE … CASCADE delle tabelle demo, poi le ricrea
+```
+
+Profili creati dal seed (solo se non esistono già):
 
 | Profilo | Accesso | PIN azioni |
 | --- | --- | --- |
@@ -244,8 +253,8 @@ arriva da `GET /api/topology`, la sessione da `/api/auth/*`.
 
 Non esiste uno script `migrate-configs-to-db.ts` perché i vecchi `*.config.ts`
 non sono più nel repository: la migrazione è già il seed PostgreSQL
-(`server/seed.ts` + `server/seed-data/*`), idempotente al primo avvio e
-replicabile su un database esistente con gli endpoint admin.
+(`server/seed.ts` + `server/seed-data/*`), idempotente (salta un database già
+popolato) e replicabile su un database esistente con gli endpoint admin.
 
 ---
 

@@ -450,6 +450,11 @@ export interface AutomationConfig {
 }
 
 export interface SeedConfig {
+  /**
+   * `AUTO_SEED=true`: abilita l'inserimento dei dati demo all'avvio, e solo su
+   * database vuoto. Default `false`: il bootstrap non scrive mai dati mock.
+   */
+  autoSeed: boolean;
   adminUsername: string;
   adminDisplayName: string;
   adminPassword: string;
