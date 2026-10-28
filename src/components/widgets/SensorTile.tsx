@@ -11,6 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { TFunction } from 'i18next';
+import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { activeLocale } from '@/i18n';
@@ -57,7 +58,8 @@ function displayValue(
   return { value: numeric.toLocaleString(activeLocale()), unit: device.state.unit };
 }
 
-export function SensorTile({ device, className }: SensorTileProps) {
+/** `memo`: il tile non ha stato proprio, si ridisegna solo se cambia la sua riga. */
+export const SensorTile = memo(function SensorTile({ device, className }: SensorTileProps) {
   const { t } = useTranslation('devices');
   const Icon = ICONS[device.state.type];
   const alarm =
@@ -97,4 +99,4 @@ export function SensorTile({ device, className }: SensorTileProps) {
       </div>
     </div>
   );
-}
+});

@@ -49,6 +49,10 @@ export interface DatabaseOptions {
   idleTimeoutMillis?: number;
   ssl?: boolean;
   connectionTimeoutMillis?: number;
+  /** TCP keep-alive sui socket del pool (default `true`). */
+  keepAlive?: boolean;
+  /** Ritardo del primo probe keep-alive in ms (default 10 s). */
+  keepAliveInitialDelayMillis?: number;
   /** Client esterno (PGlite nei test): in quel caso il pool non viene creato. */
   client?: SqlClient;
 }
@@ -423,12 +427,32 @@ export function timestampMs(value: Date | string | null | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+/**
+ * Parametri di resilienza del pool condiviso. I timeout arrivano dalla
+ * configurazione (`DATABASE_*`); il keep-alive TCP è fisso: su una LAN con
+ * router/switch che scartano sessioni NAT silenziosamente è l'unica difesa
+ * prima che la query successiva trovi un socket morto.
+ */
+export const POOL_DEFAULTS = {
+  max: 10,
+  /** Client inattivi chiusi dopo 30 s: niente connessioni appese al DB. */
+  idleTimeoutMillis: 30_000,
+  /** Fallisce in fretta se il DB è irraggiungibile, invece di restare appeso. */
+  connectionTimeoutMillis: 5_000,
+  /** TCP keep-alive a livello socket (SO_KEEPALIVE). */
+  keepAlive: true,
+  /** Primo probe dopo 10 s: sotto il tipico idle timeout di NAT/firewall. */
+  keepAliveInitialDelayMillis: 10_000,
+} as const;
+
 /** Parametri del pool condiviso, derivati dalle variabili `DB_*`/`DATABASE_URL`. */
 export interface DatabasePoolConfig {
   connectionString: string;
   max: number;
   idleTimeoutMillis: number;
   connectionTimeoutMillis: number;
+  keepAlive: boolean;
+  keepAliveInitialDelayMillis: number;
   ssl: boolean;
 }
 

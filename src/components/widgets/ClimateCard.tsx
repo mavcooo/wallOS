@@ -12,7 +12,7 @@ import {
   Wind,
   X,
 } from 'lucide-react';
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { memo, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -65,7 +65,8 @@ function accentFor(action: ClimateAction): string {
   return 'text-fg-subtle';
 }
 
-export function ClimateCard({
+/** `memo`: il termostato si ridisegna solo quando cambia la propria riga. */
+export const ClimateCard = memo(function ClimateCard({
   device,
   roomName,
   onAction,
@@ -501,4 +502,4 @@ export function ClimateCard({
       />
     </div>
   );
-}
+});

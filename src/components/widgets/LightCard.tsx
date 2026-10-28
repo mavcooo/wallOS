@@ -1,5 +1,5 @@
 import { Lightbulb, Star } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -31,7 +31,12 @@ const PRESETS = [
   { key: 'cool', kelvin: 5500 },
 ] as const;
 
-export function LightCard({
+/**
+ * `memo` chiude il confine di render: quando `DeviceCard` si aggiorna per un
+ * motivo che non riguarda questa luce (fine idratazione, coda comandi di un
+ * altro device), il sottoalbero della card non viene riconciliato.
+ */
+export const LightCard = memo(function LightCard({
   device,
   roomName,
   onAction,
@@ -158,4 +163,4 @@ export function LightCard({
       ) : null}
     </div>
   );
-}
+});
