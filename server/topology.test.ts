@@ -773,3 +773,82 @@ describe('PATCH strict e cancellazione transazionale', () => {
     for (const id of livingIds) expect(remaining.has(id), id).toBe(true);
   });
 });
+
+describe('POST strict', () => {
+  it('rifiuta le chiavi estranee su stanze, dispositivi e scenari', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const room = await app.inject({
+      method: 'POST',
+      url: '/api/rooms',
+      cookies,
+      payload: { name: 'Garage', role: 'admin' },
+    });
+    expect(room.statusCode).toBe(400);
+    expect(room.json()).toMatchObject({ error: 'INVALID_BODY' });
+    expect(room.json<{ issues: unknown[] }>().issues.length).toBeGreaterThan(0);
+    expect((await readRooms(app, cookies)).some((item) => item.id === 'garage')).toBe(false);
+
+    const device = await app.inject({
+      method: 'POST',
+      url: '/api/devices',
+      cookies,
+      payload: {
+        id: 'light-garage',
+        roomId: 'living',
+        name: 'Luce garage',
+        type: 'light',
+        stateTopic: 'casa/garage/light',
+        malicious: 'value',
+      },
+    });
+    expect(device.statusCode).toBe(400);
+    expect((await readDevices(app, cookies)).some((item) => item.id === 'light-garage')).toBe(
+      false,
+    );
+
+    const scenario = await app.inject({
+      method: 'POST',
+      url: '/api/scenarios',
+      cookies,
+      payload: {
+        label: 'Scenario malizioso',
+        actions: [
+          { deviceId: 'light-living-main', action: { type: 'power', on: false } },
+        ],
+        role: 'admin',
+      },
+    });
+    expect(scenario.statusCode).toBe(400);
+    const scenarios = await app.inject({ method: 'GET', url: '/api/scenarios', cookies });
+    expect(
+      scenarios
+        .json<{ scenarios: { label: string }[] }>()
+        .scenarios.some((item) => item.label === 'Scenario malizioso'),
+    ).toBe(false);
+  });
+
+  it('mantiene le regole incrociate su topic e telecamera', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const missingTopic = await app.inject({
+      method: 'POST',
+      url: '/api/devices',
+      cookies,
+      payload: { roomId: 'living', name: 'Senza topic', type: 'light' },
+    });
+    expect(missingTopic.statusCode).toBe(400);
+    expect(missingTopic.json()).toMatchObject({ error: 'INVALID_BODY', field: 'stateTopic' });
+
+    const missingStream = await app.inject({
+      method: 'POST',
+      url: '/api/devices',
+      cookies,
+      payload: { id: 'camera-zz', roomId: 'living', name: 'Telecamera', type: 'camera' },
+    });
+    expect(missingStream.statusCode).toBe(400);
+    expect(missingStream.json()).toMatchObject({ error: 'INVALID_BODY', field: 'streamUrl' });
+  });
+});

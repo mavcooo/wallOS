@@ -11,7 +11,7 @@ import {
   type RoomOrphanStrategy,
   type RoomUpdate,
 } from '../db.js';
-import { HttpError, asRecord, readBoolean, readString } from '../http.js';
+import { HttpError, asRecord, readString } from '../http.js';
 import {
   topologyEventName,
   type TopologyChangeKind,
@@ -207,6 +207,94 @@ export const UpdateRoomSchema = z
   })
   .strict();
 
+// ── Schemi POST (creazione) ────────────────────────────────────────────────
+//
+// Stessa regola dei PATCH: l'insieme delle chiavi accettate è chiuso. Le
+// regole incrociate (telecamera con flusso, topic di stato obbligatorio) sono
+// espresse nello schema, così un payload invalido non arriva ai builder.
+
+const slugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(
+    SLUG_RE,
+    'L’id deve essere uno slug (minuscole, cifre, - _ :) e iniziare con lettera o cifra',
+  );
+
+/** `null` accettato come “non specificato”, come faceva il vecchio `integerField`. */
+const displayOrderSchema = z.number().int().min(0).max(9_999).nullable().optional();
+
+/** `POST /api/rooms`. */
+export const CreateRoomSchema = z
+  .object({
+    id: slugSchema.optional(),
+    name: z.string().trim().min(1).max(80),
+    shortLabel: z.string().trim().max(24).nullable().optional(),
+    icon: z.string().trim().max(40).optional(),
+    displayOrder: displayOrderSchema,
+  })
+  .strict();
+
+/** `POST /api/devices`: telecamera e topic obbligatori sono regole incrociate. */
+export const CreateDeviceSchema = z
+  .object({
+    id: slugSchema.optional(),
+    roomId: z.string().trim().min(1).max(64),
+    name: z.string().trim().min(1).max(80),
+    type: z.enum(DEVICE_TYPES).optional(),
+    adapter: z.enum(ADAPTERS).optional(),
+    model: z.string().trim().max(80).nullable().optional(),
+    stateTopic: z.string().trim().max(512).optional(),
+    commandTopic: z.string().trim().max(512).nullable().optional(),
+    availabilityTopic: z.string().trim().max(512).nullable().optional(),
+    favorite: z.boolean().optional(),
+    protected: z.boolean().optional(),
+    displayOrder: displayOrderSchema,
+    fieldMap: fieldMapSchema.nullable().optional(),
+    metadata: metadataSchema.nullable().optional(),
+    streamUrl: streamUrlSchema.optional(),
+    snapshotUrl: snapshotUrlSchema.nullable().optional(),
+    streamProtocol: z.enum(CAMERA_PROTOCOLS).nullable().optional(),
+    aspectRatio: z.enum(ASPECT_RATIOS).nullable().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const isCamera = value.type === 'camera';
+    if (isCamera && !value.streamUrl) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['streamUrl'],
+        message: 'L’URL del flusso è obbligatorio per una telecamera',
+      });
+    }
+    if (!isCamera && !value.stateTopic) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['stateTopic'],
+        message: 'Il topic di stato è obbligatorio',
+      });
+    }
+  });
+
+/** `POST /api/scenarios`: gli id dei passi sono validati da `scenarioSteps`. */
+export const CreateScenarioSchema = z
+  .object({
+    id: slugSchema.optional(),
+    label: z.string().trim().min(1).max(80),
+    description: z.string().trim().max(240).optional(),
+    icon: z.string().trim().max(40).optional(),
+    protected: z.boolean().optional(),
+    actions: z.array(z.unknown()).max(50),
+    displayOrder: displayOrderSchema,
+  })
+  .strict();
+
+type CreateRoomInput = z.infer<typeof CreateRoomSchema>;
+type CreateDeviceInput = z.infer<typeof CreateDeviceSchema>;
+type CreateScenarioInput = z.infer<typeof CreateScenarioSchema>;
+
 /** Strategie ammesse per `DELETE /api/rooms/:id?orphanStrategy=…`. */
 const ORPHAN_STRATEGIES = ['restrict', 'unassign', 'cascade'] as const;
 const orphanStrategySchema = z.enum(ORPHAN_STRATEGIES);
@@ -215,7 +303,7 @@ const orphanStrategySchema = z.enum(ORPHAN_STRATEGIES);
  * Valida il body con lo schema dato e lo traduce in `HttpError` 400 con
  * l'elenco completo delle issue di Zod (mai un messaggio generico).
  */
-function parsePatch<T>(schema: z.ZodType<T>, body: unknown, label: string): T {
+function parseSchema<T>(schema: z.ZodType<T>, body: unknown, label: string): T {
   const parsed = schema.safeParse(asRecord(body));
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => ({
@@ -231,15 +319,18 @@ function parsePatch<T>(schema: z.ZodType<T>, body: unknown, label: string): T {
       { field: first?.path ?? 'body', issues },
     );
   }
+  return parsed.data;
+}
 
-  // Un PATCH senza campi non è un no-op silenzioso: il client ha sbagliato.
-  if (Object.keys(parsed.data as object).length === 0) {
+/** Come `parseSchema`, ma un PATCH senza campi è un errore, non un no-op. */
+function parsePatch<T>(schema: z.ZodType<T>, body: unknown, label: string): T {
+  const data = parseSchema(schema, body, label);
+  if (Object.keys(data as object).length === 0) {
     throw new HttpError(400, 'INVALID_BODY', `${label}: nessun campo da aggiornare`, {
       field: 'body',
     });
   }
-
-  return parsed.data;
+  return data;
 }
 
 /** `?orphanStrategy=` assente = `restrict` (409 se restano dispositivi). */
@@ -273,8 +364,7 @@ function invalid(message: string, field?: string): HttpError {
 }
 
 /** Id esplicito (slug) oppure derivato dall'etichetta per le nuove entità. */
-function resolveId(body: Record<string, unknown>, label: string): string {
-  const explicit = readString(body, 'id', 64);
+function resolveId(explicit: string | undefined, label: string): string {
   const id = explicit ?? slugify(label);
   if (!SLUG_RE.test(id)) {
     throw invalid(
@@ -283,56 +373,6 @@ function resolveId(body: Record<string, unknown>, label: string): string {
     );
   }
   return id;
-}
-
-function requiredText(
-  body: Record<string, unknown>,
-  key: string,
-  maxLength: number,
-  label: string,
-): string {
-  const value = readString(body, key, maxLength);
-  if (!value) throw invalid(`${label} è obbligatorio`, key);
-  return value;
-}
-
-function optionalText(
-  body: Record<string, unknown>,
-  key: string,
-  maxLength: number,
-  label: string,
-): string | null {
-  const value = body[key];
-  if (value === undefined || value === null || value === '') return null;
-  const text = readString(body, key, maxLength);
-  if (!text) throw invalid(`${label} non valido`, key);
-  return text;
-}
-
-function integerField(
-  body: Record<string, unknown>,
-  key: string,
-  min: number,
-  max: number,
-  fallback = 0,
-): number {
-  const value = body[key];
-  if (value === undefined || value === null) return fallback;
-  if (!Number.isInteger(value) || (value as number) < min || (value as number) > max) {
-    throw invalid(`${key} deve essere un intero tra ${min} e ${max}`, key);
-  }
-  return value as number;
-}
-
-function booleanField(
-  body: Record<string, unknown>,
-  key: string,
-  fallback = false,
-): boolean {
-  if (body[key] === undefined || body[key] === null) return fallback;
-  const value = readBoolean(body, key);
-  if (value === null) throw invalid(`${key} deve essere booleano`, key);
-  return value;
 }
 
 function enumField<T extends string>(
@@ -349,139 +389,82 @@ function enumField<T extends string>(
   return value as T;
 }
 
-function jsonObject(
-  body: Record<string, unknown>,
-  key: string,
-  label: string,
-): Record<string, unknown> | undefined {
-  const value = body[key];
-  if (value === undefined) return undefined;
-  if (value === null) return {};
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw invalid(`${label} deve essere un oggetto JSON`, key);
-  }
-  if (JSON.stringify(value).length > 8_192) {
-    throw invalid(`${label} supera gli 8 kB`, key);
-  }
-  return value as Record<string, unknown>;
-}
-
-function stringMap(
-  body: Record<string, unknown>,
-  key: string,
-): Record<string, string> | null | undefined {
-  const value = body[key];
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  if (typeof value !== 'object' || Array.isArray(value)) {
-    throw invalid(`${key} deve essere un oggetto { campo: percorso }`, key);
-  }
-  const entries = Object.entries(value as Record<string, unknown>);
-  if (entries.length > 64) throw invalid(`${key} ha troppi campi`, key);
-  const map: Record<string, string> = {};
-  for (const [field, path] of entries) {
-    if (typeof path !== 'string' || path.length === 0 || path.length > 256) {
-      throw invalid(`${key}.${field} deve essere un percorso stringa`, key);
-    }
-    map[field] = path;
-  }
-  return map;
-}
-
-function roomInput(
-  body: Record<string, unknown>,
-): { id: string; name: string; shortLabel: string | null; icon: string; displayOrder: number } {
-  const name = requiredText(body, 'name', 80, 'Il nome della stanza');
+function roomInput(input: CreateRoomInput): {
+  id: string;
+  name: string;
+  shortLabel: string | null;
+  icon: string;
+  displayOrder: number;
+} {
   return {
-    id: resolveId(body, name),
-    name,
-    shortLabel: optionalText(body, 'shortLabel', 24, 'L’etichetta breve'),
-    icon: readString(body, 'icon', 40) ?? 'home',
-    displayOrder: integerField(body, 'displayOrder', 0, 9_999),
+    id: resolveId(input.id, input.name),
+    name: input.name,
+    // Etichetta e icona vuote valgono “non specificata”, come prima di Zod.
+    shortLabel: input.shortLabel?.length ? input.shortLabel : null,
+    icon: input.icon?.length ? input.icon : 'home',
+    displayOrder: input.displayOrder ?? 0,
   };
 }
 
-function streamUrl(
-  body: Record<string, unknown>,
-  key: string,
-  label: string,
-  allowWebrtc = true,
-): string | null {
-  const value = optionalText(body, key, 1_024, label);
-  if (value === null) return null;
-  const pattern = allowWebrtc ? /^(https?|webrtc):\/\/[^\s]+$/i : /^https?:\/\/[^\s]+$/i;
-  if (!pattern.test(value)) {
-    throw invalid(
-      `${label}: usa un URL ${allowWebrtc ? 'http(s) o webrtc://' : 'http(s)'}`,
-      key,
-    );
-  }
-  return value;
-}
-
-function deviceInput(body: Record<string, unknown>): DeviceFields {
-  const name = requiredText(body, 'name', 80, 'Il nome del dispositivo');
-  const type = enumField(body, 'type', DEVICE_TYPES, 'light');
+/**
+ * Traduce il payload validato nei campi relazionali.
+ * `id` arriva dal chiamante: serve anche come topic di stato di default della
+ * telecamera (`camera/<id>`), esattamente come prima.
+ */
+function deviceInput(input: CreateDeviceInput, id: string): DeviceFields {
+  const type = input.type ?? 'light';
   const isCamera = type === 'camera';
-  const stream = isCamera ? streamUrl(body, 'streamUrl', 'L’URL del flusso') : null;
-  if (isCamera && !stream) {
-    throw invalid('L’URL del flusso è obbligatorio per una telecamera', 'streamUrl');
-  }
 
   return {
-    roomId: requiredText(body, 'roomId', 64, 'La stanza'),
-    name,
+    roomId: input.roomId,
+    name: input.name,
     type,
-    adapter: enumField(body, 'adapter', ADAPTERS, isCamera ? 'custom-json' : 'zigbee2mqtt'),
-    model: optionalText(body, 'model', 80, 'Il modello'),
+    adapter: input.adapter ?? (isCamera ? 'custom-json' : 'zigbee2mqtt'),
+    model: input.model?.length ? input.model : null,
     stateTopic: isCamera
-      ? (readString(body, 'stateTopic', 512) ?? `camera/${resolveId(body, name)}`)
-      : requiredText(body, 'stateTopic', 512, 'Il topic di stato'),
-    commandTopic: isCamera
-      ? null
-      : optionalText(body, 'commandTopic', 512, 'Il topic di comando'),
+      ? (input.stateTopic?.length ? input.stateTopic : `camera/${id}`)
+      : // Lo schema impone il topic per i device non-camera.
+        (input.stateTopic as string),
+    commandTopic: isCamera ? null : (input.commandTopic?.length ? input.commandTopic : null),
     availabilityTopic: isCamera
       ? null
-      : optionalText(body, 'availabilityTopic', 512, 'Il topic di availability'),
-    streamUrl: stream,
-    snapshotUrl: isCamera
-      ? streamUrl(body, 'snapshotUrl', 'L’URL dello snapshot', false)
-      : null,
-    streamProtocol: isCamera
-      ? enumField<CameraProtocol>(body, 'streamProtocol', CAMERA_PROTOCOLS, 'auto')
-      : null,
-    aspectRatio: isCamera
-      ? enumField<CameraAspectRatio>(body, 'aspectRatio', ASPECT_RATIOS, '16:9')
-      : null,
-    favorite: booleanField(body, 'favorite'),
-    protected: booleanField(body, 'protected'),
-    displayOrder: integerField(body, 'displayOrder', 0, 9_999),
-    ...(body.fieldMap !== undefined ? { fieldMap: stringMap(body, 'fieldMap') } : {}),
-    ...(body.metadata !== undefined ? { metadata: jsonObject(body, 'metadata', 'metadata') } : {}),
+      : input.availabilityTopic?.length
+        ? input.availabilityTopic
+        : null,
+    streamUrl: isCamera ? (input.streamUrl ?? null) : null,
+    snapshotUrl: isCamera ? (input.snapshotUrl ?? null) : null,
+    streamProtocol: isCamera ? (input.streamProtocol ?? 'auto') : null,
+    aspectRatio: isCamera ? (input.aspectRatio ?? '16:9') : null,
+    favorite: input.favorite ?? false,
+    protected: input.protected ?? false,
+    displayOrder: input.displayOrder ?? 0,
+    ...(input.fieldMap !== undefined ? { fieldMap: input.fieldMap } : {}),
+    ...(input.metadata !== undefined ? { metadata: input.metadata ?? {} } : {}),
   };
 }
 
-function scenarioInput(
-  body: Record<string, unknown>,
-): { id: string; name: string; description: string; icon: string; protected: boolean; actions: unknown; displayOrder: number } {
-  const name = requiredText(body, 'label', 80, 'Il nome dello scenario');
+function scenarioInput(input: CreateScenarioInput): {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  protected: boolean;
+  actions: unknown;
+  displayOrder: number;
+} {
   return {
-    id: resolveId(body, name),
-    name,
-    description: readString(body, 'description', 240) ?? '',
-    icon: readString(body, 'icon', 40) ?? 'sparkles',
-    protected: booleanField(body, 'protected'),
-    actions: scenarioSteps(body),
-    displayOrder: integerField(body, 'displayOrder', 0, 9_999),
+    id: resolveId(input.id, input.label),
+    name: input.label,
+    description: input.description ?? '',
+    icon: input.icon?.length ? input.icon : 'sparkles',
+    protected: input.protected ?? false,
+    actions: scenarioSteps(input.actions),
+    displayOrder: input.displayOrder ?? 0,
   };
 }
 
 /** Valida e normalizza i passi: un JSON arbitrario non entra nel DB. */
-function scenarioSteps(body: Record<string, unknown>): unknown[] {
-  const raw = body.actions;
-  if (!Array.isArray(raw)) throw invalid('actions deve essere un array di passi', 'actions');
-  if (raw.length > 50) throw invalid('Uno scenario può avere al massimo 50 passi', 'actions');
-
+function scenarioSteps(raw: readonly unknown[]): unknown[] {
   return raw.map((item, index) => {
     const step = asRecord(item);
     const deviceId = readString(step, 'deviceId', 64);
@@ -755,7 +738,7 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
   const adminOnly = requireRole(deps, ['admin']);
 
   app.post('/api/rooms', { preHandler: adminOnly }, async (request, reply) => {
-    const input = roomInput(asRecord(request.body));
+    const input = roomInput(parseSchema(CreateRoomSchema, request.body, 'Stanza non valida'));
     if (await deps.db.findRoomById(input.id)) {
       throw new HttpError(409, 'ROOM_EXISTS', 'Esiste già una stanza con questo id');
     }
@@ -817,9 +800,9 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
   });
 
   app.post('/api/devices', { preHandler: adminOnly }, async (request, reply) => {
-    const body = asRecord(request.body);
-    const input = deviceInput(body);
-    const id = resolveId(body, input.name);
+    const parsed = parseSchema(CreateDeviceSchema, request.body, 'Dispositivo non valido');
+    const id = resolveId(parsed.id, parsed.name);
+    const input = deviceInput(parsed, id);
     if (await deps.db.findDeviceById(id)) {
       throw new HttpError(409, 'DEVICE_EXISTS', 'Esiste già un dispositivo con questo id');
     }
@@ -874,7 +857,9 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
   });
 
   app.post('/api/scenarios', { preHandler: adminOnly }, async (request, reply) => {
-    const input = scenarioInput(asRecord(request.body));
+    const input = scenarioInput(
+      parseSchema(CreateScenarioSchema, request.body, 'Scenario non valido'),
+    );
     if (await deps.db.findScenarioById(input.id)) {
       throw new HttpError(409, 'SCENARIO_EXISTS', 'Esiste già uno scenario con questo id');
     }
@@ -889,7 +874,11 @@ export function registerTopologyRoutes(app: FastifyInstance, deps: TopologyDeps)
     const params = asRecord(request.params);
     const id = typeof params.id === 'string' ? params.id : '';
     const existing = await scenarioOr404(deps.db, id);
-    const input = scenarioInput(asRecord(request.body));
+    // Lo scenario si aggiorna in blocco: lo schema di creazione è anche lo
+    // schema del replace, quindi vale la stessa regola strict sulle chiavi.
+    const input = scenarioInput(
+      parseSchema(CreateScenarioSchema, request.body, 'Scenario non valido'),
+    );
     await deps.db.updateScenario(id, {
       name: input.name,
       description: input.description,
