@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { randomId } from '@/lib/randomId';
+
 /** Tinta visiva dei toast non critici (compatibilità con le chiamate esistenti). */
 export type ToastTone = 'success' | 'error' | 'info';
 
@@ -101,7 +103,7 @@ export const useToastStore = create<ToastState>()((set, get) => ({
   push(input) {
     const priority = priorityOf(input);
     const message: ToastMessage = {
-      id: crypto.randomUUID(),
+      id: randomId(),
       title: input.title,
       priority,
       timestamp: input.timestamp ?? Date.now(),

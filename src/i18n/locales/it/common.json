@@ -550,6 +550,12 @@
       "disable": "Disattiva"
     }
   },
+  "errorBoundary": {
+    "title": "Qualcosa è andato storto",
+    "description": "La dashboard ha incontrato un errore imprevisto. I comandi verso i dispositivi sono sospesi finché non ricarichi la pagina.",
+    "stack": "Dettagli tecnici (stack trace)",
+    "reload": "Ricarica Dashboard"
+  },
   "kioskSync": {
     "title": "Configurazione display aggiornata",
     "description": "Nuove impostazioni applicate a {{name}}."

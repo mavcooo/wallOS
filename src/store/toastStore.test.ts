@@ -9,6 +9,25 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe('toastStore · ambienti senza Web Crypto completo', () => {
+  it('crea notifiche anche senza `crypto.randomUUID` (HTTP in LAN)', () => {
+    // Su `http://192.168.0.101:3000` il secure context manca: `randomUUID` è
+    // undefined e la chiamata diretta faceva fallire il primo toast del boot.
+    vi.stubGlobal('crypto', {
+      getRandomValues: (bytes: Uint8Array) => bytes.fill(7),
+    });
+
+    expect(() => {
+      useToastStore.getState().push({ title: 'Lavatrice', tone: 'success' });
+    }).not.toThrow();
+
+    expect(useToastStore.getState().toasts[0]?.id).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+  });
 });
 
 describe('toastStore · priorità', () => {

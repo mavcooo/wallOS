@@ -14,6 +14,14 @@ import type { QueryClient } from '@tanstack/react-query';
 
 const RULE_ID = '11111111-1111-4111-8111-111111111111';
 
+/**
+ * I test del builder digitano una decina di campi con `userEvent`: da soli
+ * stanno sotto il secondo, ma con l'intera suite in parallelo (90 ambienti
+ * jsdom) sfiorano il timeout predefinito di 5 s. Non è un'attesa applicativa,
+ * è il costo del DOM simulato, quindi qui il margine è più largo.
+ */
+const BUILDER_TIMEOUT_MS = 20_000;
+
 function automation(overrides: Partial<Automation> = {}): Automation {
   return {
     id: RULE_ID,
@@ -365,7 +373,7 @@ describe('AutomationsTab · builder', () => {
       delayMs: 0,
     });
     expect(body.conditionGroups).toEqual([]);
-  });
+  }, BUILDER_TIMEOUT_MS);
 
   it('costruisce un secondo gruppo in OR e un’azione che esegue uno scenario', async () => {
     const user = userEvent.setup();
@@ -409,7 +417,7 @@ describe('AutomationsTab · builder', () => {
       [{ type: 'time_range', start: '23:00', end: '06:00' }],
     ]);
     expect(body.actions).toEqual([{ type: 'scenario', scenarioId: 'goodnight', delayMs: 0 }]);
-  });
+  }, BUILDER_TIMEOUT_MS);
 
   it('chiede uno scenario quando l’azione è di tipo scenario', async () => {
     const user = userEvent.setup();

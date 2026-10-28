@@ -35,7 +35,8 @@ export interface KioskDimmerApi {
  * useKioskDimmer
  * --------------------------------------------------------------------------
  * Kiosk-safe screensaver:
- * 1. ascolta attività reali (pointerdown, keydown, touch, wheel) e resetta il timer;
+ * 1. ascolta attività reali (pointerdown, touchstart/touchmove, mousemove,
+ *    keydown, wheel) e resetta il timer;
  * 2. dopo `timeoutMs` entra in `dimmed` mostrando un overlay nero;
  * 3. al primo tocco consuma l'evento in fase di capture (`stopPropagation`),
  *    così il tap di risveglio NON attiva pulsanti sottostanti;
@@ -112,7 +113,18 @@ export function useKioskDimmer(options: KioskDimmerOptions = {}): KioskDimmerApi
       }
     };
 
-    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    // `touchmove`/`mousemove` mancavano: su tablet e smartphone uno swipe o un
+    // movimento continuo non resettava l'inattività, quindi lo schermo poteva
+    // oscurarsi sotto il dito. `pointerdown` resta il segnale principale (già
+    // intercettato in capture sul layer di standby).
+    const events = [
+      'pointerdown',
+      'keydown',
+      'wheel',
+      'touchstart',
+      'touchmove',
+      'mousemove',
+    ] as const;
     for (const name of events) {
       window.addEventListener(name, onActivity, { capture: true, passive: false });
     }

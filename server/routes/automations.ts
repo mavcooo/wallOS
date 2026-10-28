@@ -404,7 +404,8 @@ export function registerAutomationRoutes(app: FastifyInstance, deps: AutomationD
 
     const query = request.query as Record<string, unknown>;
     const requested = Number(query['limit']);
-    const limit = Number.isFinite(requested) ? Math.min(Math.max(Math.trunc(requested), 1), 50) : 10;      const logs = await deps.db.listAutomationLogs(id, limit);
+    const limit = Number.isFinite(requested) ? Math.min(Math.max(Math.trunc(requested), 1), 50) : 10;
+    const logs = await deps.db.listAutomationLogs(id, limit);
     return {
       automationId: id,
       logs: logs.map((row) => ({

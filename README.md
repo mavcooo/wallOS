@@ -130,6 +130,14 @@ dal telefono apri `http://<IP-del-PC>:3000`, non `localhost`.
 - Lo stesso kiosk (`VITE_KIOSK_DEVICE_ID`) può essere aperto da più browser:
   il login non revoca le sessioni già attive, ma le azioni protette chiedono
   comunque il PIN.
+- Il client usa solo percorsi relativi (`/api/...`): nessun URL `localhost` nel
+  bundle, quindi il login da `http://192.168.0.101:3000` funziona come dal PC.
+- Broker MQTT: se `MQTT_HOST` non è impostato, l'host viene dedotto da
+  `window.location.hostname` (il broker si presume sulla stessa macchina del
+  pannello). `localhost` non viene mai usato: sul tablet punterebbe al tablet.
+- Un errore imprevisto di render o di caricamento di una pagina non lascia più
+  una schermata nera: l'`ErrorBoundary` di radice mostra messaggio, stack
+  espandibile e il pulsante `Ricarica Dashboard`.
 
 A ogni avvio il servizio applica `server/schema.sql` (idempotente). Il seed con
 stanze, dispositivi, scenari e due profili viene eseguito **solo su database

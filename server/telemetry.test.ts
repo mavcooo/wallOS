@@ -170,6 +170,90 @@ describe('telemetria storica · endpoint', () => {
     expect(response.statusCode).toBe(401);
   });
 
+  /**
+   * Gli id dei device sono slug testuali (`devices.id` è TEXT, i topic sono
+   * `stat/<device_id>/...`): vincolarli a UUID rendeva ogni grafico per device
+   * un 400. Il caso è quello reale del client: slug con trattino e slug con
+   * underscore, entrambi senza campioni nel database (finestra vuota, non
+   * errore).
+   */
+  it('accetta gli slug testuali dei device e restituisce una finestra vuota', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const historyResponse = await app.inject({
+      method: 'GET',
+      // Senza `metric`: vale il default `power_watts`, come nella richiesta
+      // che apre la pagina Energia.
+      url: '/api/telemetry/history?deviceId=living-room-light&range=24h',
+      cookies,
+    });
+    expect(historyResponse.statusCode).toBe(200);
+    expect(historyResponse.json<HistoryDto>()).toMatchObject({
+      deviceId: 'living-room-light',
+      range: '24h',
+      metric: 'power_watts',
+      points: [],
+      pointCount: 0,
+    });
+
+    const summaryResponse = await app.inject({
+      method: 'GET',
+      url: '/api/telemetry/summary?deviceId=plug_lavatrice',
+      cookies,
+    });
+    expect(summaryResponse.statusCode).toBe(200);
+    expect(summaryResponse.json()).toMatchObject({
+      deviceId: 'plug_lavatrice',
+      metric: 'power_watts',
+      summary: { count: 0 },
+    });
+
+    // Stessa classe di caratteri con cui `server/routes/topology.ts` crea gli
+    // id: i device scoperti dai bridge possono contenere i due punti.
+    const discovered = await app.inject({
+      method: 'GET',
+      url: '/api/telemetry/history?deviceId=zigbee:0x00158d0001',
+      cookies,
+    });
+    expect(discovered.statusCode).toBe(200);
+    expect(discovered.json<HistoryDto>().deviceId).toBe('zigbee:0x00158d0001');
+  });
+
+  it('rifiuta deviceId vuoti, oltre 64 caratteri o con caratteri fuori dallo slug', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const invalid = [
+      '', // vuoto
+      'a'.repeat(65), // oltre il limite della colonna
+      'living room', // spazio
+      "plug_tv'", // apice
+      'luce/soggiorno', // slash: non è un id, è un topic
+      'plug_tv; DROP TABLE telemetry_history; --',
+      'plug_tv%00',
+    ];
+
+    for (const deviceId of invalid) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/telemetry/history?deviceId=${encodeURIComponent(deviceId)}&range=24h&metric=power_watts`,
+        cookies,
+      });
+      expect(response.statusCode, `deviceId accettato: ${JSON.stringify(deviceId)}`).toBe(400);
+      expect(response.json()).toMatchObject({ error: 'INVALID_QUERY' });
+    }
+
+    // Lo stesso schema serve il riepilogo: un id non valido non passa nemmeno lì.
+    const summary = await app.inject({
+      method: 'GET',
+      url: '/api/telemetry/summary?deviceId=living%20room',
+      cookies,
+    });
+    expect(summary.statusCode).toBe(400);
+    expect(summary.json()).toMatchObject({ error: 'INVALID_QUERY' });
+  });
+
   it('accetta gli slug di `devices.id` e aggrega la finestra 24h in bucket da 30 minuti', async () => {
     const { app } = await setup();
     const cookies = await login(app);

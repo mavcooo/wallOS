@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resolveBrokerDefaults, type BrokerEnv } from '@/config/app.config';
+import { panelHostname, resolveBrokerDefaults, type BrokerEnv } from '@/config/app.config';
 
-/** Default di fabbrica, usati quando l'ambiente non dice nulla. */
+/**
+ * Default di fabbrica, usati quando l'ambiente non dice nulla. L'host è quello
+ * del pannello (`window.location.hostname`, in jsdom `localhost`): niente IP
+ * cablati, che su un tablet in LAN puntavano a una macchina inesistente.
+ */
 const FACTORY_DEFAULTS = {
-  host: '192.168.1.10',
+  host: 'localhost',
   port: 9001,
   protocol: 'ws',
   path: '/mqtt',
@@ -96,6 +100,24 @@ describe('resolveBrokerDefaults', () => {
       { host: 'broker.casa.lan', path: '/mqtt' },
     );
   });
+
+  it('senza MQTT_HOST usa l’host del pannello, non un IP cablato', () => {
+    const original = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...original, hostname: '192.168.0.101' },
+    });
+
+    try {
+      expect(panelHostname()).toBe('192.168.0.101');
+      expect(resolveBrokerDefaults({})).toMatchObject({
+        host: '192.168.0.101',
+        demoMode: true,
+      });
+    } finally {
+      Object.defineProperty(window, 'location', { configurable: true, value: original });
+    }
+  });
 });
 
 describe('DEFAULT_BROKER', () => {
@@ -134,7 +156,7 @@ describe('DEFAULT_BROKER', () => {
 
     const { DEFAULT_BROKER } = await import('@/config/app.config');
 
-    expect(DEFAULT_BROKER).toMatchObject({ host: '192.168.1.10', port: 9001, demoMode: true });
+    expect(DEFAULT_BROKER).toMatchObject({ host: 'localhost', port: 9001, demoMode: true });
   });
 
   it('senza MQTT_DISCOVERY_PREFIXES ascolta il prefisso standard', async () => {

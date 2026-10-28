@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 
 import { APP_BOOT_AT, BOOT_RECOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import i18n from '@/i18n';
+import { randomId } from '@/lib/randomId';
 import { rollbackState } from '@/mqtt/optimistic';
 import { logRecovery } from '@/mqtt/recoveryLog';
 import { useHomeStore } from '@/store/homeStore';
@@ -121,7 +122,7 @@ export const useOfflineQueue = create<OfflineQueueState>()(
         }
 
         const command: QueuedCommand = {
-          id: crypto.randomUUID(),
+          id: randomId(),
           deviceId: input.deviceId,
           deviceName: input.deviceName,
           topic: input.topic,

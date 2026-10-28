@@ -53,8 +53,10 @@ describe('broker: ambiente e persist', () => {
   it('senza persist e senza ambiente usa i default di fabbrica', async () => {
     const store = await loadStore();
 
+    // In jsdom l'host del pannello è `localhost`: senza `MQTT_HOST` il broker
+    // si presume sulla stessa macchina che serve la dashboard.
     expect(store.getState().broker).toMatchObject({
-      host: '192.168.1.10',
+      host: 'localhost',
       port: 9001,
       protocol: 'ws',
       demoMode: true,

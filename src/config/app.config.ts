@@ -47,6 +47,20 @@ export type BrokerDefaults = Pick<
  * hanno la precedenza (vedi `merge` del persist in `homeStore`), quindi il
  * pannello può sempre correggere quanto arriva dall'ambiente.
  */
+/**
+ * Host del pannello: quello da cui il browser ha caricato la dashboard.
+ *
+ * Senza `MQTT_HOST` il broker si presume sulla stessa macchina del pannello:
+ * su un tablet in LAN `http://192.168.0.101:3000` significa `192.168.0.101`,
+ * non `localhost` (che punterebbe al tablet stesso) e nessun IP cablato.
+ * Nei test e negli script senza `window` resta `localhost`.
+ */
+export function panelHostname(): string {
+  if (typeof window === 'undefined') return 'localhost';
+  const host = window.location?.hostname;
+  return host && host.length > 0 ? host : 'localhost';
+}
+
 export function resolveBrokerDefaults(env: BrokerEnv): BrokerDefaults {
   const host = envText(env.MQTT_HOST);
   const port = envPort(env.MQTT_PORT);
@@ -62,7 +76,7 @@ export function resolveBrokerDefaults(env: BrokerEnv): BrokerDefaults {
   );
 
   return {
-    host: host ?? '192.168.1.10',
+    host: host ?? panelHostname(),
     port: port ?? 9001,
     protocol: protocol ?? 'ws',
     path: path ?? '/mqtt',

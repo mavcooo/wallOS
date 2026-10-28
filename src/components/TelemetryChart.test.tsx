@@ -82,6 +82,29 @@ describe('TelemetryChart', () => {
     expect(url).not.toContain('deviceId');
   });
 
+  it('interroga un device con id testuale e ne disegna i campioni', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => ({
+      ok: true,
+      json: async () => ({
+        points: [
+          { timestamp: Date.now() - 60_000, value: 40 },
+          { timestamp: Date.now(), value: 80 },
+        ],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    // `devices.id` è uno slug: il grafico non deve mai convertirla in UUID né
+    // lasciare la card in stato di errore.
+    renderChart({ deviceId: 'living-room-light' });
+
+    expect(await screen.findByText('2 campioni')).toBeInTheDocument();
+    expect(screen.queryByText('Dati storici in fase di accumulo…')).not.toBeInTheDocument();
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain('deviceId=living-room-light');
+    expect(url).toContain('range=24h');
+  });
+
   it('renderizza i punti aggregati e notifica il cambio intervallo', async () => {
     stubHistory([
       { timestamp: Date.now() - 60_000, value: 900 },

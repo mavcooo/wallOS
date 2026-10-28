@@ -550,6 +550,12 @@
       "disable": "Disable"
     }
   },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "description": "The dashboard hit an unexpected error. Device commands stay paused until you reload the page.",
+    "stack": "Technical details (stack trace)",
+    "reload": "Reload dashboard"
+  },
   "kioskSync": {
     "title": "Display configuration updated",
     "description": "New settings applied for {{name}}."

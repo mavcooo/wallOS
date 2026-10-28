@@ -17,11 +17,32 @@ const TELEMETRY_METRICS = ['power_watts', 'energy_kwh', 'temperature', 'humidity
 type TelemetryRange = '24h' | '7d' | '30d';
 
 /**
- * `devices.id` è uno slug testuale (`power-kitchen-oven`), non un UUID: la
- * validazione deve accettare lo stesso formato della tabella, altrimenti ogni
- * richiesta del grafico finisce in 400 e la pagina resta vuota.
+ * `devices.id` è uno slug testuale (`power-kitchen-oven`, `living-room-light`,
+ * `plug_lavatrice`), non un UUID: la validazione deve accettare lo stesso
+ * formato della tabella e dei topic MQTT (`stat/<device_id>/...`), altrimenti
+ * ogni richiesta del grafico finisce in 400 e la pagina resta vuota.
+ *
+ * Il set di caratteri è lo stesso con cui nascono gli id (`SLUG_RE` in
+ * `server/routes/topology.ts`): deve iniziare con lettera o cifra, poi lettere,
+ * cifre, `-`, `_` e `:`. Lo spazio è escluso — in un id non esiste — e i due
+ * punti sono ammessi perché i device scoperti dai bridge hanno id come
+ * `zigbee:0x00158d0001`; qui però restano case-insensitive, così un id scritto
+ * a mano non diventa un 400 ma una finestra vuota.
+ *
+ * Spazi, apici, slash e punto e virgola sono il segno di un client che sbaglia
+ * (o di un tentativo di iniezione): la richiesta viene respinta prima di
+ * arrivare a PostgreSQL, dove comunque il valore resta un parametro
+ * posizionale e mai testo concatenato.
  */
-const deviceIdSchema = z.string().trim().min(1).max(64);
+const deviceIdSchema = z
+  .string()
+  .trim()
+  .min(1, 'deviceId non può essere vuoto')
+  .max(64, 'deviceId non può superare i 64 caratteri')
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/,
+    'deviceId deve iniziare con una lettera o una cifra e contenere solo lettere, cifre, trattini, underscore o due punti',
+  );
 
 const telemetryQuerySchema = z.object({
   deviceId: deviceIdSchema.optional(),
@@ -277,13 +298,12 @@ export function registerTelemetryIngestRoutes(app: FastifyInstance, deps: Teleme
         recordedAt?: unknown;
       };
 
-      const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
+      const deviceId = deviceIdSchema.safeParse(body.deviceId);
       const rawMetric = typeof body.metricType === 'string' ? body.metricType : '';
       const metricType = TELEMETRY_METRICS.find((metric) => metric === rawMetric);
 
       if (
-        deviceId.length === 0 ||
-        deviceId.length > 64 ||
+        !deviceId.success ||
         metricType === undefined ||
         typeof body.val !== 'number' ||
         !Number.isFinite(body.val)
@@ -303,19 +323,19 @@ export function registerTelemetryIngestRoutes(app: FastifyInstance, deps: Teleme
 
       const device = await deps.db.client.query<{ id: string }>(
         'SELECT id FROM devices WHERE id = $1',
-        [deviceId],
+        [deviceId.data],
       );
       // `rows.length`, non `rowCount`: con PGlite nei test `rowCount` mappa
       // `affectedRows`, che per una SELECT vale 0.
       if (device.rows.length === 0) {
-        throw new HttpError(404, 'DEVICE_NOT_FOUND', `Dispositivo ${deviceId} inesistente`);
+        throw new HttpError(404, 'DEVICE_NOT_FOUND', `Dispositivo ${deviceId.data} inesistente`);
       }
 
       const result = await deps.db.client.query<{ id: string }>(
         `INSERT INTO telemetry_history (device_id, metric_type, val, recorded_at)
          VALUES ($1::text, $2::varchar(32), $3::numeric(10, 2), $4::timestamptz)
          RETURNING id`,
-        [deviceId, metricType, body.val, recordedAt],
+        [deviceId.data, metricType, body.val, recordedAt],
       );
 
       return reply.code(201).send({ inserted: result.rows[0] ?? null });

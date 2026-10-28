@@ -1,3 +1,4 @@
+import { randomId } from '@/lib/randomId';
 import { useHomeStore } from '@/store/homeStore';
 
 /**
@@ -7,7 +8,7 @@ import { useHomeStore } from '@/store/homeStore';
  */
 export function logRecovery(message: string): void {
   useHomeStore.getState().appendRaw({
-    id: crypto.randomUUID(),
+    id: randomId(),
     direction: 'system',
     topic: 'recovery',
     payload: message,

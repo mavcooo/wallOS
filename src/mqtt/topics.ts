@@ -1,3 +1,4 @@
+import { panelHostname } from '@/config/app.config';
 import type { DeviceMetadata } from '@/types/device';
 import type { BrokerSettings } from '@/types/mqtt';
 
@@ -14,7 +15,9 @@ export function stripBaseTopic(settings: BrokerSettings, topic: string): string 
 }
 
 export function buildBrokerUrl(settings: BrokerSettings): string {
-  const host = settings.host.trim() || 'localhost';
+  // Mai `localhost`: un host vuoto (config incompleta o cancellata) significa
+  // "il broker è sulla macchina del pannello", non "sul tablet stesso".
+  const host = settings.host.trim() || panelHostname();
   const path = settings.path.trim() || '/mqtt';
   const normalizedPath = path.startsWith('/') ? path : `/${path}`;
   return `${settings.protocol}://${host}:${settings.port}${normalizedPath}`;

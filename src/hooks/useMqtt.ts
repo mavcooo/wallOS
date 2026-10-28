@@ -15,6 +15,7 @@ import {
   withoutDiscoveredDevice,
 } from '@/lib/discovery';
 import { TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
+import { randomId } from '@/lib/randomId';
 import type { Topology } from '@/lib/topologyApi';
 import { getAdapter } from '@/mqtt/adapters';
 import {
@@ -139,7 +140,7 @@ function logRaw(
   retain = false,
 ): void {
   const message: RawMqttMessage = {
-    id: crypto.randomUUID(),
+    id: randomId(),
     direction,
     topic,
     payload:
