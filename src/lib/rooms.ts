@@ -1,6 +1,7 @@
 import type { RoomId } from '@/types/device';
+import type { RoomFloorplanExtension } from '@/types/floorplan';
 
-export interface RoomConfig {
+export interface RoomConfig extends RoomFloorplanExtension {
   id: RoomId;
   label: string;
   shortLabel: string;

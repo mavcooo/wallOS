@@ -6,6 +6,8 @@
  * La traduzione da/verso i topic MQTT vive esclusivamente in `src/mqtt/adapters`.
  */
 
+import type { DevicePinPosition } from './floorplan';
+
 /**
  * Le stanze non sono un'unione chiusa: arrivano dal database (`/api/topology`)
  * e la discovery Home Assistant può crearne di nuove a runtime, estendendo la
@@ -164,6 +166,11 @@ interface DeviceBase {
   protected: boolean;
   /** Ordinamento nella UI, gestito dall'amministrazione. */
   displayOrder?: number;
+  /**
+   * Marker nella planimetria della stanza (percentuale, 0-100). Assente nei
+   * device storici o scoperti: la UI usa il centro della stanza.
+   */
+  roomPinPosition?: DevicePinPosition;
   /** Presente solo sui device scoperti via Home Assistant MQTT Discovery. */
   discovery?: DeviceDiscovery;
 }

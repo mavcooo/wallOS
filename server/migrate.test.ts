@@ -198,14 +198,14 @@ describe('migrateDown · rollback reale', () => {
 
     const rolled = await migrateDown({ connection, dir: REAL_MIGRATION_DIR, log: noop });
 
-    expect(rolled.rolledBack).toBe('006_kiosk_displays.sql');
-    expect(await tableNames(connection, 'kiosk_displays')).toEqual([]);
-    expect(await ledgerVersions(connection)).not.toContain('006_kiosk_displays.sql');
+    expect(rolled.rolledBack).toBe('007_add_floorplan_schema.sql');
+    expect(await tableNames(connection, 'floors')).toEqual([]);
+    expect(await ledgerVersions(connection)).not.toContain('007_add_floorplan_schema.sql');
 
     // Riapplicare è possibile: il ledger è la fonte dell'ordine, non i file.
     const again = await migrateUp({ connection, dir: REAL_MIGRATION_DIR, log: noop });
-    expect(again.applied).toEqual(['006_kiosk_displays.sql']);
-    expect(await tableNames(connection, 'kiosk_displays')).toEqual(['kiosk_displays']);
+    expect(again.applied).toEqual(['007_add_floorplan_schema.sql']);
+    expect(await tableNames(connection, 'floors')).toEqual(['floors']);
   });
 
   it('senza sezione DOWN solleva un errore esplicito e non tocca schema né ledger', async () => {

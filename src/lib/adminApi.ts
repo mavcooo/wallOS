@@ -64,9 +64,14 @@ async function toApiError(response: Response): Promise<ApiError> {
   return new ApiError(response.status, code, message);
 }
 
-async function request<T>(
+/**
+ * Richiesta mutante autenticata (cookie HttpOnly + rotazione del refresh).
+ * Esportata perché anche le route della planimetria (`floors`) condividono lo
+ * stesso contratto: header `X-Client-Id`, gestione 401 e `ApiError`.
+ */
+export async function adminRequest<T>(
   path: string,
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   body?: unknown,
 ): Promise<T> {
   const send = () => {
@@ -91,6 +96,8 @@ async function request<T>(
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
+
+const request = adminRequest;
 
 /**
  * CRUD della topologia: solo il ruolo admin è autorizzato dal server.

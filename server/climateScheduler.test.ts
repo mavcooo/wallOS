@@ -36,6 +36,7 @@ function device(overrides: Partial<DeviceRow> = {}): DeviceRow {
     favorite: false,
     protected: false,
     display_order: 0,
+    room_pin_position: { x: 50, y: 50 },
     ...overrides,
   };
 }

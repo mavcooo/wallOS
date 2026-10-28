@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 
-import type { Database, DeviceFields } from '../db.js';
+import { normalizeGridLayout, normalizePinPosition, type Database, type DeviceFields } from '../db.js';
 import { HttpError, asRecord, readBoolean, readString } from '../http.js';
 import {
   topologyEventName,
@@ -73,6 +73,10 @@ interface RoomDto {
   shortLabel: string;
   icon: string;
   displayOrder: number;
+  /** Piano della planimetria; `null` = stanza non ancora assegnata. */
+  floorId: string | null;
+  /** Rettangolo sulla griglia 12×8 della pianta schematica. */
+  gridLayout: ReturnType<typeof normalizeGridLayout>;
 }
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -94,6 +98,8 @@ function toRoom(row: RoomRow): RoomDto {
     shortLabel: row.short_label ?? row.name,
     icon: row.icon,
     displayOrder: row.display_order,
+    floorId: row.floor_id ?? null,
+    gridLayout: normalizeGridLayout(row.grid_layout),
   };
 }
 
@@ -468,6 +474,7 @@ function toDevice(row: DeviceRow): Device {
     favorite: row.favorite,
     protected: row.protected,
     displayOrder: row.display_order,
+    roomPinPosition: normalizePinPosition(row.room_pin_position),
     ...(meta.discovery
       ? {
           discovery: {

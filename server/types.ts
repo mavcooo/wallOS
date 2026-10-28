@@ -1,3 +1,5 @@
+import type { DevicePinPosition, RoomGridLayout } from '../src/types/floorplan.js';
+
 export type UserRole = 'admin' | 'family' | 'guest' | 'kiosk';
 
 export type SessionKind = 'user' | 'kiosk';
@@ -46,6 +48,26 @@ export interface RoomRow {
   short_label: string | null;
   icon: string;
   display_order: number;
+  /** Piano della planimetria; `null` = stanza non assegnata. */
+  floor_id: string | null;
+  /** Rettangolo sulla griglia 12×8 (JSONB, normalizzato in lettura). */
+  grid_layout: RoomGridLayout;
+}
+
+/** Riga di `floors`: un livello della planimetria schematica. */
+export interface FloorRow {
+  id: string;
+  name: string;
+  level_order: number;
+  icon: string;
+  created_at: Date | string;
+}
+
+/** Campi modificabili di un piano (l'id è la chiave, non si riscrive). */
+export interface FloorFields {
+  name: string;
+  level_order: number;
+  icon: string;
 }
 
 export interface DeviceRow {
@@ -67,6 +89,8 @@ export interface DeviceRow {
   favorite: boolean;
   protected: boolean;
   display_order: number;
+  /** Marker nella planimetria della stanza, in percentuale (0-100). */
+  room_pin_position: DevicePinPosition;
 }
 
 /** Preset del cronotermostato: non è la modalità del firmware. */

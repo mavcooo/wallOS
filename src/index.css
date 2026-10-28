@@ -32,6 +32,9 @@
   /* Swipe: solo transform/opacity, nessun layout shift sul tablet. */
   --animate-slide-in-right: slide-in-right 260ms cubic-bezier(0.16, 1, 0.3, 1);
   --animate-slide-in-left: slide-in-left 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* Planimetria: pulse rosso ad alta frequenza su una stanza in allarme.
+     Solo box-shadow/border-color, nessun cambio di layout sul canvas. */
+  --animate-alarm-pulse: alarm-pulse 900ms ease-in-out infinite;
 
   @keyframes shake {
     10%,
@@ -88,6 +91,17 @@
     to {
       opacity: 1;
       transform: translate3d(0, 0, 0);
+    }
+  }
+  @keyframes alarm-pulse {
+    0%,
+    100% {
+      border-color: rgb(248 113 113 / 0.55);
+      box-shadow: 0 0 0 0 rgb(248 113 113 / 0.5);
+    }
+    50% {
+      border-color: rgb(248 113 113 / 1);
+      box-shadow: 0 0 0 6px rgb(248 113 113 / 0);
     }
   }
 }

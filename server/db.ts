@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { Pool } from 'pg';
 
+import type { DevicePinPosition, RoomGridLayout } from '../src/types/floorplan.js';
 import type {
   AttemptPolicy,
   AttemptRow,
@@ -14,6 +15,8 @@ import type {
   ClimateRuntimeRow,
   ClimateScheduleRow,
   DeviceRow,
+  FloorFields,
+  FloorRow,
   KioskDisplayFields,
   KioskDisplayRow,
   RefreshTokenRow,
@@ -92,6 +95,23 @@ export interface NewRoom {
   shortLabel: string | null;
   icon: string;
   displayOrder: number;
+  /** Piano della planimetria (default: nessuno, l'editor lo assegna). */
+  floorId?: string | null;
+  gridLayout?: RoomGridLayout;
+}
+
+/** Stanza dentro il salvataggio bulk del layout. */
+export interface FloorLayoutRoomUpdate {
+  id: string;
+  /** `undefined` = resta il piano corrente, `null` = nessun piano. */
+  floorId?: string | null;
+  gridLayout: RoomGridLayout;
+}
+
+/** Marker dispositivo dentro il salvataggio bulk del layout. */
+export interface FloorLayoutDeviceUpdate {
+  id: string;
+  roomPinPosition: DevicePinPosition;
 }
 
 export interface NewDevice {
@@ -113,6 +133,7 @@ export interface NewDevice {
   favorite: boolean;
   protected: boolean;
   displayOrder: number;
+  roomPinPosition?: DevicePinPosition;
 }
 
 export interface NewScenario {
@@ -228,6 +249,59 @@ const SCHEMA = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
 export function shortVersion(version: string): string {
   const [product, release] = version.split(' ');
   return product && release ? `${product} ${release}` : version;
+}
+
+/** Geometria di default della stanza: identica al DEFAULT della migrazione. */
+export const DEFAULT_GRID_LAYOUT: RoomGridLayout = {
+  col: 1,
+  row: 1,
+  colSpan: 3,
+  rowSpan: 2,
+  color: 'zinc',
+};
+
+/** Centro della stanza: marker di default quando il device non ne ha uno. */
+export const DEFAULT_PIN_POSITION: DevicePinPosition = { x: 50, y: 50 };
+
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Normalizza `rooms.grid_layout` in un rettangolo sempre dentro la griglia
+ * 12×8: una riga scritta a mano (o da una versione precedente) non deve mai
+ * far uscire una stanza dal canvas di un pannello.
+ */
+export function normalizeGridLayout(value: unknown): RoomGridLayout {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const colSpan = clamp(Math.round(finiteNumber(record.colSpan, 3)), 1, 12);
+  const rowSpan = clamp(Math.round(finiteNumber(record.rowSpan, 2)), 1, 8);
+  return {
+    col: clamp(Math.round(finiteNumber(record.col, 1)), 1, 12 - colSpan + 1),
+    row: clamp(Math.round(finiteNumber(record.row, 1)), 1, 8 - rowSpan + 1),
+    colSpan,
+    rowSpan,
+    color: typeof record.color === 'string' && record.color.length > 0 ? record.color : 'zinc',
+  };
+}
+
+/** Marker sempre dentro il perimetro della stanza (percentuale 0-100). */
+export function normalizePinPosition(value: unknown): DevicePinPosition {
+  const record =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    x: clamp(finiteNumber(record.x, 50), 0, 100),
+    y: clamp(finiteNumber(record.y, 50), 0, 100),
+  };
 }
 
 /** PG restituisce Date; un driver di test può restituire la stringa ISO. */
@@ -468,6 +542,52 @@ export class Database {
       else await this.pool.end();
     }
     await this.client.close?.();
+  }
+
+  /**
+   * Transazione su una **connessione dedicata**.
+   *
+   * Il repository usa un pool condiviso: `BEGIN` su una query e `COMMIT` su
+   * un'altra possono finire su connessioni diverse, quindi il salvataggio bulk
+   * della planimetria deve possedere la sessione per tutta la durata. Con un
+   * client iniettato (PGlite nei test) la connessione è già unica.
+   *
+   * In caso di errore il ROLLBACK è esplicito: una connessione restituita al
+   * pool in stato "idle in transaction" continuerebbe a trattenere i lock.
+   */
+  async withTransaction<T>(run: (client: SqlClient) => Promise<T>): Promise<T> {
+    let client = this.client;
+    let release: (() => void) | null = null;
+
+    if (this.pool) {
+      const pooled = await this.pool.connect();
+      client = {
+        async query<R>(sql: string, params?: readonly unknown[]) {
+          const result = await pooled.query(sql, params ? [...params] : undefined);
+          return { rows: result.rows as R[], rowCount: result.rowCount ?? 0 };
+        },
+        async exec(sql: string) {
+          await pooled.query(sql);
+        },
+      };
+      release = () => pooled.release();
+    }
+
+    await client.exec('BEGIN');
+    try {
+      const result = await run(client);
+      await client.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.exec('ROLLBACK');
+      } catch {
+        // Connessione già caduta: il pool la scarta da sé.
+      }
+      throw error;
+    } finally {
+      release?.();
+    }
   }
 
   // ── Utenti ────────────────────────────────────────────────────────────────
@@ -718,20 +838,110 @@ export class Database {
 
   async listRooms(): Promise<RoomRow[]> {
     const { rows } = await this.client.query<RoomRow>(
-      'SELECT id, name, short_label, icon, display_order FROM rooms ORDER BY display_order, name',
+      `SELECT id, name, short_label, icon, display_order, floor_id, grid_layout
+       FROM rooms
+       ORDER BY display_order, name`,
+    );
+    return rows.map((row) => ({ ...row, grid_layout: normalizeGridLayout(row.grid_layout) }));
+  }
+
+  /** Piani in ordine di lettura (piano terra, primo piano, …). */
+  async listFloors(): Promise<FloorRow[]> {
+    const { rows } = await this.client.query<FloorRow>(
+      'SELECT id, name, level_order, icon, created_at FROM floors ORDER BY level_order, name',
     );
     return rows;
+  }
+
+  async findFloorById(id: string): Promise<FloorRow | undefined> {
+    const { rows } = await this.client.query<FloorRow>(
+      'SELECT id, name, level_order, icon, created_at FROM floors WHERE id = $1',
+      [id],
+    );
+    return rows[0];
+  }
+
+  async createFloor(floor: { id: string } & FloorFields): Promise<void> {
+    await this.client.query(
+      'INSERT INTO floors (id, name, level_order, icon) VALUES ($1, $2, $3, $4)',
+      [floor.id, floor.name, floor.level_order, floor.icon],
+    );
+  }
+
+  /** Seed idempotente: un riavvio non riscrive nomi e ordine dei piani. */
+  async insertFloor(floor: { id: string } & FloorFields): Promise<void> {
+    await this.client.query(
+      `INSERT INTO floors (id, name, level_order, icon)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (id) DO NOTHING`,
+      [floor.id, floor.name, floor.level_order, floor.icon],
+    );
+  }
+
+  async updateFloor(id: string, floor: FloorFields): Promise<void> {
+    await this.client.query(
+      'UPDATE floors SET name = $2, level_order = $3, icon = $4 WHERE id = $1',
+      [id, floor.name, floor.level_order, floor.icon],
+    );
+  }
+
+  async deleteFloor(id: string): Promise<void> {
+    await this.client.query('DELETE FROM floors WHERE id = $1', [id]);
+  }
+
+  /**
+   * Salvataggio bulk della planimetria: geometrie delle stanze e marker dei
+   * dispositivi in **una sola transazione**. Se una riga non esiste (stanza o
+   * device eliminati da un altro pannello) l'intero salvataggio viene annullato:
+   * mai una pianta scritta a metà.
+   */
+  async updateFloorLayout(
+    floorId: string,
+    rooms: readonly FloorLayoutRoomUpdate[],
+    devices: readonly FloorLayoutDeviceUpdate[],
+  ): Promise<void> {
+    await this.withTransaction(async (client) => {
+      for (const room of rooms) {
+        const result = await client.query(
+          `UPDATE rooms
+           SET floor_id = $2, grid_layout = $3::jsonb, updated_at = now()
+           WHERE id = $1`,
+          [
+            room.id,
+            room.floorId === undefined ? floorId : room.floorId,
+            JSON.stringify(room.gridLayout),
+          ],
+        );
+        if (result.rowCount === 0) {
+          throw new Error(`stanza ${room.id} non trovata durante il salvataggio del layout`);
+        }
+      }
+
+      for (const device of devices) {
+        const result = await client.query(
+          'UPDATE devices SET room_pin_position = $2::jsonb, updated_at = now() WHERE id = $1',
+          [device.id, JSON.stringify(device.roomPinPosition)],
+        );
+        if (result.rowCount === 0) {
+          throw new Error(`dispositivo ${device.id} non trovato durante il salvataggio del layout`);
+        }
+      }
+    });
   }
 
   async listDevices(): Promise<DeviceRow[]> {
     const { rows } = await this.client.query<DeviceRow>(
       `SELECT id, room_id, name, type, adapter, model, state_topic, command_topic,
               availability_topic, field_map, stream_url, snapshot_url,
-              stream_protocol, aspect_ratio, metadata, favorite, protected, display_order
+              stream_protocol, aspect_ratio, metadata, favorite, protected, display_order,
+              room_pin_position
        FROM devices
        ORDER BY display_order, name`,
     );
-    return rows;
+    return rows.map((row) => ({
+      ...row,
+      room_pin_position: normalizePinPosition(row.room_pin_position),
+    }));
   }
 
   async listScenarios(): Promise<ScenarioRow[]> {
@@ -858,12 +1068,16 @@ export class Database {
     const { rows } = await this.client.query<DeviceRow>(
       `SELECT id, room_id, name, type, adapter, model, state_topic, command_topic,
               availability_topic, field_map, stream_url, snapshot_url,
-              stream_protocol, aspect_ratio, metadata, favorite, protected, display_order
+              stream_protocol, aspect_ratio, metadata, favorite, protected, display_order,
+              room_pin_position
        FROM devices
        WHERE type = 'climate'
        ORDER BY display_order, name`,
     );
-    return rows;
+    return rows.map((row) => ({
+      ...row,
+      room_pin_position: normalizePinPosition(row.room_pin_position),
+    }));
   }
 
   async listClimateSchedules(deviceId: string): Promise<ClimateScheduleRow[]> {
@@ -1007,9 +1221,17 @@ export class Database {
 
   async createRoom(room: NewRoom): Promise<void> {
     await this.client.query(
-      `INSERT INTO rooms (id, name, short_label, icon, display_order)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [room.id, room.name, room.shortLabel, room.icon, room.displayOrder],
+      `INSERT INTO rooms (id, name, short_label, icon, display_order, floor_id, grid_layout)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)`,
+      [
+        room.id,
+        room.name,
+        room.shortLabel,
+        room.icon,
+        room.displayOrder,
+        room.floorId ?? null,
+        JSON.stringify(room.gridLayout ?? DEFAULT_GRID_LAYOUT),
+      ],
     );
   }
 
@@ -1031,10 +1253,10 @@ export class Database {
       `INSERT INTO devices (
          id, room_id, name, type, adapter, model, state_topic, command_topic,
          availability_topic, field_map, stream_url, snapshot_url, stream_protocol,
-         aspect_ratio, metadata, favorite, protected, display_order
+         aspect_ratio, metadata, favorite, protected, display_order, room_pin_position
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-         $10::jsonb, $11, $12, $13, $14, $15::jsonb, $16, $17, $18
+         $10::jsonb, $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19::jsonb
        )`,
       [
         device.id,
@@ -1055,6 +1277,7 @@ export class Database {
         device.favorite,
         device.protected,
         device.displayOrder,
+        JSON.stringify(device.roomPinPosition ?? DEFAULT_PIN_POSITION),
       ],
     );
   }
@@ -1144,10 +1367,18 @@ export class Database {
 
   async insertRoom(room: NewRoom): Promise<void> {
     await this.client.query(
-      `INSERT INTO rooms (id, name, short_label, icon, display_order)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO rooms (id, name, short_label, icon, display_order, floor_id, grid_layout)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
        ON CONFLICT (id) DO NOTHING`,
-      [room.id, room.name, room.shortLabel, room.icon, room.displayOrder],
+      [
+        room.id,
+        room.name,
+        room.shortLabel,
+        room.icon,
+        room.displayOrder,
+        room.floorId ?? null,
+        JSON.stringify(room.gridLayout ?? DEFAULT_GRID_LAYOUT),
+      ],
     );
   }
 
@@ -1156,10 +1387,10 @@ export class Database {
       `INSERT INTO devices (
          id, room_id, name, type, adapter, model, state_topic, command_topic,
          availability_topic, field_map, stream_url, snapshot_url, stream_protocol,
-         aspect_ratio, metadata, favorite, protected, display_order
+         aspect_ratio, metadata, favorite, protected, display_order, room_pin_position
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9,
-         $10::jsonb, $11, $12, $13, $14, $15::jsonb, $16, $17, $18
+         $10::jsonb, $11, $12, $13, $14, $15::jsonb, $16, $17, $18, $19::jsonb
        )
        ON CONFLICT (id) DO NOTHING`,
       [
@@ -1181,6 +1412,7 @@ export class Database {
         device.favorite,
         device.protected,
         device.displayOrder,
+        JSON.stringify(device.roomPinPosition ?? DEFAULT_PIN_POSITION),
       ],
     );
   }

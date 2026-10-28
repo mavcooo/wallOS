@@ -266,6 +266,31 @@ CREATE TABLE IF NOT EXISTS kiosk_displays (
 CREATE INDEX IF NOT EXISTS idx_kiosk_displays_active ON kiosk_displays (is_active);
 CREATE INDEX IF NOT EXISTS idx_kiosk_displays_room ON kiosk_displays (default_room_id);
 
+-- ── Planimetria schematica multi-piano ─────────────────────────────────────
+-- Replica di `007_add_floorplan_schema.sql`: `db.init()` applica questo file a
+-- ogni avvio e i test usano PGlite senza passare dal runner delle migrazioni,
+-- quindi le nuove colonne devono esistere qui come per il resto dello schema.
+CREATE TABLE IF NOT EXISTS floors (
+  id          VARCHAR(64) PRIMARY KEY,
+  name        VARCHAR(128) NOT NULL,
+  level_order INTEGER NOT NULL DEFAULT 0,
+  icon        VARCHAR(32) DEFAULT 'Layers',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_floors_level_order ON floors (level_order);
+
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS floor_id VARCHAR(64) REFERENCES floors(id) ON DELETE SET NULL;
+ALTER TABLE rooms
+  ADD COLUMN IF NOT EXISTS grid_layout JSONB NOT NULL
+  DEFAULT '{"col": 1, "row": 1, "colSpan": 3, "rowSpan": 2, "color": "zinc"}'::jsonb;
+ALTER TABLE devices
+  ADD COLUMN IF NOT EXISTS room_pin_position JSONB NOT NULL
+  DEFAULT '{"x": 50, "y": 50}'::jsonb;
+
+CREATE INDEX IF NOT EXISTS idx_rooms_floor_id ON rooms (floor_id);
+
 -- ── Ledger delle migrazioni ─────────────────────────────────────────────────
 -- Non è schema applicativo: è il registro di `server/migrate.ts`, che lo crea
 -- da sé (stessa DDL) prima di applicare le migrazioni pendenti. La riga

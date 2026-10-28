@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef } from 'react';
 
 import i18n from '@/i18n';
-import { TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
+import { FLOORPLAN_QUERY_KEY, TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import {
   onTopologyChanged,
@@ -76,9 +76,12 @@ export function useTopologySync(): void {
 
     // invalidateQueries attende il refetch: solo allora i nuovi `state_topic`
     // compaiono nell'indice e vale la pena riallineare le sottoscrizioni.
-    void queryClient
-      .invalidateQueries({ queryKey: TOPOLOGY_QUERY_KEY })
-      .finally(() => refreshSubscriptions());
+    // Anche la planimetria (`['floors']`) è topologia: stanze, geometrie e
+    // marker arrivano dalla stessa mutazione e devono restare allineati.
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: TOPOLOGY_QUERY_KEY }),
+      queryClient.invalidateQueries({ queryKey: FLOORPLAN_QUERY_KEY }),
+    ]).finally(() => refreshSubscriptions());
 
     if (withToast) {
       // `i18n.t` diretto (come in `useMqtt`): il callback non cambia identità

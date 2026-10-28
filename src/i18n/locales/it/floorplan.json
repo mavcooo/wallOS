@@ -1,0 +1,76 @@
+{
+  "view": {
+    "label": "Vista ambienti",
+    "grid": "Griglia",
+    "schematic": "Pianta"
+  },
+  "floors": {
+    "label": "Piani",
+    "empty": "Nessun piano configurato: crealo da Amministrazione → Planimetria.",
+    "loading": "Caricamento planimetria…",
+    "error": "Planimetria non disponibile.",
+    "lights": "{{count}} luci accese",
+    "alarms": "{{count}} allarmi",
+    "noRooms": "Nessuna stanza su questo piano.",
+    "aria": "Selettore dei piani"
+  },
+  "canvas": {
+    "aria": "Planimetria del piano {{floor}}",
+    "devices": "{{count}} dispositivi",
+    "alarm": "Allarme attivo",
+    "lightOn": "Luci accese",
+    "selectRoom": "Seleziona {{room}}",
+    "pinHint": "Tocca un marker per accendere, tieni premuto per i dettagli"
+  },
+  "pin": {
+    "aria": "{{name}}: {{status}}",
+    "on": "acceso",
+    "off": "spento",
+    "alarm": "in allarme",
+    "unavailable": "non raggiungibile",
+    "hint": "Tocca per accendere o spegnere, tieni premuto per i dettagli",
+    "guardTitle": "Comando protetto",
+    "guardDescription": "Inserisci il PIN per comandare “{{name}}”."
+  },
+  "detail": {
+    "description": "Controllo dettagliato del dispositivo selezionato."
+  },
+  "editor": {
+    "title": "Planimetria schematica",
+    "description": "La pianta non è un file CAD: ogni stanza occupa un rettangolo su una griglia 12×8 e ogni marker una posizione percentuale dentro la stanza. Il salvataggio scrive PostgreSQL in una transazione e avvisa tutti i pannelli via MQTT.",
+    "floors": "Piani",
+    "addFloor": "Nuovo piano",
+    "floorName": "Nome del piano",
+    "levelOrder": "Ordine",
+    "create": "Crea piano",
+    "rename": "Rinomina",
+    "saveName": "Salva nome",
+    "delete": "Elimina piano",
+    "deleteConfirm": "Eliminare “{{name}}”? Le stanze restano, ma senza piano.",
+    "cancel": "Annulla",
+    "confirm": "Elimina",
+    "roomsHere": "Stanze su questo piano",
+    "availableRooms": "Altre stanze",
+    "addRoom": "Aggiungi",
+    "removeRoom": "Togli dal piano",
+    "save": "Salva layout",
+    "saving": "Salvataggio…",
+    "saved": "Layout salvato",
+    "savedDescription": "La planimetria è aggiornata su tutti i pannelli della casa.",
+    "saveError": "Salvataggio del layout non riuscito.",
+    "gridHint": "Trascina una stanza per spostarla, l’angolo in basso a destra per ridimensionarla. I marker si trascinano dentro il perimetro della stanza.",
+    "noFloors": "Nessun piano: creane uno per iniziare.",
+    "loading": "Caricamento planimetria…",
+    "loadError": "Impossibile caricare la planimetria.",
+    "dirty": "Modifiche non salvate",
+    "clean": "Nessuna modifica",
+    "floorCreated": "Piano creato",
+    "floorDeleted": "Piano eliminato",
+    "floorUpdated": "Piano aggiornato",
+    "error": "Operazione non riuscita.",
+    "gridAria": "Griglia della planimetria",
+    "devicePin": "Marker di {{name}}",
+    "noRooms": "Nessuna stanza su questo piano: aggiungine una dall’elenco.",
+    "unassigned": "Senza piano"
+  }
+}

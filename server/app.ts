@@ -11,6 +11,7 @@ import { createAutomationEngine, type AutomationEngine } from './services/automa
 import { registerAutomationRoutes } from './routes/automations.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerClimateRoutes } from './routes/climate.js';
+import { registerFloorRoutes } from './routes/floors.js';
 import { registerKioskRoutes } from './routes/kiosk.js';
 import { registerTopologyRoutes } from './routes/topology.js';
 import { registerTopologyEventRoutes } from './routes/topologyEvents.js';
@@ -257,6 +258,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   // Display a parete: auto-registrazione all'avvio, configurazione centralizzata
   // e sync real-time via `wallos/system/kiosk/:id/config_updated`.
   registerKioskRoutes(app, { db, config, publisher: kioskPublisher });
+  // Planimetria schematica: piani, geometrie delle stanze e marker dei device.
+  // Il salvataggio bulk pubblica `floor_updated` sul topic di topologia, quindi
+  // ogni pannello invalida `['floors']` e `['topology']` senza reload.
+  registerFloorRoutes(app, { db, config, events: topologyEvents });
 
   app.addHook('onClose', async () => {
     await automations.stop();

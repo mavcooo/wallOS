@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 import { TOPOLOGY_SYNC_DEFAULTS } from '@/config/app.config';
 import { useTopologySync } from '@/hooks/useTopologySync';
-import { TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
+import { FLOORPLAN_QUERY_KEY, TOPOLOGY_QUERY_KEY } from '@/lib/queryClient';
 import { emitTopologyChanged, parseTopologyChanged } from '@/mqtt/topologyEvents';
 import { useHomeStore } from '@/store/homeStore';
 import { useToastStore, type ToastInput } from '@/store/toastStore';
@@ -110,10 +110,12 @@ describe('useTopologySync · evento MQTT', () => {
     // Niente refetch finché la finestra di debounce è aperta.
     expect(invalidate).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1), {
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), {
       timeout: 5_000,
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: TOPOLOGY_QUERY_KEY });
+    // Anche la planimetria annidata è topologia: stessa finestra di debounce.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: FLOORPLAN_QUERY_KEY });
     // Dopo il refetch i nuovi state_topic vengono sottoscritti.
     await waitFor(() => expect(mocks.refreshSubscriptions).toHaveBeenCalledTimes(1));
     expect(pushSpy).toHaveBeenCalledTimes(1);
@@ -136,7 +138,7 @@ describe('useTopologySync · evento MQTT', () => {
     act(() => {
       emitTopologyChanged(eventOf({ sourceClientId: 'pc-direzione' }));
     });
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1), {
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), {
       timeout: 5_000,
     });
     expect(pushSpy).toHaveBeenCalledTimes(1);
@@ -156,7 +158,7 @@ describe('useTopologySync · evento MQTT', () => {
     act(() => getState().setStatus('offline'));
     act(() => getState().setStatus('connected'));
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1), {
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), {
       timeout: 5_000,
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: TOPOLOGY_QUERY_KEY });
@@ -175,7 +177,7 @@ describe('useTopologySync · evento MQTT', () => {
     await sleep(DEBOUNCE + 150);
     expect(invalidate).not.toHaveBeenCalled();
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), { timeout: 5_000 });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: TOPOLOGY_QUERY_KEY });
   });
 
@@ -215,7 +217,7 @@ describe('useTopologySync · ripiego SSE', () => {
       );
     });
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1), {
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), {
       timeout: 5_000,
     });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: TOPOLOGY_QUERY_KEY });
@@ -251,7 +253,7 @@ describe('useTopologySync · ripiego SSE', () => {
 
     act(() => reopened.open());
 
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1), {
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), {
       timeout: 5_000,
     });
     expect(pushSpy).not.toHaveBeenCalled();

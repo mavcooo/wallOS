@@ -10,7 +10,11 @@ import type { AuthConfig } from '../types.js';
  */
 export const TOPOLOGY_CHANGED_TOPIC = 'wallos/system/topology_changed';
 
-export type TopologyEntity = 'room' | 'device' | 'scenario';
+/**
+ * Entità che possono cambiare: `floor` copre il salvataggio della planimetria
+ * (`PUT /api/floors/:id/layout`), che sposta stanze e marker in un colpo solo.
+ */
+export type TopologyEntity = 'floor' | 'room' | 'device' | 'scenario';
 
 /** `created` / `updated` / `deleted` / `reordered`: finisce in `event`. */
 export type TopologyChangeKind = 'created' | 'updated' | 'deleted' | 'reordered';

@@ -1,0 +1,76 @@
+{
+  "view": {
+    "label": "Room view",
+    "grid": "Grid",
+    "schematic": "Floor plan"
+  },
+  "floors": {
+    "label": "Floors",
+    "empty": "No floors configured yet: create one in Administration → Floor plan.",
+    "loading": "Loading floor plan…",
+    "error": "Floor plan unavailable.",
+    "lights": "{{count}} lights on",
+    "alarms": "{{count}} alarms",
+    "noRooms": "No rooms on this floor.",
+    "aria": "Floor selector"
+  },
+  "canvas": {
+    "aria": "Floor plan for {{floor}}",
+    "devices": "{{count}} devices",
+    "alarm": "Active alarm",
+    "lightOn": "Lights on",
+    "selectRoom": "Select {{room}}",
+    "pinHint": "Tap a marker to switch it on, long-press for details"
+  },
+  "pin": {
+    "aria": "{{name}}: {{status}}",
+    "on": "on",
+    "off": "off",
+    "alarm": "in alarm",
+    "unavailable": "unreachable",
+    "hint": "Tap to switch on or off, long-press for details",
+    "guardTitle": "Protected command",
+    "guardDescription": "Enter the PIN to control “{{name}}”."
+  },
+  "detail": {
+    "description": "Detailed control for the selected device."
+  },
+  "editor": {
+    "title": "Schematic floor plan",
+    "description": "The plan is not a CAD file: every room occupies a rectangle on a 12×8 grid and every marker a percentage position inside its room. Saving writes PostgreSQL in a single transaction and notifies every panel over MQTT.",
+    "floors": "Floors",
+    "addFloor": "New floor",
+    "floorName": "Floor name",
+    "levelOrder": "Order",
+    "create": "Create floor",
+    "rename": "Rename",
+    "saveName": "Save name",
+    "delete": "Delete floor",
+    "deleteConfirm": "Delete “{{name}}”? Rooms are kept, without a floor.",
+    "cancel": "Cancel",
+    "confirm": "Delete",
+    "roomsHere": "Rooms on this floor",
+    "availableRooms": "Other rooms",
+    "addRoom": "Add",
+    "removeRoom": "Remove from floor",
+    "save": "Save layout",
+    "saving": "Saving…",
+    "saved": "Layout saved",
+    "savedDescription": "The floor plan is up to date on every panel in the house.",
+    "saveError": "Saving the layout failed.",
+    "gridHint": "Drag a room to move it, its bottom-right corner to resize it. Markers can be dragged inside the room perimeter.",
+    "noFloors": "No floors yet: create one to start.",
+    "loading": "Loading floor plan…",
+    "loadError": "Unable to load the floor plan.",
+    "dirty": "Unsaved changes",
+    "clean": "No changes",
+    "floorCreated": "Floor created",
+    "floorDeleted": "Floor deleted",
+    "floorUpdated": "Floor updated",
+    "error": "Operation failed.",
+    "gridAria": "Floor plan grid",
+    "devicePin": "Marker for {{name}}",
+    "noRooms": "No rooms on this floor: add one from the list.",
+    "unassigned": "No floor"
+  }
+}

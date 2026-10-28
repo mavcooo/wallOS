@@ -1,12 +1,24 @@
-import { Lightbulb, Power, RadioTower } from 'lucide-react';
+import { LayoutGrid, Lightbulb, Map, Power, RadioTower } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
 import { usePinGuard } from '@/components/kiosk/PinProvider';
+import { FloorSelector } from '@/components/floorplan/FloorSelector';
+import { SchematicFloorCanvas } from '@/components/floorplan/SchematicFloorCanvas';
 import { CarouselDots } from '@/components/ui/carousel-dots';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { VirtualizedDeviceGrid } from '@/components/ui/VirtualizedDeviceGrid';
+import { DeviceCard } from '@/components/widgets/DeviceCard';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useDevice } from '@/hooks/useDevice';
+import { useFloorplanQuery } from '@/hooks/useFloorplan';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { useDevices, useRooms } from '@/hooks/useTopologyQuery';
 import { useMqttApi } from '@/mqtt/MqttProvider';
@@ -127,15 +139,112 @@ const RoomLightsButton = memo(function RoomLightsButton({
   );
 });
 
+/**
+ * Toggle "Pianta / Griglia".
+ *
+ * Due soli stati, target da 48 px e preferenza persistita in `homeStore.ui`:
+ * il tablet a parete riapre la vista che l'utente aveva lasciato, anche dopo
+ * un riavvio o una pulizia della cache del browser.
+ */
+const RoomViewToggle = memo(function RoomViewToggle() {
+  const { t } = useTranslation('floorplan');
+  const roomView = useHomeStore((state) => state.ui.roomView);
+  const setRoomView = useHomeStore((state) => state.setRoomView);
+  const schematic = roomView === 'schematic';
+
+  const button = (
+    active: boolean,
+    label: string,
+    icon: ReactNode,
+    onClick: () => void,
+    value: 'grid' | 'schematic',
+  ) => (
+    <button
+      type="button"
+      aria-pressed={active}
+      aria-label={label}
+      title={label}
+      data-room-view={value}
+      onClick={() => {
+        if (!active) onClick();
+      }}
+      className={cn(
+        'flex min-h-12 items-center gap-2 rounded-xl px-3 text-xs font-medium transition-colors',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50',
+        active ? 'bg-elevated text-fg' : 'text-fg-muted hover:text-fg',
+      )}
+    >
+      {icon}
+      <span className="hidden sm:inline">{label}</span>
+    </button>
+  );
+
+  return (
+    <div
+      role="group"
+      aria-label={t('view.label')}
+      className="flex shrink-0 items-center gap-1 rounded-2xl border border-line bg-panel p-1"
+    >
+      {button(
+        schematic,
+        t('view.schematic'),
+        <Map className="size-4" />,
+        () => setRoomView('schematic'),
+        'schematic',
+      )}
+      {button(
+        !schematic,
+        t('view.grid'),
+        <LayoutGrid className="size-4" />,
+        () => setRoomView('grid'),
+        'grid',
+      )}
+    </div>
+  );
+});
+
+/**
+ * Dettaglio del marker: riusa `DeviceCard`, quindi PIN, disponibilità e
+ * badge delle automazioni restano gli stessi della vista a card.
+ */
+function DeviceDetailDialog({ deviceId, onClose }: { deviceId: string; onClose: () => void }) {
+  const { t } = useTranslation('floorplan');
+  const device = useDevice(deviceId);
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogContent className="max-h-[92dvh] w-[min(94vw,30rem)] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{device?.name ?? deviceId}</DialogTitle>
+          <DialogDescription>{t('detail.description')}</DialogDescription>
+        </DialogHeader>
+        <div className="mt-4">
+          <DeviceCard deviceId={deviceId} showFavorite />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function RoomsPage() {
   const { t } = useTranslation();
+  const { t: tFloorplan } = useTranslation('floorplan');
   const room = useHomeStore((state) => state.ui.room);
   const setRoom = useHomeStore((state) => state.setRoom);
+  const roomView = useHomeStore((state) => state.ui.roomView);
+  const storedFloor = useHomeStore((state) => state.ui.floor);
+  const setFloor = useHomeStore((state) => state.setFloor);
   // Metadati e stanze sono server-state: la pagina non si ridisegna con la
   // telemetria, solo le card e i contatori isolati lo fanno.
   const devices = useDevices();
   const allRooms = useRooms();
   const user = useCurrentUser();
+  const [detailDeviceId, setDetailDeviceId] = useState<string | null>(null);
 
   const rooms = user.allowedRooms
     ? allRooms.filter((candidate) => user.allowedRooms?.includes(candidate.id))
@@ -143,6 +252,14 @@ export function RoomsPage() {
   const active = rooms.find((candidate) => candidate.id === room) ?? rooms[0];
   const roomIds = useMemo(() => rooms.map((candidate) => candidate.id), [rooms]);
   const activeIndex = active ? rooms.findIndex((candidate) => candidate.id === active.id) : -1;
+
+  const schematic = roomView === 'schematic';
+  const plan = useFloorplanQuery(schematic);
+  const floors = useMemo(() => plan.data ?? [], [plan.data]);
+  // Il piano salvato nella preferenza può essere stato eliminato da un altro
+  // desktop: in quel caso si ricade sul primo piano disponibile.
+  const activeFloor =
+    floors.find((candidate) => candidate.id === storedFloor) ?? floors[0] ?? null;
 
   // Direzione dell'ultimo swipe: decide da quale lato entra il contenuto.
   const [roomDirection, setRoomDirection] = useState<'left' | 'right' | null>(null);
@@ -154,7 +271,9 @@ export function RoomsPage() {
     items: roomIds,
     current: active?.id ?? roomIds[0] ?? ('' as RoomId),
     onChange: setRoom,
-    enabled: rooms.length > 1,
+    // Sulla pianta lo swipe è disattivato: il gesto compete con il long-press
+    // dei marker e con il drag dell'editor. Si naviga toccando il piano.
+    enabled: !schematic && rooms.length > 1,
     onSwipe: (direction) => setRoomDirection(direction === 'left' ? 'right' : 'left'),
     onEdge: (edge) => {
       setEdgeNudge(edge);
@@ -211,137 +330,189 @@ export function RoomsPage() {
         edgeNudge === 'end' && '-translate-x-1',
       )}
       data-testid="rooms-swipe-surface"
+      data-room-view={roomView}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <Tabs
-          value={active.id}
-          onValueChange={(value) => {
-            setRoomDirection(null);
-            setRoom(value as RoomId);
-          }}
-          className="min-w-0"
-        >
-          <TabsList className="flex w-full flex-wrap justify-start gap-1 lg:w-auto">
-            {rooms.map((candidate) => (
-              <TabsTrigger key={candidate.id} value={candidate.id} className="px-3">
-                {candidate.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {schematic ? (
+          <FloorSelector
+            floors={floors}
+            activeFloorId={activeFloor?.id ?? null}
+            onSelect={setFloor}
+            className="min-w-0"
+          />
+        ) : (
+          <Tabs
+            value={active.id}
+            onValueChange={(value) => {
+              setRoomDirection(null);
+              setRoom(value as RoomId);
+            }}
+            className="min-w-0"
+          >
+            <TabsList className="flex w-full flex-wrap justify-start gap-1 lg:w-auto">
+              {rooms.map((candidate) => (
+                <TabsTrigger key={candidate.id} value={candidate.id} className="px-3">
+                  {candidate.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <RoomOnlineBadge deviceIds={roomDeviceIds} />
           <RoomLightsButton lights={groups.lights} roomLabel={active.label} />
+          <RoomViewToggle />
         </div>
       </div>
 
-      <CarouselDots
-        count={rooms.length}
-        activeIndex={activeIndex}
-        label={t('swipe.room')}
-        onSelect={(index) => {
-          const next = rooms[index];
-          if (!next) return;
-          setRoomDirection(null);
-          setRoom(next.id);
-        }}
-        className="-mt-1"
-      />
+      {schematic ? (
+        <div
+          key={activeFloor?.id ?? 'no-floor'}
+          className="mx-auto flex w-full max-w-[min(100%,calc((100dvh-18rem)*1.6))] flex-col gap-2 animate-fade-in motion-reduce:animate-none"
+        >
+          {plan.isPending ? (
+            <p className="text-xs text-fg-subtle">{tFloorplan('floors.loading')}</p>
+          ) : plan.isError ? (
+            <p role="alert" className="text-xs text-danger">
+              {tFloorplan('floors.error')}
+            </p>
+          ) : !activeFloor ? (
+            <p className="rounded-2xl border border-dashed border-line p-6 text-center text-xs text-fg-subtle">
+              {tFloorplan('floors.empty')}
+            </p>
+          ) : (
+            <>
+              <SchematicFloorCanvas
+                floor={activeFloor}
+                activeRoomId={active.id}
+                onSelectRoom={setRoom}
+                onOpenDetail={setDetailDeviceId}
+              />
+              <p className="text-center text-[10px] leading-relaxed text-fg-subtle">
+                {tFloorplan('canvas.pinHint')}
+              </p>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <CarouselDots
+            count={rooms.length}
+            activeIndex={activeIndex}
+            label={t('swipe.room')}
+            onSelect={(index) => {
+              const next = rooms[index];
+              if (!next) return;
+              setRoomDirection(null);
+              setRoom(next.id);
+            }}
+            className="-mt-1"
+          />
 
-      <div
-        key={active.id}
-        className={cn(
-          'flex flex-col gap-6 motion-reduce:animate-none',
-          roomDirection === 'right' && 'animate-slide-in-right',
-          roomDirection === 'left' && 'animate-slide-in-left',
-        )}
-      >
-        {roomDevices.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-fg-muted">
-            {t('rooms.empty', { room: active.label })}
-          </p>
-        ) : null}
+          <div
+            key={active.id}
+            className={cn(
+              'flex flex-col gap-6 motion-reduce:animate-none',
+              roomDirection === 'right' && 'animate-slide-in-right',
+              roomDirection === 'left' && 'animate-slide-in-left',
+            )}
+          >
+            {roomDevices.length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-line p-8 text-center text-sm text-fg-muted">
+                {t('rooms.empty', { room: active.label })}
+              </p>
+            ) : null}
 
-        {groups.climates.length > 0 ? (
-          <Group title={t('rooms.groups.climate')} count={groups.climates.length}>
-            <VirtualizedDeviceGrid
-              deviceIds={groupIds.climates}
-              columnsCount={{ sm: 1, xl: 2 }}
-              estimatedCardHeight={280}
-              showFavorite
-            />
-          </Group>
-        ) : null}
+            {groups.climates.length > 0 ? (
+              <Group title={t('rooms.groups.climate')} count={groups.climates.length}>
+                <VirtualizedDeviceGrid
+                  deviceIds={groupIds.climates}
+                  columnsCount={{ sm: 1, xl: 2 }}
+                  estimatedCardHeight={280}
+                  showFavorite
+                />
+              </Group>
+            ) : null}
 
-        {groups.lights.length > 0 ? (
-          <Group title={t('rooms.groups.lights')} count={groups.lights.length}>
-            <VirtualizedDeviceGrid
-              deviceIds={groupIds.lights}
-              columnsCount={{ sm: 1, md: 2, xl: 3 }}
-              estimatedCardHeight={240}
-              showFavorite
-            />
-          </Group>
-        ) : null}
+            {groups.lights.length > 0 ? (
+              <Group title={t('rooms.groups.lights')} count={groups.lights.length}>
+                <VirtualizedDeviceGrid
+                  deviceIds={groupIds.lights}
+                  columnsCount={{ sm: 1, md: 2, xl: 3 }}
+                  estimatedCardHeight={240}
+                  showFavorite
+                />
+              </Group>
+            ) : null}
 
-        {groups.powers.length > 0 ? (
-          <Group title={t('rooms.groups.powers')} count={groups.powers.length}>
-            <VirtualizedDeviceGrid
-              deviceIds={groupIds.powers}
-              columnsCount={{ sm: 1, md: 2, xl: 3 }}
-              estimatedCardHeight={200}
-              showFavorite
-            />
-          </Group>
-        ) : null}
+            {groups.powers.length > 0 ? (
+              <Group title={t('rooms.groups.powers')} count={groups.powers.length}>
+                <VirtualizedDeviceGrid
+                  deviceIds={groupIds.powers}
+                  columnsCount={{ sm: 1, md: 2, xl: 3 }}
+                  estimatedCardHeight={200}
+                  showFavorite
+                />
+              </Group>
+            ) : null}
 
-        {groups.cameras.length > 0 ? (
-          <Group title={t('rooms.groups.cameras')} count={groups.cameras.length}>
-            <VirtualizedDeviceGrid
-              deviceIds={groupIds.cameras}
-              columnsCount={{ sm: 1, lg: 2, xl: 3 }}
-              estimatedCardHeight={360}
-              showFavorite
-            />
-          </Group>
-        ) : null}
+            {groups.cameras.length > 0 ? (
+              <Group title={t('rooms.groups.cameras')} count={groups.cameras.length}>
+                <VirtualizedDeviceGrid
+                  deviceIds={groupIds.cameras}
+                  columnsCount={{ sm: 1, lg: 2, xl: 3 }}
+                  estimatedCardHeight={360}
+                  showFavorite
+                />
+              </Group>
+            ) : null}
 
-        {groups.media.length > 0 ? (
-          <Group title={t('rooms.groups.media')} count={groups.media.length}>
-            <VirtualizedDeviceGrid
-              deviceIds={groupIds.media}
-              columnsCount={{ sm: 1, md: 2 }}
-              estimatedCardHeight={200}
-              showFavorite
-            />
-          </Group>
-        ) : null}
+            {groups.media.length > 0 ? (
+              <Group title={t('rooms.groups.media')} count={groups.media.length}>
+                <VirtualizedDeviceGrid
+                  deviceIds={groupIds.media}
+                  columnsCount={{ sm: 1, md: 2 }}
+                  estimatedCardHeight={200}
+                  showFavorite
+                />
+              </Group>
+            ) : null}
 
-        {groups.sensors.length > 0 ? (
-          <Group title={t('rooms.groups.sensors')} count={groups.sensors.length}>
-            <VirtualizedDeviceGrid
-              deviceIds={groupIds.sensors}
-              columnsCount={{ sm: 2, xl: 3 }}
-              estimatedCardHeight={100}
-            />
-          </Group>
-        ) : null}
+            {groups.sensors.length > 0 ? (
+              <Group title={t('rooms.groups.sensors')} count={groups.sensors.length}>
+                <VirtualizedDeviceGrid
+                  deviceIds={groupIds.sensors}
+                  columnsCount={{ sm: 2, xl: 3 }}
+                  estimatedCardHeight={100}
+                />
+              </Group>
+            ) : null}
 
-        {roomDevices.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel/60 px-4 py-3 text-[10px] text-fg-subtle">
-            <span className="flex items-center gap-1.5">
-              <RadioTower className="size-3.5" />{' '}
-              {t('rooms.adapters', {
-                adapters: [...new Set(roomDevices.map((device) => device.adapter))].join(' · '),
-              })}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <Power className="size-3.5" /> {t('rooms.topic', { topic: roomDevices[0]?.topics.state })}
-            </span>
+            {roomDevices.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-line bg-panel/60 px-4 py-3 text-[10px] text-fg-subtle">
+                <span className="flex items-center gap-1.5">
+                  <RadioTower className="size-3.5" />{' '}
+                  {t('rooms.adapters', {
+                    adapters: [...new Set(roomDevices.map((device) => device.adapter))].join(' · '),
+                  })}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <Power className="size-3.5" />{' '}
+                  {t('rooms.topic', { topic: roomDevices[0]?.topics.state })}
+                </span>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </>
+      )}
+
+      {detailDeviceId ? (
+        <DeviceDetailDialog
+          deviceId={detailDeviceId}
+          onClose={() => setDetailDeviceId(null)}
+        />
+      ) : null}
     </div>
   );
 }

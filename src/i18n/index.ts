@@ -7,12 +7,14 @@ import enAutomations from './locales/en/automations.json';
 import enCommon from './locales/en/common.json';
 import enDevices from './locales/en/devices.json';
 import enEnergy from './locales/en/energy.json';
+import enFloorplan from './locales/en/floorplan.json';
 import enSettings from './locales/en/settings.json';
 import itAuth from './locales/it/auth.json';
 import itAutomations from './locales/it/automations.json';
 import itCommon from './locales/it/common.json';
 import itDevices from './locales/it/devices.json';
 import itEnergy from './locales/it/energy.json';
+import itFloorplan from './locales/it/floorplan.json';
 import itSettings from './locales/it/settings.json';
 
 /** Lingua di fallback: il pannello nasce in italiano, le chiavi mancanti
@@ -35,6 +37,7 @@ export const resources = {
     settings: itSettings,
     auth: itAuth,
     automations: itAutomations,
+    floorplan: itFloorplan,
   },
   en: {
     common: enCommon,
@@ -43,6 +46,7 @@ export const resources = {
     settings: enSettings,
     auth: enAuth,
     automations: enAutomations,
+    floorplan: enFloorplan,
   },
 } as const;
 
@@ -53,6 +57,7 @@ export const NAMESPACES = [
   'settings',
   'auth',
   'automations',
+  'floorplan',
 ] as const;
 
 /** Locale BCP 47 usata da Intl: 'en' → inglese britannico, con date

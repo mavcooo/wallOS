@@ -23,9 +23,20 @@ import type { TopologySyncSettings } from '@/types/topologySync';
 
 export type ViewId = 'overview' | 'rooms' | 'energy' | 'settings' | 'users' | 'admin';
 
+/** Come la pagina Stanze mostra gli ambienti. */
+export type RoomView = 'grid' | 'schematic';
+
 export interface UiState {
   view: ViewId;
   room: RoomId;
+  /**
+   * Ultima vista scelta per le stanze: la pianta schematica o la classica
+   * griglia di card. Persistita con le altre preferenze, così un riavvio del
+   * kiosk non riporta sempre la pagina alla vista sbagliata.
+   */
+  roomView: RoomView;
+  /** Piano attivo della planimetria; `null` = primo piano disponibile. */
+  floor: string | null;
   dimmerTimeoutMs: number;
   screenDimmed: boolean;
   /**
@@ -117,6 +128,8 @@ export interface HomeState {
   ui: UiState;
   setView(view: ViewId): void;
   setRoom(room: RoomId): void;
+  setRoomView(view: RoomView): void;
+  setFloor(floor: string | null): void;
   setDimmerTimeout(ms: number): void;
   setScreenDimmed(dimmed: boolean): void;
   setPerformanceMode(enabled: boolean): void;
@@ -150,6 +163,8 @@ const initialRecovery: RecoveryState = {
 const initialUi: UiState = {
   view: 'overview',
   room: 'living',
+  roomView: 'grid',
+  floor: null,
   dimmerTimeoutMs: KIOSK_DEFAULTS.dimmerTimeoutMs,
   screenDimmed: false,
   performanceMode: false,
@@ -543,6 +558,12 @@ export const useHomeStore = create<HomeState>()(
       },
       setRoom(room) {
         set((state) => ({ ui: { ...state.ui, room, lastActionAt: Date.now() } }));
+      },
+      setRoomView(roomView) {
+        set((state) => ({ ui: { ...state.ui, roomView, lastActionAt: Date.now() } }));
+      },
+      setFloor(floor) {
+        set((state) => ({ ui: { ...state.ui, floor, lastActionAt: Date.now() } }));
       },
       setDimmerTimeout(ms) {
         set((state) => ({ ui: { ...state.ui, dimmerTimeoutMs: ms } }));

@@ -1,6 +1,7 @@
 import type { Database, NewDevice } from './db.js';
 import { hashSecret, pinLengthOf, randomId } from './security.js';
 import { initialDevices } from './seed-data/devices.js';
+import { SEED_FLOORS } from './seed-data/floors.js';
 import { SEED_ROOMS } from './seed-data/rooms.js';
 import { SCENARIOS } from './seed-data/scenarios.js';
 import type { AuthConfig } from './types.js';
@@ -11,6 +12,16 @@ import type { Device } from '../src/types/device.js';
  * il seed idempotente: un riavvio non sovrascrive PIN, modifiche o preferiti.
  */
 export async function seedDatabase(db: Database, config: AuthConfig): Promise<void> {
+  // I piani prima delle stanze: `rooms.floor_id` punta a `floors.id`.
+  for (const floor of SEED_FLOORS) {
+    await db.insertFloor({
+      id: floor.id,
+      name: floor.name,
+      level_order: floor.levelOrder,
+      icon: floor.icon,
+    });
+  }
+
   for (const room of SEED_ROOMS) {
     await db.insertRoom({
       id: room.id,
@@ -18,11 +29,18 @@ export async function seedDatabase(db: Database, config: AuthConfig): Promise<vo
       shortLabel: room.shortLabel,
       icon: room.icon,
       displayOrder: room.displayOrder,
+      floorId: room.floorId,
+      gridLayout: room.gridLayout,
     });
   }
 
+  // Marker distribuiti dentro la stanza (a griglia 3 colonne): il centro
+  // esatto li sovrapporrebbe tutti, rendendo la planimetria demo illeggibile.
+  const pinPerRoom = new Map<string, number>();
   for (const [index, device] of initialDevices.entries()) {
-    await db.insertDevice(toSeedDevice(device, index));
+    const slot = pinPerRoom.get(device.room) ?? 0;
+    pinPerRoom.set(device.room, slot + 1);
+    await db.insertDevice(toSeedDevice(device, index, slot));
   }
 
   for (const [index, scenario] of SCENARIOS.entries()) {
@@ -73,7 +91,7 @@ export async function seedDatabase(db: Database, config: AuthConfig): Promise<vo
  * La tabella `devices` conserva i campi interrogabili (topic, stanza, tipo) e
  * mette stato/capability/discovery in `metadata` JSONB: l'adapter non cambia.
  */
-function toSeedDevice(device: Device, index: number): NewDevice {
+function toSeedDevice(device: Device, index: number, slot = 0): NewDevice {
   const record = device as unknown as Record<string, unknown>;
   const metadata: Record<string, unknown> = {
     state: record.state,
@@ -110,5 +128,11 @@ function toSeedDevice(device: Device, index: number): NewDevice {
     favorite: device.favorite,
     protected: device.protected,
     displayOrder: index,
+    roomPinPosition: {
+      // Griglia 4×3 con margine: resta dentro il perimetro anche con molti
+      // device nella stessa stanza.
+      x: 18 + (slot % 4) * 22,
+      y: 22 + (Math.floor(slot / 4) % 3) * 28,
+    },
   };
 }

@@ -1,6 +1,7 @@
 import {
   Cpu,
   DoorOpen,
+  Layers,
   MonitorSmartphone,
   Pencil,
   Plus,
@@ -15,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 
 import { AutomationsTab } from '@/components/admin/AutomationsTab';
 import { DeviceForm } from '@/components/admin/DeviceForm';
+import { FloorplanEditor } from '@/components/admin/FloorplanEditor';
 import { KioskManagerTab } from '@/components/admin/KioskManagerTab';
 import { RoomForm } from '@/components/admin/RoomForm';
 import { ScenarioForm } from '@/components/admin/ScenarioForm';
@@ -35,13 +37,13 @@ import { roomLabel, type RoomConfig } from '@/lib/rooms';
 import { useToastStore } from '@/store/toastStore';
 import type { DeviceMetadata, Scenario } from '@/types/device';
 
-type Tab = 'rooms' | 'devices' | 'scenarios' | 'automations' | 'displays';
+type Tab = 'rooms' | 'devices' | 'scenarios' | 'automations' | 'displays' | 'floorplan';
 
 /**
- * Le tab con il CRUD a dialog: automazioni e display hanno i propri controlli
- * (il display non si crea a mano: si auto-registra al primo avvio).
+ * Le tab con il CRUD a dialog: automazioni, display e planimetria hanno i
+ * propri controlli (il display si auto-registra, la pianta si edita in griglia).
  */
-type CrudTab = Exclude<Tab, 'automations' | 'displays'>;
+type CrudTab = Exclude<Tab, 'automations' | 'displays' | 'floorplan'>;
 
 type Editing =
   | { kind: 'room'; item?: RoomConfig }
@@ -180,8 +182,11 @@ export function AdminPage() {
             <TabsTrigger value="displays">
               <MonitorSmartphone className="size-4" /> {t('admin.tabs.displays')}
             </TabsTrigger>
+            <TabsTrigger value="floorplan">
+              <Layers className="size-4" /> {t('admin.tabs.floorplan')}
+            </TabsTrigger>
           </TabsList>
-          {tab === 'automations' || tab === 'displays' ? null : (
+          {tab === 'automations' || tab === 'displays' || tab === 'floorplan' ? null : (
             <Button
               type="button"
               variant="primary"
@@ -337,6 +342,10 @@ export function AdminPage() {
 
         <TabsContent value="displays">
           <KioskManagerTab />
+        </TabsContent>
+
+        <TabsContent value="floorplan">
+          <FloorplanEditor />
         </TabsContent>
       </Tabs>
 

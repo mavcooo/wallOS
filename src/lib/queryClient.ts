@@ -7,6 +7,13 @@ export const TOPOLOGY_QUERY_KEY = ['topology'] as const;
 export const USERS_QUERY_KEY = ['users'] as const;
 
 /**
+ * Planimetria annidata (piano → stanze → dispositivi). Chiave separata dalla
+ * topologia perché la forma serve solo a canvas ed editor: ogni mutazione le
+ * invalida entrambe, così la stessa stanza non può divergere fra le due viste.
+ */
+export const FLOORPLAN_QUERY_KEY = ['floors'] as const;
+
+/**
  * I metadati cambiano solo da Amministrazione: 15 minuti di `staleTime`
  * evitano refetch inutili su un pannello sempre acceso. Le mutazioni admin e il
  * cambio profilo invalidano la chiave in modo esplicito.

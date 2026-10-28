@@ -9,7 +9,11 @@
 
 export const TOPOLOGY_CHANGED_TOPIC = 'wallos/system/topology_changed';
 
-export type TopologyEntity = 'room' | 'device' | 'scenario';
+/**
+ * Entità che possono cambiare. `floor` arriva dal salvataggio della planimetria
+ * (`PUT /api/floors/:id/layout`): stanze e marker aggiornati in una transazione.
+ */
+export type TopologyEntity = 'floor' | 'room' | 'device' | 'scenario';
 
 export type TopologyChangeKind = 'created' | 'updated' | 'deleted' | 'reordered';
 
@@ -23,7 +27,7 @@ export interface TopologyChangedEvent {
   sourceClientId?: string;
 }
 
-const ENTITIES: readonly TopologyEntity[] = ['room', 'device', 'scenario'];
+const ENTITIES: readonly TopologyEntity[] = ['floor', 'room', 'device', 'scenario'];
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim().length > 0 ? value : undefined;
