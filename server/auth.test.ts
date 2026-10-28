@@ -537,9 +537,14 @@ describe('health con stato del database', () => {
 
   it('risponde 503 con il codice di errore quando il database è irraggiungibile', async () => {
     const { app, db } = await setup();
-    vi.spyOn(db, 'serverInfo').mockRejectedValue(
-      Object.assign(new Error('connection refused'), { code: 'ECONNREFUSED' }),
-    );
+    // `Database.health()` incapsula la sonda sul pool: qui si simula l'esito
+    // di rete già classificato dal driver (la sonda reale è coperta da
+    // `dbResilience.test.ts`).
+    vi.spyOn(db, 'health').mockResolvedValue({
+      healthy: false,
+      latencyMs: 3,
+      error: 'ECONNREFUSED',
+    });
 
     const response = await app.inject({ method: 'GET', url: '/api/health' });
 

@@ -531,6 +531,12 @@ export function createPool(config: DatabasePoolConfig): Pool {
     max: config.max,
     idleTimeoutMillis: config.idleTimeoutMillis,
     connectionTimeoutMillis: config.connectionTimeoutMillis,
+    // Un socket inattivo può morire senza FIN (riavvio di PostgreSQL, cavo
+    // sfilato, sessione NAT scartata dal router). Il keep-alive TCP lo scopre
+    // mentre il client è ancora nel pool, così `pg` lo elimina e la query
+    // successiva apre una connessione nuova invece di fallire.
+    keepAlive: config.keepAlive,
+    keepAliveInitialDelayMillis: config.keepAliveInitialDelayMillis,
     application_name: 'wallos-auth',
     ...(config.ssl ? { ssl: { rejectUnauthorized: false } } : {}),
   });
@@ -586,19 +592,100 @@ export async function query<T = Record<string, unknown>>(
   return { rows: result.rows as T[], rowCount: result.rowCount ?? 0 };
 }
 
-/** Identità del server per log e health: nessun segreto, una sola query. */
-export async function readServerInfo(client: SqlClient): Promise<ServerInfo> {
-  const { rows } = await client.query<{
-    version: string;
-    database: string;
-    username: string;
-  }>('SELECT version() AS version, current_database() AS database, current_user AS username');
-  const row = rows[0];
+/** Query di identità: una sola andata e ritorno, nessun segreto. */
+const SERVER_INFO_SQL =
+  'SELECT version() AS version, current_database() AS database, current_user AS username';
+
+interface ServerInfoRow {
+  version: string;
+  database: string;
+  username: string;
+}
+
+function toServerInfo(row: ServerInfoRow | undefined): ServerInfo {
   return {
     version: row?.version ?? 'versione sconosciuta',
     database: row?.database ?? 'database sconosciuto',
     user: row?.username ?? 'utente sconosciuto',
   };
+}
+
+/** Identità del server per log e health: nessun segreto, una sola query. */
+export async function readServerInfo(client: SqlClient): Promise<ServerInfo> {
+  const { rows } = await client.query<ServerInfoRow>(SERVER_INFO_SQL);
+  return toServerInfo(rows[0]);
+}
+
+export interface DatabaseHealth {
+  healthy: boolean;
+  /** Tempo di acquisizione del client + query, assente se il pool non esiste. */
+  latencyMs?: number;
+  /** Codice PostgreSQL/Node (es. `ECONNREFUSED`) o messaggio di fallback. */
+  error?: string;
+  /** Identità del server, presente solo quando la connessione risponde. */
+  server?: ServerInfo;
+}
+
+function isPgPool(target: Pool | SqlClient): target is Pool {
+  return typeof (target as Pool).connect === 'function';
+}
+
+/** Codice del driver se disponibile, altrimenti il messaggio: mai credenziali. */
+function healthErrorLabel(error: unknown): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (typeof code === 'string' && code.length > 0) return code;
+  if (error instanceof Error && error.message.length > 0) return error.message;
+  return 'DATABASE_UNAVAILABLE';
+}
+
+/**
+ * Verifica reale della connettività, pensata per health check e watchdog.
+ *
+ * - Con un `Pool` prende un client (`connect()` rispetta
+ *   `connectionTimeoutMillis`, quindi pool esaurito = fallimento rapido),
+ *   esegue la query di identità e lo rilascia **sempre** nel `finally`.
+ * - Con un `SqlClient` (PGlite nei test, adattatori) usa quello.
+ * - Non lancia mai: un database spento o un errore di rete diventano
+ *   `{ healthy: false, error }`, così la rotta `/api/health` e gli script non
+ *   devono gestire eccezioni.
+ */
+export async function checkDatabaseHealth(
+  target?: Pool | SqlClient | null,
+): Promise<DatabaseHealth> {
+  const startedAt = Date.now();
+  const probe = target ?? sharedPool;
+
+  if (!probe) {
+    return { healthy: false, latencyMs: 0, error: 'POOL_NOT_INITIALIZED' };
+  }
+
+  try {
+    if (isPgPool(probe)) {
+      const client = await probe.connect();
+      try {
+        const { rows } = await client.query<ServerInfoRow>(SERVER_INFO_SQL);
+        return {
+          healthy: true,
+          latencyMs: Date.now() - startedAt,
+          server: toServerInfo(rows[0]),
+        };
+      } finally {
+        client.release();
+      }
+    }
+
+    return {
+      healthy: true,
+      latencyMs: Date.now() - startedAt,
+      server: await readServerInfo(probe),
+    };
+  } catch (error) {
+    return {
+      healthy: false,
+      latencyMs: Date.now() - startedAt,
+      error: healthErrorLabel(error),
+    };
+  }
 }
 
 export interface ConnectionCheckOptions {
@@ -648,9 +735,13 @@ export class Database {
 
     this.pool = getPool({
       connectionString: options.connectionString,
-      max: options.max ?? 10,
-      idleTimeoutMillis: options.idleTimeoutMillis ?? 30_000,
-      connectionTimeoutMillis: options.connectionTimeoutMillis ?? 5_000,
+      max: options.max ?? POOL_DEFAULTS.max,
+      idleTimeoutMillis: options.idleTimeoutMillis ?? POOL_DEFAULTS.idleTimeoutMillis,
+      connectionTimeoutMillis:
+        options.connectionTimeoutMillis ?? POOL_DEFAULTS.connectionTimeoutMillis,
+      keepAlive: options.keepAlive ?? POOL_DEFAULTS.keepAlive,
+      keepAliveInitialDelayMillis:
+        options.keepAliveInitialDelayMillis ?? POOL_DEFAULTS.keepAliveInitialDelayMillis,
       ssl: options.ssl ?? false,
     });
     this.client = createSqlClient(this.pool);
@@ -668,6 +759,14 @@ export class Database {
   /** Identità del server per il log di avvio: nessun segreto, una sola query. */
   async serverInfo(): Promise<ServerInfo> {
     return readServerInfo(this.client);
+  }
+
+  /**
+   * Health check del pool (o del client iniettato): non lancia mai, quindi la
+   * rotta `/api/health` può rispondere 503 invece di far cadere il processo.
+   */
+  async health(): Promise<DatabaseHealth> {
+    return checkDatabaseHealth(this.pool ?? this.client);
   }
 
   async close(): Promise<void> {

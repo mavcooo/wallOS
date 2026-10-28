@@ -57,6 +57,11 @@ export function DatabaseBadge() {
         ? t('database.badge.offline')
         : t('database.badge.checking');
 
+  // Latenza (up) e codice errore (down) sono già in `/api/health`: mostrati
+  // nel badge, non solo nel tooltip che sul pannello touch non esiste.
+  const latencyText = latencyMs !== null ? `${latencyMs} ms` : null;
+  const detail = status === 'up' ? latencyText : status === 'down' ? error : null;
+
   const checked = timeLabel(checkedAt);
   const checkedText = checked ? t('database.badge.checkedAt', { time: checked }) : null;
   const title =
@@ -85,10 +90,17 @@ export function DatabaseBadge() {
   const aria =
     status === 'up'
       ? versionText
-        ? t('database.badge.availableAria', { version: versionText })
+        ? latencyText
+          ? t('database.badge.availableAriaLatency', {
+              version: versionText,
+              latency: latencyText,
+            })
+          : t('database.badge.availableAria', { version: versionText })
         : t('database.badge.available')
       : status === 'down'
-        ? t('database.badge.unavailable')
+        ? error
+          ? t('database.badge.unavailableAria', { error })
+          : t('database.badge.unavailable')
         : t('database.badge.checkingTitle');
 
   // Determina se mostrare l'indicatore di "checking" (solo al primo poll o durante il timeout)
@@ -120,7 +132,20 @@ export function DatabaseBadge() {
           />
         )}
         {isChecking ? null : <Database className="size-3" aria-hidden />}
-        <span className="max-w-28 truncate">{label}</span>
+        <span className="max-w-24 truncate">{label}</span>
+        {detail ? (
+          <>
+            <span className="opacity-40" aria-hidden>
+              ·
+            </span>
+            <span
+              className={cn('shrink-0', status === 'up' && 'tabular')}
+              data-testid="database-badge-detail"
+            >
+              {detail}
+            </span>
+          </>
+        ) : null}
       </div>
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogTrigger asChild>

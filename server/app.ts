@@ -207,30 +207,32 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
 
   // Health per il monitoraggio: una query reale sul DB, non solo il processo.
   // 200 quando il database risponde, 503 quando è irraggiungibile.
+  // `db.health()` non lancia: l'errore arriva già come codice
+  // (ECONNREFUSED, 28P01…) più la latenza misurata sul pool.
   app.get('/api/health', async (_request, reply) => {
-    const startedAt = Date.now();
-    try {
-      const info = await db.serverInfo();
+    const health = await db.health();
+    const latencyMs = health.latencyMs ?? 0;
+
+    if (health.healthy) {
       return {
         status: 'ok',
         database: {
           status: 'up',
-          version: shortVersion(info.version),
-          latencyMs: Date.now() - startedAt,
+          version: health.server ? shortVersion(health.server.version) : '',
+          latencyMs,
         },
       };
-    } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      return reply.code(503).send({
-        status: 'degraded',
-        database: {
-          status: 'down',
-          // Codice PostgreSQL/Node (es. ECONNREFUSED): niente host o password.
-          error: typeof code === 'string' ? code : 'DATABASE_UNAVAILABLE',
-          latencyMs: Date.now() - startedAt,
-        },
-      });
     }
+
+    return reply.code(503).send({
+      status: 'degraded',
+      database: {
+        status: 'down',
+        // Codice PostgreSQL/Node (es. ECONNREFUSED): niente host o password.
+        error: health.error ?? 'DATABASE_UNAVAILABLE',
+        latencyMs,
+      },
+    });
   });
 
   const topologyEvents =

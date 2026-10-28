@@ -19,6 +19,7 @@
     "test:ui": "vitest --ui",
     "test:server": "vitest run --config vitest.config.server.ts",
     "db:check": "tsx server/db-check.ts",
+    "db:resilience": "tsx server/db-resilience.ts",
     "db:seed": "tsx server/seed.ts",
     "db:seed:force": "tsx server/seed.ts --force",
     "migrate:up": "tsx server/migrate.ts up",

@@ -55,6 +55,29 @@ Se il database non risponde: HTTP **503** con
 `{"status":"degraded","database":{"status":"down","error":"ECONNREFUSED"}}`.
 Non vengono esposti host, database, utente o credenziali.
 
+#### Pool resiliente (riavvii di PostgreSQL e micro-blackout LAN)
+
+Il pool usa `connectionTimeoutMillis: 5000`, `idleTimeoutMillis: 30000`,
+`keepAlive: true` e `keepAliveInitialDelayMillis: 10000`: un socket inattivo
+che muore (riavvio del servizio, cavo sfilato, sessione NAT scartata dal
+router) viene rilevato dal keep-alive TCP o dall'evento `error` del pool,
+rimosso e sostituito alla query successiva. L'evento `error` è **sempre**
+intercettato (`pool.on('error', …)`): senza listener Node lo tratterebbe come
+`uncaughtException` e il processo terminerebbe.
+
+Simulazione del drop senza riavviare PostgreSQL (termina solo il backend idle
+creato dallo script, poi verifica che il processo resti vivo e il pool si
+riconnetta):
+
+```bash
+npm run db:resilience
+# exit 0 = pool resiliente · 2 = permessi insufficienti per pg_terminate_backend
+```
+
+La prova equivalente a mano è `sudo systemctl restart postgresql` mentre
+`npm run dev:auth` gira: il servizio deve restare up e rispondere alla query
+successiva, con una riga `[db] connessione inattiva persa (…` nel log.
+
 ### Monitoraggio periodico e notifiche
 
 `useDatabaseHealthMonitor` (montato in `App`) interroga `/api/health` ogni
@@ -64,10 +87,13 @@ Non vengono esposti host, database, utente o credenziali.
   uno di successo quando torna disponibile. Durante un'interruzione prolungata
   non vengono mostrate raffiche di notifiche: il polling continua e rileva il
   recupero al primo controllo riuscito.
-- L'header mostra un badge persistente accanto allo stato MQTT: verde con la
-  versione (`PG 17.4`), rosso `DB offline` con il codice errore nel tooltip,
-  neutro durante il primo controllo. Badge e monitor leggono lo stesso snapshot
-  (`databaseHealthStore`): un solo loop di fetch per tutta l'app.
+- L'header mostra un badge persistente accanto allo stato MQTT: verde con
+  versione e latenza (`PG 17.4 · 9 ms`), rosso `DB offline` con il codice errore
+  accanto (`ECONNREFUSED`, `57P01`, `TIMEOUT`…), neutro durante il primo
+  controllo. I due valori arrivano da `/api/health` e sono visibili nel badge,
+  non solo nel tooltip: sul pannello touch non esiste hover. Badge e monitor
+  leggono lo stesso snapshot (`databaseHealthStore`): un solo loop di fetch per
+  tutta l'app.
 - Il `Toaster` è montato a livello applicazione, quindi gli avvisi compaiono
   anche sul lock screen, prima che la topologia sia caricata.
 - Il polling si ferma allo smontaggio dell'app e ogni richiesta viene annullata
@@ -275,6 +301,7 @@ domus-kiosk/
 │   ├── config.ts                   # env + validazione DB/auth
 │   ├── db.ts / schema.sql          # pool PostgreSQL, UUID/JSONB, repository SQL
 │   ├── db-check.ts                 # npm run db:check (solo connettività)
+│   ├── db-resilience.ts            # npm run db:resilience (drop di un client idle)
 │   ├── seed.ts / seed-data/        # stanze, device, scenari, admin + kiosk
 │   ├── security.ts                 # bcrypt, JWT, cookie HttpOnly, serializer
 │   ├── session.ts                  # autenticazione richiesta + elevation
