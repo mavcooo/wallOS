@@ -104,6 +104,9 @@ export function AppShell({ children, mainProps }: AppShellProps) {
       </div>
       <KioskDimmerOverlay
         visible={isDimmed}
+        // Il tap di risveglio è consumato dall'overlay prima di arrivare qui:
+        // `wake` cambia solo lo stato del dimmer, nessun comando domotico.
+        onWake={wake}
         mode={burnIn.mode}
         shiftIntervalMs={burnIn.shiftIntervalMs}
         clockOpacity={burnIn.dimClockOpacity}

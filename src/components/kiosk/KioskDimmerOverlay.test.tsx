@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { KioskDimmerOverlay } from '@/components/kiosk/KioskDimmerOverlay';
@@ -99,5 +99,57 @@ describe('KioskDimmerOverlay · burn-in', () => {
     unmount();
 
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('KioskDimmerOverlay · risveglio senza click-through', () => {
+  it('blocca i gesti nativi sulla superficie nera', () => {
+    render(<KioskDimmerOverlay visible />);
+
+    // `touch-action: none` impedisce panning/pinch/doppio-tap-zoom, che
+    // ruberebbero il pointerdown al risveglio.
+    expect(screen.getByTestId('kiosk-dimmer-overlay').style.touchAction).toBe('none');
+  });
+
+  it('consuma il pointerdown e sveglia una sola volta', () => {
+    const onWake = vi.fn();
+    const bubbled = vi.fn();
+    render(
+      <div onPointerDown={bubbled}>
+        <KioskDimmerOverlay visible onWake={onWake} />
+      </div>,
+    );
+    const overlay = screen.getByTestId('kiosk-dimmer-overlay');
+
+    // `dispatchEvent` restituisce false quando `preventDefault` è stato chiamato.
+    expect(fireEvent.pointerDown(overlay)).toBe(false);
+    expect(onWake).toHaveBeenCalledTimes(1);
+    expect(bubbled).not.toHaveBeenCalled();
+  });
+
+  it('resta sopra al contenuto per tutta la dissolvenza', () => {
+    const onWake = vi.fn();
+    const { rerender } = render(
+      <KioskDimmerOverlay visible onWake={onWake} fadeMs={900} />,
+    );
+    const overlay = screen.getByTestId('kiosk-dimmer-overlay');
+
+    // Il tocco di risveglio: `visible` passa a false nel solito render.
+    fireEvent.pointerDown(overlay);
+    rerender(<KioskDimmerOverlay visible={false} onWake={onWake} fadeMs={900} />);
+
+    // Durante il fade il layer è ancora opaco ai tocchi: i pointerup/click
+    // residui atterrano qui, non sul widget che si trovava sotto.
+    expect(overlay).toHaveClass('pointer-events-auto', 'opacity-0');
+    expect(fireEvent.pointerDown(overlay)).toBe(false);
+    // Già svegli: un secondo `wake` non deve partire.
+    expect(onWake).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      vi.advanceTimersByTime(900);
+    });
+
+    // A transizione conclusa l'overlay torna trasparente ai tocchi.
+    expect(overlay).toHaveClass('pointer-events-none');
   });
 });
