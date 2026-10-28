@@ -2,71 +2,51 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { cn, formatKwh, formatTemp, formatWatts } from '@/lib/utils';
+import {
+  fetchTelemetryHistory,
+  formatTelemetryValue,
+  type TelemetryMetric,
+  type TelemetryPoint,
+  type TelemetryRange,
+} from '@/lib/telemetry';
+import { cn } from '@/lib/utils';
 
-const API_BASE = (import.meta.env.VITE_AUTH_API_BASE?.trim() || '/api').replace(/\/+$/, '');
+export type { TelemetryMetric, TelemetryPoint, TelemetryRange };
 
 const PADDING = { top: 14, right: 12, bottom: 18, left: 44 } as const;
 
-export type TelemetryMetric = 'power_watts' | 'energy_kwh' | 'temperature' | 'humidity';
-export type TelemetryRange = '24h' | '7d' | '30d';
-
-/** Punto della serie storica restituito da `GET /api/telemetry/history`. */
-export interface TelemetryPoint {
-  /** Epoch in millisecondi. */
-  timestamp: number;
-  value: number;
-  min?: number;
-  max?: number;
-}
+const RANGES: TelemetryRange[] = ['24h', '7d', '30d'];
+const EMPTY_POINTS: TelemetryPoint[] = [];
 
 export interface TelemetryChartProps {
-  /** Dispositivo da interrogare: senza id la card resta vuota. */
-  deviceId: string;
+  /** Dispositivo da interrogare; `null` = aggregato di tutta la casa. */
+  deviceId: string | null;
   metric: TelemetryMetric;
-  /** Intervallo iniziale; i bottoni touch lo cambiano localmente. */
+  /** Intervallo attivo; i bottoni touch lo cambiano e notificano il genitore. */
   range?: TelemetryRange;
-}
-
-const RANGES: TelemetryRange[] = ['24h', '7d', '30d'];
-
-async function fetchHistory(
-  deviceId: string,
-  metric: TelemetryMetric,
-  range: TelemetryRange,
-): Promise<TelemetryPoint[]> {
-  const params = new URLSearchParams({ deviceId, metric, range });
-  const response = await fetch(`${API_BASE}/telemetry/history?${params}`, {
-    credentials: 'include',
-    headers: { Accept: 'application/json' },
-  });
-  if (!response.ok) {
-    throw new Error(`Telemetria non disponibile (${response.status})`);
-  }
-  const payload = (await response.json()) as { points?: TelemetryPoint[] };
-  return Array.isArray(payload.points) ? payload.points : [];
-}
-
-function formatValue(metric: TelemetryMetric, value: number): string {
-  switch (metric) {
-    case 'power_watts':
-      return formatWatts(value);
-    case 'energy_kwh':
-      return formatKwh(value);
-    case 'temperature':
-      return formatTemp(value);
-    case 'humidity':
-      return `${Math.round(value)}%`;
-  }
+  onRangeChange?: (range: TelemetryRange) => void;
+  /**
+   * `false` quando non esiste nessun meter: nessuna richiesta al server e
+   * empty state "nessun contatore", invece di un grafico vuoto.
+   */
+  enabled?: boolean;
 }
 
 /**
  * TelemetryChart - serie storica canvas-based per display touch.
  *
  * Il canvas evita centinaia di nodi DOM sui Raspberry Pi del pannello; i
- * bottoni del range sono sopra i 44px per restare usabili col dito.
+ * bottoni del range sono sopra i 44px per restare usabili col dito. I punti
+ * arrivano già aggregati dal server (bucket di 30 min / 1 h / 1 giorno), quindi
+ * il client non riduce nulla e resta leggero anche su 30 giorni di storia.
  */
-export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryChartProps) {
+export function TelemetryChart({
+  deviceId,
+  metric,
+  range = '24h',
+  onRangeChange,
+  enabled = true,
+}: TelemetryChartProps) {
   const { t } = useTranslation('energy');
   const [selectedRange, setSelectedRange] = useState<TelemetryRange>(range);
   const [hovered, setHovered] = useState<TelemetryPoint | null>(null);
@@ -76,14 +56,18 @@ export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryCha
     setSelectedRange(range);
   }, [range]);
 
+  // Il cambio di range cambia la queryKey: TanStack Query parte subito con il
+  // fetch del nuovo bucket e `isFetching` copre lo skeleton anche quando i
+  // dati precedenti sono ancora in cache. `deviceId: null` chiede la somma di
+  // tutti i meter (tutta la casa).
   const query = useQuery({
-    queryKey: ['telemetry', deviceId, metric, selectedRange],
-    queryFn: () => fetchHistory(deviceId, metric, selectedRange),
-    enabled: Boolean(deviceId),
+    queryKey: ['telemetry', deviceId ?? 'house', selectedRange, metric],
+    queryFn: ({ signal }) => fetchTelemetryHistory(deviceId, metric, selectedRange, signal),
+    enabled,
     staleTime: 60_000,
   });
 
-  const points = query.data ?? [];
+  const points = query.data ?? EMPTY_POINTS;
   const lastPoint = points.length > 0 ? points[points.length - 1] : undefined;
 
   useEffect(() => {
@@ -137,8 +121,8 @@ export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryCha
       ctx.font = '10px system-ui, sans-serif';
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
-      ctx.fillText(formatValue(metric, maxValue), PADDING.left - 6, PADDING.top);
-      ctx.fillText(formatValue(metric, minValue), PADDING.left - 6, PADDING.top + chartHeight);
+      ctx.fillText(formatTelemetryValue(metric, maxValue), PADDING.left - 6, PADDING.top);
+      ctx.fillText(formatTelemetryValue(metric, minValue), PADDING.left - 6, PADDING.top + chartHeight);
 
       // Linea della serie.
       ctx.strokeStyle = '#ff6b6b';
@@ -168,6 +152,12 @@ export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryCha
     return () => window.removeEventListener('resize', draw);
   }, [points, metric, lastPoint]);
 
+  const selectRange = (value: TelemetryRange) => {
+    setHovered(null);
+    setSelectedRange(value);
+    onRangeChange?.(value);
+  };
+
   const handleTouch = (clientX: number, rect: DOMRect) => {
     if (points.length === 0) return;
     const chartWidth = Math.max(1, rect.width - PADDING.left - PADDING.right);
@@ -176,7 +166,7 @@ export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryCha
     setHovered(points[index] ?? null);
   };
 
-  const loading = query.isPending && Boolean(deviceId);
+  const loading = enabled && query.isFetching;
   const failed = query.isError;
   const empty = !loading && !failed && points.length === 0;
 
@@ -189,7 +179,7 @@ export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryCha
             <button
               key={value}
               type="button"
-              onClick={() => setSelectedRange(value)}
+              onClick={() => selectRange(value)}
               aria-pressed={selectedRange === value}
               className={cn(
                 'min-h-11 min-w-14 rounded-full border px-3 text-[11px] font-medium transition-colors',
@@ -220,28 +210,47 @@ export function TelemetryChart({ deviceId, metric, range = '24h' }: TelemetryCha
         onMouseLeave={() => setHovered(null)}
       >
         {loading ? (
-          <p className="p-4 text-center text-xs text-fg-subtle">{t('telemetry.loading')}</p>
+          <div
+            role="status"
+            aria-busy="true"
+            aria-label={t('telemetry.loading')}
+            className="flex h-full items-end gap-1.5 p-4"
+          >
+            {[38, 62, 48, 76, 55, 70, 44, 66].map((height, index) => (
+              <div
+                // Skeleton decorativo: l'altezza fissa evita layout shift.
+                key={index}
+                className="flex-1 animate-pulse rounded-sm bg-elevated"
+                style={{ height: `${height}%` }}
+              />
+            ))}
+          </div>
         ) : failed ? (
           <p className="p-4 text-center text-xs text-fg-subtle">{t('telemetry.error')}</p>
         ) : empty ? (
-          <p className="p-4 text-center text-xs text-fg-subtle">
-            {deviceId ? t('telemetry.empty') : t('telemetry.noDevice')}
-          </p>
+          <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+            <p className="text-xs font-medium text-fg-subtle">
+              {enabled ? t('telemetry.empty') : t('telemetry.noDevice')}
+            </p>
+            {enabled ? (
+              <p className="text-[10px] text-fg-subtle">{t('telemetry.emptyHint')}</p>
+            ) : null}
+          </div>
         ) : (
           <canvas ref={canvasRef} className="block size-full" aria-hidden="true" />
         )}
 
         {hovered ? (
           <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-panel px-3 py-1 text-[10px] text-fg shadow-sm">
-            {formatValue(metric, hovered.value)}
+            {formatTelemetryValue(metric, hovered.value)}
           </div>
         ) : null}
       </div>
 
-      {points.length > 0 ? (
+      {points.length > 0 && !loading ? (
         <div className="flex justify-between text-[10px] text-fg-subtle">
           <span>{t('telemetry.points', { count: points.length })}</span>
-          {lastPoint ? <span>{formatValue(metric, lastPoint.value)}</span> : null}
+          {lastPoint ? <span>{formatTelemetryValue(metric, lastPoint.value)}</span> : null}
         </div>
       ) : null}
     </div>

@@ -1,5 +1,6 @@
+import { useQuery } from '@tanstack/react-query';
 import { Activity, BatteryCharging, Gauge, PlugZap, Zap } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useShallow } from 'zustand/react/shallow';
 
@@ -9,13 +10,48 @@ import { SummaryCard } from '@/components/widgets/SummaryCard';
 import { TelemetryChart } from '@/components/TelemetryChart';
 import { useDevices } from '@/hooks/useTopologyQuery';
 import { combineDevice } from '@/lib/deviceState';
+import {
+  fetchTelemetrySummary,
+  formatTelemetryValue,
+  type TelemetryMetric,
+  type TelemetryRange,
+} from '@/lib/telemetry';
 import { useMqttApi } from '@/mqtt/MqttProvider';
 import { cn, formatKwh, formatWatts, percent } from '@/lib/utils';
 import { useHomeStore } from '@/store/homeStore';
-import type { PowerDevice } from '@/types/device';
+import type { Device, PowerDevice } from '@/types/device';
 
 const CONTRACT_LIMIT_W = 3_300;
 const ENERGY_PRICE_EUR_KWH = 0.28;
+
+/**
+ * Dispositivi con un contatore di potenza: prese (`kind: 'power'`), sensori che
+ * dichiarano la metrica `power`/`energy` e attuatori Shelly con meter
+ * integrato. Il vecchio filtro solo-`power` escludeva proprio questi ultimi,
+ * che pubblicano comunque `apower`/`aenergy` sul broker.
+ */
+function hasPowerMeter(device: Device): boolean {
+  if (device.kind === 'power') return true;
+  if (device.kind === 'sensor') {
+    return device.state.type === 'power' || device.state.type === 'energy';
+  }
+  return device.adapter === 'shelly' && device.kind !== 'camera';
+}
+
+interface TelemetryStatProps {
+  label: string;
+  value: string;
+}
+
+/** Riepilogo compatto della finestra storica selezionata. */
+function TelemetryStat({ label, value }: TelemetryStatProps) {
+  return (
+    <div className="rounded-xl border border-line bg-panel-2/40 px-3 py-2">
+      <dt className="text-[10px] uppercase tracking-wide text-fg-subtle">{label}</dt>
+      <dd className="tabular mt-0.5 text-sm font-medium text-fg">{value}</dd>
+    </div>
+  );
+}
 
 export function EnergyPage() {
   const { t } = useTranslation('energy');
@@ -41,6 +77,29 @@ export function EnergyPage() {
         .sort((a, b) => b.state.watts - a.state.watts),
     [powerDevices, rows],
   );
+
+  // Storico e riepiloghi: stessi selettori del grafico, così picco e media
+  // descrivono esattamente la finestra e la metrica visualizzate.
+  const meterDevices = useMemo(() => devices.filter(hasPowerMeter), [devices]);
+  // 'house' = somma di tutti i meter; altrimenti lo slug del singolo device.
+  const [selectedScope, setSelectedScope] = useState<string>('house');
+  const [activeRange, setActiveRange] = useState<TelemetryRange>('24h');
+  const [activeMetric, setActiveMetric] = useState<TelemetryMetric>('power_watts');
+  const hasMeters = meterDevices.length > 0;
+  const activeDevice = meterDevices.find((device) => device.id === selectedScope) ?? null;
+  // `null` = aggregato di casa: è il valore che il server interpreta come
+  // "nessun filtro device" e somma per bucket.
+  const activeDeviceId = activeDevice?.id ?? null;
+  const houseSelected = activeDeviceId === null;
+
+  const summaryQuery = useQuery({
+    queryKey: ['telemetry', activeDeviceId ?? 'house', activeRange, activeMetric, 'summary'],
+    queryFn: ({ signal }) =>
+      fetchTelemetrySummary(activeDeviceId, activeMetric, activeRange, signal),
+    enabled: hasMeters,
+    staleTime: 60_000,
+  });
+  const summary = summaryQuery.data;
 
   const instantaneous = sockets.reduce((sum, socket) => sum + socket.state.watts, 0);
   const todayKwh = sockets.reduce((sum, socket) => sum + socket.state.energyTodayKwh, 0);
@@ -111,16 +170,90 @@ export function EnergyPage() {
       ) : null}
 
       <section aria-labelledby="telemetry-title" className="rounded-[var(--radius-card)] border border-line bg-panel p-4">
-        <div>
-          <h2 id="telemetry-title" className="text-sm font-semibold text-fg">{t('telemetry.title')}</h2>
-          <p className="mt-0.5 text-[11px] text-fg-subtle">{t('telemetry.hint')}</p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 id="telemetry-title" className="text-sm font-semibold text-fg">{t('telemetry.title')}</h2>
+            <p className="mt-0.5 text-[11px] text-fg-subtle">{t('telemetry.hint')}</p>
+          </div>
+          {/* Il consumo reale resta leggibile anche con lo storico ancora vuoto. */}
+          <span className="tabular rounded-full border border-line px-2.5 py-1 text-[10px] text-fg-subtle">
+            {t('telemetry.live', { value: formatWatts(instantaneous) })}
+          </span>
         </div>
-        <div className="mt-3">
+
+        {meterDevices.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap gap-1" role="group" aria-label={t('telemetry.deviceAria')}>
+              <button
+                type="button"
+                onClick={() => setSelectedScope('house')}
+                aria-pressed={houseSelected}
+                className={cn(
+                  'min-h-9 rounded-full border px-3 text-[11px] font-medium transition-colors',
+                  houseSelected
+                    ? 'border-accent/30 bg-accent-soft text-accent'
+                    : 'border-line bg-panel-2 text-fg-subtle',
+                )}
+              >
+                {t('telemetry.house')}
+              </button>
+              {meterDevices.map((device) => (
+                <button
+                  key={device.id}
+                  type="button"
+                  onClick={() => setSelectedScope(device.id)}
+                  aria-pressed={device.id === activeDeviceId}
+                  className={cn(
+                    'min-h-9 rounded-full border px-3 text-[11px] font-medium transition-colors',
+                    device.id === activeDeviceId
+                      ? 'border-accent/30 bg-accent-soft text-accent'
+                      : 'border-line bg-panel-2 text-fg-subtle',
+                  )}
+                >
+                  {device.name}
+                </button>
+              ))}
+            </div>
+            <div className="ml-auto flex gap-1" role="group" aria-label={t('telemetry.metricAria')}>
+              {(['power_watts', 'energy_kwh'] as const).map((metric) => (
+                <button
+                  key={metric}
+                  type="button"
+                  onClick={() => setActiveMetric(metric)}
+                  aria-pressed={activeMetric === metric}
+                  className={cn(
+                    'min-h-9 rounded-full border px-3 text-[11px] font-medium transition-colors',
+                    activeMetric === metric
+                      ? 'border-accent/30 bg-accent-soft text-accent'
+                      : 'border-line bg-panel-2 text-fg-subtle',
+                  )}
+                >
+                  {t(`metric.${metric}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,1fr)_220px]">
           <TelemetryChart
-            deviceId={powerDevices[0]?.id || ''}
-            metric="power_watts"
-            range="24h"
+            deviceId={activeDeviceId}
+            metric={activeMetric}
+            range={activeRange}
+            onRangeChange={setActiveRange}
+            enabled={hasMeters}
           />
+          <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3 xl:grid-cols-1">
+            <TelemetryStat
+              label={t('telemetry.stats.peak')}
+              value={summary?.max != null ? formatTelemetryValue(activeMetric, summary.max) : '—'}
+            />
+            <TelemetryStat
+              label={t('telemetry.stats.average')}
+              value={summary?.avg != null ? formatTelemetryValue(activeMetric, summary.avg) : '—'}
+            />
+            <TelemetryStat label={t('telemetry.stats.today')} value={formatKwh(todayKwh)} />
+          </dl>
         </div>
       </section>
 

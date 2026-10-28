@@ -291,6 +291,27 @@ ALTER TABLE devices
 
 CREATE INDEX IF NOT EXISTS idx_rooms_floor_id ON rooms (floor_id);
 
+-- ── Telemetria storica ──────────────────────────────────────────────────────
+-- Replica della tabella di `003_telemetry_history.sql`: `db.init()` applica
+-- questo file a ogni avvio e i test usano PGlite senza il runner delle
+-- migrazioni, quindi l'ingestion (`telemetryWorker.ts`) e le query dei grafici
+-- (`routes/telemetry.ts`) devono trovarla già qui.
+-- `device_id` è TEXT come `devices.id` (slug MQTT, non UUID).
+CREATE TABLE IF NOT EXISTS telemetry_history (
+  id          BIGSERIAL PRIMARY KEY,
+  device_id   TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  metric_type VARCHAR(32) NOT NULL,
+  val         NUMERIC(10, 2) NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Serie per device+metrica dalla più recente: copre grafico e aggregazione.
+CREATE INDEX IF NOT EXISTS idx_telemetry_history_device_time
+  ON telemetry_history (device_id, metric_type, recorded_at DESC);
+-- Finestra temporale senza filtro di device: query "tutta la casa" e retention.
+CREATE INDEX IF NOT EXISTS idx_telemetry_history_recorded_at
+  ON telemetry_history (recorded_at);
+
 -- ── Ledger delle migrazioni ─────────────────────────────────────────────────
 -- Non è schema applicativo: è il registro di `server/migrate.ts`, che lo crea
 -- da sé (stessa DDL) prima di applicare le migrazioni pendenti. La riga

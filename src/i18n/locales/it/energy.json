@@ -44,6 +44,10 @@
   "telemetry": {
     "title": "Telemetria storica",
     "hint": "Campioni salvati con conservazione 30 giorni",
+    "live": "Adesso: {{value}}",
+    "house": "Tutta la casa",
+    "deviceAria": "Dispositivo con contatore",
+    "metricAria": "Metrica",
     "rangeAria": "Intervallo temporale",
     "range": {
       "24h": "24 h",
@@ -52,9 +56,15 @@
     },
     "loading": "Caricamento storico…",
     "error": "Storico non disponibile",
-    "empty": "Nessun campione registrato",
-    "noDevice": "Nessuna presa disponibile",
-    "points": "{{count}} campioni"
+    "empty": "Dati storici in fase di accumulo…",
+    "emptyHint": "Il worker salva un campione al minuto: il primo punto comparirà a breve.",
+    "noDevice": "Nessun contatore disponibile",
+    "points": "{{count}} campioni",
+    "stats": {
+      "peak": "Picco massimo",
+      "average": "Consumo medio",
+      "today": "Totale oggi"
+    }
   },
   "metric": {
     "power_watts": "Potenza",

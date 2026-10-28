@@ -4,6 +4,7 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { bootstrapMigrations } from './migrate.js';
 import { createClimateScheduler, createMqttClimatePublisher } from './services/climateScheduler.js';
+import { createTelemetryWorker } from './services/telemetryWorker.js';
 
 try {
   // Node 24: carica `.env` senza dipendenze aggiuntive. Se il file manca si
@@ -68,9 +69,26 @@ const climateScheduler = createClimateScheduler({
   log: app.log,
 });
 
+// Ingestion della telemetria energetica: ascolta il broker sul listener TCP e
+// scrive i campioni in `telemetry_history`, l'unica sorgente dei grafici
+// 24h/7d/30d. Come il cronotermostato vive qui e non in `buildApp`, così nei
+// test l'istanza Fastify resta senza socket e senza timer. Un broker assente
+// non è un errore: il worker logga e resta inerte.
+const telemetryIntervalMs = Number.parseInt(
+  process.env.TELEMETRY_SAMPLE_INTERVAL_MS ?? '',
+  10,
+);
+const telemetryWorker = createTelemetryWorker({
+  db: built.db,
+  config,
+  log: app.log,
+  ...(Number.isFinite(telemetryIntervalMs) ? { sampleIntervalMs: telemetryIntervalMs } : {}),
+});
+
 const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'arresto del servizio auth');
   climateScheduler.stop();
+  await telemetryWorker.stop();
   await built.automations.stop();
   await climatePublisher.close();
   await app.close();
@@ -90,6 +108,15 @@ try {
   // minuto. Vive qui e non in `buildApp` perché nei test l'istanza Fastify deve
   // restare senza timer attivi e senza socket verso il broker.
   built.automations.start();
+  // Ingestion telemetria: un errore all'avvio non deve impedire al pannello di
+  // funzionare, quindi viene loggato senza terminare il processo.
+  void telemetryWorker.start().catch((error: unknown) => {
+    app.log.warn(
+      `telemetria: avvio del worker fallito · ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
 } catch (error) {
   app.log.error(error);
   process.exit(1);

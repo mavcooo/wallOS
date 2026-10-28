@@ -44,6 +44,10 @@
   "telemetry": {
     "title": "Historical telemetry",
     "hint": "Stored samples with 30-day retention",
+    "live": "Now: {{value}}",
+    "house": "Whole house",
+    "deviceAria": "Device with a meter",
+    "metricAria": "Metric",
     "rangeAria": "Time range",
     "range": {
       "24h": "24 h",
@@ -52,9 +56,15 @@
     },
     "loading": "Loading history…",
     "error": "History unavailable",
-    "empty": "No samples recorded yet",
-    "noDevice": "No socket available",
-    "points": "{{count}} samples"
+    "empty": "History is still accumulating…",
+    "emptyHint": "The worker stores one sample per minute: the first point will appear shortly.",
+    "noDevice": "No meter available",
+    "points": "{{count}} samples",
+    "stats": {
+      "peak": "Peak demand",
+      "average": "Average draw",
+      "today": "Today total"
+    }
   },
   "metric": {
     "power_watts": "Power",
