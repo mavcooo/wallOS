@@ -1,8 +1,13 @@
+import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 
 import { HEALTH_MONITOR } from '@/config/app.config';
 import i18n from '@/i18n';
-import { fetchDatabaseHealth } from '@/lib/healthApi';
+import {
+  fetchDatabaseHealth,
+  fetchDatabaseHealthHistory,
+  type DatabaseCheckRecord,
+} from '@/lib/healthApi';
 import {
   useDatabaseHealthStore,
   type DatabaseHealthSnapshot,
@@ -120,6 +125,37 @@ export function useDatabaseHealthMonitor(options?: {
   }, [intervalMs, timeoutMs]);
 
   return state;
+}
+
+/** Chiave dello storico: separata da `/api/health`, che non usa TanStack Query. */
+export const DATABASE_HISTORY_QUERY_KEY = ['database', 'history'] as const;
+
+/**
+ * Storico dei controlli di connettività dal gateway.
+ *
+ * - refetch ogni 30 s, come il monitor di `/api/health`: la diagnostica resta
+ *   aggiornata senza un secondo polling scritto a mano;
+ * - `staleTime` breve, così aprire le Impostazioni mostra subito un dato
+ *   recente invece di aspettare il prossimo intervallo;
+ * - in caso di errore TanStack conserva l'ultimo `data`: durante un down il
+ *   pannello mostra lo storico salvato e un avviso, senza svuotarsi.
+ */
+export function useDatabaseHealthHistory(options?: {
+  limit?: number;
+  intervalMs?: number;
+}): UseQueryResult<DatabaseCheckRecord[], Error> {
+  const limit = options?.limit ?? 50;
+
+  return useQuery({
+    queryKey: [...DATABASE_HISTORY_QUERY_KEY, limit],
+    queryFn: ({ signal }) => fetchDatabaseHealthHistory({ limit, signal }),
+    refetchInterval: options?.intervalMs ?? 30_000,
+    staleTime: 10_000,
+    // Un solo retry immediato: il polling riprova comunque fra 30 s e il
+    // pannello non deve restare in attesa di un backoff lungo.
+    retry: 1,
+    retryDelay: 0,
+  });
 }
 
 function errorLabel(code: string | null): string {

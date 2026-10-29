@@ -312,6 +312,25 @@ CREATE INDEX IF NOT EXISTS idx_telemetry_history_device_time
 CREATE INDEX IF NOT EXISTS idx_telemetry_history_recorded_at
   ON telemetry_history (recorded_at);
 
+-- ── Audit dei controlli database ──────────────────────────────────────────
+-- Replica di `008_add_db_health_checks.sql`: `db.init()` applica questo file a
+-- ogni avvio e i test usano PGlite senza passare dal runner delle migrazioni,
+-- quindi `logDatabaseCheck` e `GET /api/database/history` devono trovare la
+-- tabella già qui. Una riga per ogni esito di `checkDatabaseHealth()`.
+CREATE TABLE IF NOT EXISTS db_health_checks (
+  id            BIGSERIAL PRIMARY KEY,
+  status        VARCHAR(16) NOT NULL,
+  latency_ms    INTEGER NOT NULL,
+  checked_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  error_message TEXT,
+  CONSTRAINT db_health_checks_status
+    CHECK (status IN ('healthy', 'degraded', 'down')),
+  CONSTRAINT db_health_checks_latency
+    CHECK (latency_ms >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_db_checks_time ON db_health_checks (checked_at DESC);
+
 -- ── Ledger delle migrazioni ─────────────────────────────────────────────────
 -- Non è schema applicativo: è il registro di `server/migrate.ts`, che lo crea
 -- da sé (stessa DDL) prima di applicare le migrazioni pendenti. La riga

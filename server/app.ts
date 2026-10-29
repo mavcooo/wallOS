@@ -11,6 +11,7 @@ import { createAutomationEngine, type AutomationEngine } from './services/automa
 import { registerAutomationRoutes } from './routes/automations.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerClimateRoutes } from './routes/climate.js';
+import { registerDatabaseRoutes } from './routes/database.js';
 import { registerFloorRoutes } from './routes/floors.js';
 import { registerKioskRoutes } from './routes/kiosk.js';
 import { registerTopologyRoutes } from './routes/topology.js';
@@ -259,6 +260,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   registerTelemetryRoutes(app, { db, config });
   registerTelemetrySummaryRoutes(app, { db, config });
   registerTelemetryIngestRoutes(app, { db, config });
+  // Diagnostica: storico dei controlli scritti da `logDatabaseCheck()` (status,
+  // latenza ed errore). Richiede una sessione, a differenza di `/api/health`.
+  registerDatabaseRoutes(app, { db, config });
   // Cronotermostato: solo persistenza, i comandi li pubblica il job periodico
   // (`createClimateScheduler`, avviato da `server/index.ts`).
   registerClimateRoutes(app, { db, config });

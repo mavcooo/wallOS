@@ -640,6 +640,63 @@ function healthErrorLabel(error: unknown): string {
   return 'DATABASE_UNAVAILABLE';
 }
 
+/** Esito di un controllo registrato in `db_health_checks`. */
+export type DatabaseHealthStatus = 'healthy' | 'degraded' | 'down';
+
+/**
+ * Soglia oltre la quale un check riuscito è `degraded`: su una LAN un
+ * PostgreSQL sano risponde in pochi millisecondi, mezzo secondo significa che
+ * qualcosa (rete, lock, carico) sta rallentando il pannello.
+ */
+export const DB_HEALTH_DEGRADED_MS = 500;
+
+function healthStatus(latencyMs: number): DatabaseHealthStatus {
+  return latencyMs >= DB_HEALTH_DEGRADED_MS ? 'degraded' : 'healthy';
+}
+
+/**
+ * Scrittore minimo dell'audit: `pg.Pool`, `pg.PoolClient` e il client PGlite
+ * dei test espongono tutti `query(sql, params)`.
+ */
+type AuditWriter = {
+  query(sql: string, params?: readonly unknown[]): Promise<unknown>;
+};
+
+/**
+ * Registra un esito in `db_health_checks`. Best-effort: un audit che fallisce
+ * non deve mai far fallire l'health check, quindi l'errore viene loggato e la
+ * funzione risolve sempre. Senza un pool inizializzato (script isolati) non
+ * c'è nulla da scrivere e la funzione esce in silenzio.
+ *
+ * `checked_at` resta il DEFAULT `NOW()` del database: l'istante del controllo
+ * è quello del server, non quello del client che ha chiamato `/api/health`.
+ */
+export async function logDatabaseCheck(
+  status: DatabaseHealthStatus,
+  latencyMs: number,
+  error?: string,
+  writer?: AuditWriter | null,
+): Promise<void> {
+  const target = writer ?? sharedPool;
+  // I fake pool dei test non hanno `query`: niente audit, nessun rumore.
+  if (!target || typeof target.query !== 'function') return;
+
+  try {
+    await target.query(
+      `INSERT INTO db_health_checks (status, latency_ms, error_message)
+       VALUES ($1, $2, $3)`,
+      [
+        status,
+        Math.max(0, Math.round(latencyMs)),
+        error && error.length > 0 ? error.slice(0, 1_000) : null,
+      ],
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error('[DB Audit] Impossibile scrivere il log di health check:', message);
+  }
+}
+
 /**
  * Verifica reale della connettività, pensata per health check e watchdog.
  *
@@ -666,9 +723,13 @@ export async function checkDatabaseHealth(
       const client = await probe.connect();
       try {
         const { rows } = await client.query<ServerInfoRow>(SERVER_INFO_SQL);
+        const latencyMs = Date.now() - startedAt;
+        // Audit sulla stessa connessione già acquisita: una sola andata e
+        // ritorno in più, nessun secondo `connect()` sul pool.
+        await logDatabaseCheck(healthStatus(latencyMs), latencyMs, undefined, client);
         return {
           healthy: true,
-          latencyMs: Date.now() - startedAt,
+          latencyMs,
           server: toServerInfo(rows[0]),
         };
       } finally {
@@ -676,17 +737,18 @@ export async function checkDatabaseHealth(
       }
     }
 
-    return {
-      healthy: true,
-      latencyMs: Date.now() - startedAt,
-      server: await readServerInfo(probe),
-    };
+    const latencyMs = Date.now() - startedAt;
+    const server = await readServerInfo(probe);
+    await logDatabaseCheck(healthStatus(latencyMs), latencyMs, undefined, probe);
+    return { healthy: true, latencyMs, server };
   } catch (error) {
-    return {
-      healthy: false,
-      latencyMs: Date.now() - startedAt,
-      error: healthErrorLabel(error),
-    };
+    const latencyMs = Date.now() - startedAt;
+    const label = healthErrorLabel(error);
+    // Con il database irraggiungibile anche l'INSERT fallirebbe dopo il
+    // timeout di connessione: il tentativo resta in background, così la
+    // risposta di `/api/health` non raddoppia la propria latenza.
+    void logDatabaseCheck('down', latencyMs, label, probe);
+    return { healthy: false, latencyMs, error: label };
   }
 }
 

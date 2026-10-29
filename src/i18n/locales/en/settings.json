@@ -156,6 +156,28 @@
       "note": "Battery telemetry for the smart plug: every {{seconds}} s on {{topic}} (QoS 1, retained), plus on every level or charging change."
     },
     "sampledAt": "Last sample: {{when}}"
+  },
+  "database": {
+    "history": {
+      "title": "Database checks history",
+      "description": "PostgreSQL connectivity and latency audit, refreshed automatically.",
+      "count_one": "{{count}} check",
+      "count_other": "{{count}} checks",
+      "refresh": "Refresh history",
+      "loading": "Loading history…",
+      "empty": "No checks recorded yet: the history fills up at the gateway's first health check.",
+      "error": "History unavailable: {{message}}",
+      "offlineStale": "Database unreachable: showing the last saved history ({{when}}).",
+      "offlineEmpty": "Database unreachable: no saved history to show.",
+      "lastError": "Last error code: {{code}}",
+      "errorDetails": "Error: {{message}}",
+      "latency": "{{ms}} ms",
+      "status": {
+        "healthy": "OK",
+        "degraded": "Slow",
+        "down": "Down"
+      }
+    }
   },  "pin": {
     "title": "Panel PIN",
     "description": "Protects loads, resets and critical scenarios",

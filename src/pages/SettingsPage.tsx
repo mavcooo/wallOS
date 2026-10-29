@@ -14,6 +14,7 @@ import {
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { DatabaseHealthHistoryCard } from '@/components/settings/DatabaseHealthHistoryCard';
 import { DeviceHealthCard } from '@/components/settings/DeviceHealthCard';
 import { KioskIdentityCard } from '@/components/settings/KioskIdentityCard';
 import { useKioskQuery, useUpdateKiosk } from '@/hooks/useKioskProfile';
@@ -580,6 +581,10 @@ export function SettingsPage() {
           {/* Diagnostica H24: batteria (fascia 20-80%), heap del browser,
               frame rate e latenza verso il broker. */}
           <DeviceHealthCard />
+
+          {/* Audit dei check di connettività: ogni esito di `checkDatabaseHealth()`
+              è persistito in `db_health_checks` e mostrato con latenza e stato. */}
+          <DatabaseHealthHistoryCard />
 
           <Card>
             <CardHeader>

@@ -156,6 +156,28 @@
       "note": "Telemetria batteria per la presa smart: ogni {{seconds}} s su {{topic}} (QoS 1, retained), oltre che a ogni cambio di livello o di carica."
     },
     "sampledAt": "Ultimo campionamento: {{when}}"
+  },
+  "database": {
+    "history": {
+      "title": "Storico controlli database",
+      "description": "Audit di connettività e latenza verso PostgreSQL, aggiornato automaticamente.",
+      "count_one": "{{count}} controllo",
+      "count_other": "{{count}} controlli",
+      "refresh": "Aggiorna storico",
+      "loading": "Caricamento storico…",
+      "empty": "Nessun controllo registrato: lo storico si popola al primo health check del gateway.",
+      "error": "Storico non disponibile: {{message}}",
+      "offlineStale": "Database non raggiungibile: mostro l’ultimo storico salvato ({{when}}).",
+      "offlineEmpty": "Database non raggiungibile: nessuno storico locale da mostrare.",
+      "lastError": "Ultimo codice errore: {{code}}",
+      "errorDetails": "Errore: {{message}}",
+      "latency": "{{ms}} ms",
+      "status": {
+        "healthy": "OK",
+        "degraded": "Lento",
+        "down": "Down"
+      }
+    }
   },  "pin": {
     "title": "PIN pannello",
     "description": "Protegge carichi, reset e scenari critici",
