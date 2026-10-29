@@ -2,16 +2,16 @@ import { PGlite } from '@electric-sql/pglite';
 import type { FastifyInstance } from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { buildApp } from './app.js';
-import { loadConfig } from './config.js';
-import { Database } from './db.js';
-import type { MqttLink } from './mqttClient.js';
+import { buildApp } from '../app.js';
+import { loadConfig } from '../config.js';
+import { Database } from '../db.js';
+import type { MqttLink } from '../mqttClient.js';
 import {
   createTelemetryWorker,
   normalizeTelemetryPayload,
   telemetrySubscriptionTopics,
   telemetryTopicKey,
-} from './services/telemetryWorker.js';
+} from '../services/telemetryWorker.js';
 
 const PASSWORD = 'admin-password-123';
 const HOUR_MS = 3_600_000;
