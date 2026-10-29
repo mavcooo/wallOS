@@ -18,9 +18,19 @@
  *    `aenergy.total`, `ENERGY.Total`, …) in `power_watts` / `energy_kwh`,
  *    ignorando JSON malformati, valori non numerici e NaN;
  * 4. campiona al massimo un valore per device+metrica ogni
- *    `sampleIntervalMs` (default 60 s) e inserisce in batch, così un meter che
- *    pubblica ogni secondo non satura il database;
- * 5. sopravvive a broker e database irraggiungibili: l'errore viene loggato e
+ *    `sampleIntervalMs` (default 60 s) e applica il filtro della variazione
+ *    significativa (`significantDeltaRatio`, default 2%): una lettura quasi
+ *    identica all'ultima **persistita** non produce una riga, salvo heartbeat
+ *    di salvataggio forzato (default 15 min);
+ * 5. inserisce in batch e ritenta il batch fallito al tick successivo, senza
+ *    far crashare il processo né perdere la coda; il buffer resta limitato;
+ * 6. esegue periodicamente la retention dei campioni più vecchi di
+ *    `retentionDays` (default 30) con un timer `unref()`ato, fermato da
+ *    `stop()`;
+ * 7. espone le metriche operative (`totalIngested`, `totalSkipped`,
+ *    `failedBatches`, `lastIngestAt`, `lastRetentionAt`) tramite
+ *    `GET /api/telemetry/stats`;
+ * 8. sopravvive a broker e database irraggiungibili: l'errore viene loggato e
  *    il worker resta in ascolto, senza terminare il processo.
  *
  * Il ciclo di vita (`start()`/`stop()`) lo pilota `server/index.ts`: nei test
@@ -44,6 +54,75 @@ export interface TelemetrySample {
   recordedAt: Date;
 }
 
+/**
+ * Metriche operative del worker. `lastIngestAt`/`lastRetentionAt` sono ISO
+ * (non epoch) perché finiscono in JSON e nei log senza conversione.
+ */
+export interface TelemetryStats {
+  /** `start()` chiamata e `stop()` non ancora: interpreta gli zeri. */
+  started: boolean;
+  /** Campioni scritti con successo in `telemetry_history`. */
+  totalIngested: number;
+  /** Campioni scartati dal filtro della variazione significativa. */
+  totalSkipped: number;
+  /** Batch falliti (errore SQL): il batch viene ritentato al tick dopo. */
+  failedBatches: number;
+  lastIngestAt: string | null;
+  lastRetentionAt: string | null;
+}
+
+/**
+ * Contenitore delle metriche, condiviso fra worker e rotta di diagnostica.
+ * `buildApp` ne crea uno e lo passa al worker avviato da `server/index.ts`:
+ * così `GET /api/telemetry/stats` legge gli stessi contatori del processo.
+ */
+export interface TelemetryStatsStore {
+  snapshot(): TelemetryStats;
+  markStarted(started: boolean): void;
+  recordIngested(count: number, at: Date): void;
+  recordSkipped(count?: number): void;
+  recordFailure(): void;
+  recordRetention(at: Date): void;
+}
+
+export function createTelemetryStatsStore(): TelemetryStatsStore {
+  let started = false;
+  let totalIngested = 0;
+  let totalSkipped = 0;
+  let failedBatches = 0;
+  let lastIngestAt: string | null = null;
+  let lastRetentionAt: string | null = null;
+
+  return {
+    snapshot: () => ({
+      started,
+      totalIngested,
+      totalSkipped,
+      failedBatches,
+      lastIngestAt,
+      lastRetentionAt,
+    }),
+    markStarted(next) {
+      started = next;
+    },
+    recordIngested(count, at) {
+      if (count <= 0) return;
+      totalIngested += count;
+      lastIngestAt = at.toISOString();
+    },
+    recordSkipped(count = 1) {
+      if (count <= 0) return;
+      totalSkipped += count;
+    },
+    recordFailure() {
+      failedBatches += 1;
+    },
+    recordRetention(at) {
+      lastRetentionAt = at.toISOString();
+    },
+  };
+}
+
 export interface TelemetryWorkerOptions {
   db: Database;
   /** Solo la sezione broker della configurazione (`url: null` = ingestion spenta). */
@@ -54,12 +133,30 @@ export interface TelemetryWorkerOptions {
    * Default 60 s, validato fra 10 s e 15 min.
    */
   sampleIntervalMs?: number;
+  /**
+   * Variazione relativa minima (0–1) per persistere un campione non cumulativo.
+   * Default 0.02 (2%). `0` disattiva il filtro.
+   */
+  significantDeltaRatio?: number;
+  /**
+   * Salvataggio forzato di una serie piatta, anche senza variazione
+   * significativa. Default 15 min, validato fra 1 min e 24 h.
+   */
+  heartbeatMs?: number;
+  /** Periodo della retention. Default 1 h, minimo 1 min. */
+  retentionIntervalMs?: number;
+  /** Età oltre la quale un campione viene cancellato. Default 30 giorni. */
+  retentionDays?: number;
   /** Collegamento MQTT già costruito: nei test si inietta un falso spia. */
   link?: MqttLink;
   /** Ogni quanto svuotare il buffer (default 2 s). */
   flushIntervalMs?: number;
   /** Ogni quanto rileggere l'anagrafica device (default 5 min). */
   deviceRefreshMs?: number;
+  /** Metriche condivise con la rotta di diagnostica (default: store interno). */
+  stats?: TelemetryStatsStore;
+  /** Orologio iniettabile: nei test rende deterministici delta e heartbeat. */
+  now?: () => number;
 }
 
 export interface TelemetryWorker {
@@ -71,6 +168,10 @@ export interface TelemetryWorker {
   refreshDevices(): Promise<void>;
   /** Scrive subito i campioni in buffer. */
   flush(): Promise<void>;
+  /** Cancella i campioni più vecchi di `retentionDays`; restituisce le righe. */
+  runRetention(): Promise<number>;
+  /** Snapshot delle metriche operative. */
+  stats(): TelemetryStats;
   /** Topic attualmente sottoscritti (diagnostica e test). */
   subscriptions(): string[];
 }
@@ -101,6 +202,15 @@ const MIN_FLUSH_INTERVAL_MS = 500;
 const DEVICE_REFRESH_MS = 5 * 60_000;
 const MAX_BUFFERED_SAMPLES = 1_000;
 const FLUSH_THRESHOLD = 200;
+const DEFAULT_SIGNIFICANT_DELTA_RATIO = 0.02;
+const DEFAULT_HEARTBEAT_MS = 15 * 60_000;
+const MIN_HEARTBEAT_MS = 60_000;
+const MAX_HEARTBEAT_MS = 24 * 60 * 60_000;
+const DEFAULT_RETENTION_INTERVAL_MS = 60 * 60_000;
+const MIN_RETENTION_INTERVAL_MS = 60_000;
+const DEFAULT_RETENTION_DAYS = 30;
+const MIN_RETENTION_DAYS = 1;
+const MAX_RETENTION_DAYS = 3_650;
 
 /** Oltre questi limiti il payload è rumore (o un contatore corrotto). */
 const MAX_POWER_W = 1_000_000;
@@ -400,6 +510,27 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
     options.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
   );
   const deviceRefreshMs = Math.max(30_000, options.deviceRefreshMs ?? DEVICE_REFRESH_MS);
+  const significantDeltaRatio = clamp(
+    options.significantDeltaRatio ?? DEFAULT_SIGNIFICANT_DELTA_RATIO,
+    0,
+    1,
+  );
+  const heartbeatMs = clamp(
+    options.heartbeatMs ?? DEFAULT_HEARTBEAT_MS,
+    MIN_HEARTBEAT_MS,
+    MAX_HEARTBEAT_MS,
+  );
+  const retentionIntervalMs = Math.max(
+    MIN_RETENTION_INTERVAL_MS,
+    options.retentionIntervalMs ?? DEFAULT_RETENTION_INTERVAL_MS,
+  );
+  const retentionDays = clamp(
+    Math.round(options.retentionDays ?? DEFAULT_RETENTION_DAYS),
+    MIN_RETENTION_DAYS,
+    MAX_RETENTION_DAYS,
+  );
+  const stats = options.stats ?? createTelemetryStatsStore();
+  const clock = options.now ?? Date.now;
 
   const ownsLink = options.link === undefined;
   const link: MqttLink =
@@ -410,14 +541,19 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
     });
 
   let started = false;
-  let flushing = false;
+  let flushPromise: Promise<void> | null = null;
   let devices: MonitoredDevice[] = [];
   let keyIndex = new Map<string, MonitoredDevice>();
   const pending: TelemetrySample[] = [];
   const lastSampleAt = new Map<string, number>();
+  /** Ultimo valore **persistito** per device+metrica: base del delta. */
+  const lastPersisted = new Map<string, number>();
+  /** Istante (ms) dell'ultima persistenza riuscita: base dell'heartbeat. */
+  const lastPersistedAt = new Map<string, number>();
   const activeSubscriptions = new Set<string>();
   let flushTimer: NodeJS.Timeout | null = null;
   let refreshTimer: NodeJS.Timeout | null = null;
+  let retentionTimer: NodeJS.Timeout | null = null;
 
   function resolveDevice(topic: string): MonitoredDevice | undefined {
     const exact = devices.find((device) => device.stateTopic === topic);
@@ -425,36 +561,99 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
     return keyIndex.get(telemetryTopicKey(topic));
   }
 
-  async function flush(): Promise<void> {
-    if (flushing || pending.length === 0) return;
-    flushing = true;
+  /**
+   * Decisione di persistenza per un campione già passato dal throttling.
+   *
+   * `energy_kwh` è un contatore cumulativo: un delta relativo del 2% su un
+   * totale di 300 kWh vale 6 kWh, cioè giorni di consumo, quindi il filtro lo
+   * scarterebbe per sempre e il grafico perderebbe il delta MAX-MIN su cui si
+   * basa il totale della finestra. Per questa metrica il filtro è disattivato
+   * in modo esplicito: restano il campionamento temporale e il buffer.
+   */
+  function shouldPersist(
+    key: string,
+    metricType: TelemetryMetricType,
+    value: number,
+    at: number,
+  ): boolean {
+    const previous = lastPersisted.get(key);
+    if (previous === undefined) return true;
+    if (metricType === 'energy_kwh') return true;
+
+    // Heartbeat: una serie perfettamente piatta deve comunque lasciare una
+    // traccia, altrimenti la finestra sembra un buco di ingestione.
+    if (at - (lastPersistedAt.get(key) ?? 0) >= heartbeatMs) return true;
+
+    const delta =
+      previous === 0
+        ? value === 0
+          ? 0
+          : 1
+        : Math.abs(value - previous) / Math.abs(previous);
+    return delta >= significantDeltaRatio;
+  }
+
+  function flush(): Promise<void> {
+    // Un solo INSERT alla volta: un flush concorrente (timer, soglia, stop)
+    // attende quello in corso invece di duplicare le righe. Il controllo
+    // precede la coda vuota, così `stop()` aspetta anche l'INSERT già partito.
+    if (flushPromise) return flushPromise;
+    if (pending.length === 0) return Promise.resolve();
+
     const batch = pending.splice(0, pending.length);
-    try {
-      await insertTelemetrySamples(db, batch);
-    } catch (error) {
-      // Un database lento o momentaneamente giù non deve fermare l'ingestion:
-      // il campione perso vale meno di un worker che smette di ascoltare.
-      log?.warn(
-        `telemetria: inserimento di ${batch.length} campioni fallito: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    } finally {
-      flushing = false;
-    }
+    flushPromise = (async () => {
+      try {
+        await insertTelemetrySamples(db, batch);
+        stats.recordIngested(batch.length, new Date(clock()));
+        for (const sample of batch) {
+          const key = `${sample.deviceId}:${sample.metricType}`;
+          lastPersisted.set(key, sample.value);
+          lastPersistedAt.set(key, sample.recordedAt.getTime());
+        }
+      } catch (error) {
+        stats.recordFailure();
+        // Retry controllato: il batch torna in coda e verrà ritentato al tick
+        // successivo, senza busy loop e senza far cadere il processo. Il
+        // buffer resta limitato, quindi un database giù a lungo non consuma
+        // memoria in modo indefinito.
+        pending.unshift(...batch);
+        if (pending.length > MAX_BUFFERED_SAMPLES) {
+          pending.splice(0, pending.length - MAX_BUFFERED_SAMPLES);
+          log?.warn('telemetria: buffer pieno durante il retry, scartati i campioni più vecchi');
+        }
+        log?.warn(
+          `telemetria: inserimento di ${batch.length} campioni fallito, ` +
+            `nuovo tentativo al prossimo flush: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+        );
+      } finally {
+        flushPromise = null;
+      }
+    })();
+
+    return flushPromise;
   }
 
   function enqueue(deviceId: string, metricType: TelemetryMetricType, value: number): void {
     if (!Number.isFinite(value)) return;
     const key = `${deviceId}:${metricType}`;
-    const now = Date.now();
-    const previous = lastSampleAt.get(key) ?? 0;
+    const at = clock();
+    const previousSampleAt = lastSampleAt.get(key) ?? 0;
     // Throttling per device+metrica: la serie storica non ha bisogno di ogni
     // lettura, e un meter a 1 Hz scriverebbe 86 400 righe al giorno.
-    if (now - previous < sampleIntervalMs) return;
-    lastSampleAt.set(key, now);
+    if (at - previousSampleAt < sampleIntervalMs) return;
 
-    pending.push({ deviceId, metricType, value: round2(value), recordedAt: new Date(now) });
+    const rounded = round2(value);
+    if (!shouldPersist(key, metricType, rounded, at)) {
+      // Il filtro delta non aggiorna `lastSampleAt`: un campione scartato non
+      // deve ritardare di un intero intervallo la variazione successiva.
+      stats.recordSkipped();
+      return;
+    }
+    lastSampleAt.set(key, at);
+
+    pending.push({ deviceId, metricType, value: rounded, recordedAt: new Date(at) });
     if (pending.length > MAX_BUFFERED_SAMPLES) {
       pending.splice(0, pending.length - MAX_BUFFERED_SAMPLES);
       log?.warn('telemetria: buffer pieno, scartati i campioni più vecchi');
@@ -530,9 +729,41 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
     }
   }
 
+  /**
+   * Retention dei campioni grezzi. La tabella che cresce con l'ingestione è
+   * `telemetry_history`: il DELETE è parametrizzato (`$1` giorni) e usa
+   * l'indice su `recorded_at`. Gli aggregati orari/giornalieri non sono
+   * scritti da questo worker e restano a carico di
+   * `cleanup_telemetry_history()` quando esisteranno i job che li popolano.
+   */
+  async function runRetention(): Promise<number> {
+    try {
+      const result = await db.client.query(
+        `DELETE FROM telemetry_history
+         WHERE recorded_at < NOW() - ($1::int * INTERVAL '1 day')`,
+        [retentionDays],
+      );
+      stats.recordRetention(new Date(clock()));
+      if (result.rowCount > 0) {
+        log?.info(
+          `telemetria: retention rimossi ${result.rowCount} campioni più vecchi di ${retentionDays} giorni`,
+        );
+      }
+      return result.rowCount;
+    } catch (error) {
+      // Un errore di retention non deve fermare l'ingestion: il job riproverà
+      // al prossimo intervallo.
+      log?.warn(
+        `telemetria: retention fallita: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return 0;
+    }
+  }
+
   async function start(): Promise<void> {
     if (started) return;
     started = true;
+    stats.markStarted(true);
     link.onMessage(handleMessage);
 
     if (!link.enabled) {
@@ -548,14 +779,19 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
     flushTimer.unref();
     refreshTimer = setInterval(() => void refreshDevices(), deviceRefreshMs);
     refreshTimer.unref();
+    retentionTimer = setInterval(() => void runRetention(), retentionIntervalMs);
+    retentionTimer.unref();
     log?.info(
       `telemetria: ingestion attiva · ${devices.length} dispositivi · ` +
-        `campionamento ${Math.round(sampleIntervalMs / 1000)} s`,
+        `campionamento ${Math.round(sampleIntervalMs / 1000)} s · ` +
+        `delta ${(significantDeltaRatio * 100).toFixed(1)}% · ` +
+        `retention ${retentionDays} g ogni ${Math.round(retentionIntervalMs / 60_000)} min`,
     );
   }
 
   async function stop(): Promise<void> {
     started = false;
+    stats.markStarted(false);
     if (flushTimer) {
       clearInterval(flushTimer);
       flushTimer = null;
@@ -564,7 +800,19 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
-    await flush();
+    // Anche il timer della retention viene fermato qui: `unref()` da solo
+    // evita che tenga vivo il processo, ma non impedirebbe un DELETE durante
+    // la chiusura del pool.
+    if (retentionTimer) {
+      clearInterval(retentionTimer);
+      retentionTimer = null;
+    }
+    // Svuota i batch residui; se il database è giù il primo tentativo rimette
+    // i campioni in coda e si ritenta una sola volta, senza bloccare lo
+    // shutdown all'infinito.
+    for (let attempt = 0; attempt < 2 && pending.length > 0; attempt += 1) {
+      await flush();
+    }
     for (const topic of activeSubscriptions) link.unsubscribe(topic);
     activeSubscriptions.clear();
     if (ownsLink) await link.close();
@@ -576,6 +824,8 @@ export function createTelemetryWorker(options: TelemetryWorkerOptions): Telemetr
     handleMessage,
     refreshDevices,
     flush,
+    runRetention,
+    stats: () => stats.snapshot(),
     subscriptions: () => [...activeSubscriptions],
   };
 }

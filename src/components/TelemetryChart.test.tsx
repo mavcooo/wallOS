@@ -1,11 +1,15 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { TelemetryChart, type TelemetryChartProps } from '@/components/TelemetryChart';
+import {
+  TelemetryChart,
+  type TelemetryChartProps,
+  type TelemetryPoint,
+} from '@/components/TelemetryChart';
 
-function stubHistory(points: { timestamp: number; value: number }[]): void {
+function stubHistory(points: TelemetryPoint[]): void {
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => ({
@@ -103,6 +107,28 @@ describe('TelemetryChart', () => {
     const url = String(fetchMock.mock.calls[0]?.[0]);
     expect(url).toContain('deviceId=living-room-light');
     expect(url).toContain('range=24h');
+  });
+
+  it('usa la media aggregata e mostra gli estremi min–max nel tooltip', async () => {
+    const now = Date.now();
+    stubHistory([
+      { timestamp: now - 60_000, value: 900, avg: 900, min: 500, max: 1500, samples: 4 },
+      { timestamp: now, value: 1200, avg: 1200, min: 800, max: 2000, samples: 6 },
+    ]);
+
+    const { container } = renderChart();
+    expect(await screen.findByText('2 campioni')).toBeInTheDocument();
+
+    const canvas = container.querySelector('canvas');
+    expect(canvas).not.toBeNull();
+    // Il tooltip è sul contenitore del canvas: un touch seleziona il punto.
+    fireEvent.touchStart(canvas?.parentElement as HTMLElement, {
+      touches: [{ clientX: 120 }],
+    });
+
+    // Media come valore principale e picco/minimo del bucket nel tooltip.
+    expect((await screen.findAllByText('1,2 kW')).length).toBeGreaterThan(0);
+    expect(screen.getByText('800 W – 2 kW')).toBeInTheDocument();
   });
 
   it('renderizza i punti aggregati e notifica il cambio intervallo', async () => {

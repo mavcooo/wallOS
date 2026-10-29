@@ -12,9 +12,15 @@ export type TelemetryRange = '24h' | '7d' | '30d';
 export interface TelemetryPoint {
   /** Epoch in millisecondi (bucket già allineato dal server). */
   timestamp: number;
+  /** Media del bucket; alias legacy di `avg`, mantenuto per i client vecchi. */
   value: number;
+  /** Media esplicita del bucket (linea del grafico). */
+  avg?: number;
+  /** Estremi del bucket: banda e tooltip, mai soppressi dal downsampling. */
   min?: number | null;
   max?: number | null;
+  /** Ultimo campione del bucket (per le metriche cumulative). */
+  last?: number | null;
   /** Campioni grezzi confluiti nel bucket. */
   samples?: number;
 }

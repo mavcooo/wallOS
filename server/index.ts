@@ -79,11 +79,28 @@ const telemetryIntervalMs = Number.parseInt(
   process.env.TELEMETRY_SAMPLE_INTERVAL_MS ?? '',
   10,
 );
+const telemetryDeltaRatio = Number.parseFloat(
+  process.env.TELEMETRY_SIGNIFICANT_DELTA_RATIO ?? '',
+);
+const telemetryHeartbeatMs = Number.parseInt(process.env.TELEMETRY_HEARTBEAT_MS ?? '', 10);
+const telemetryRetentionIntervalMs = Number.parseInt(
+  process.env.TELEMETRY_RETENTION_INTERVAL_MS ?? '',
+  10,
+);
+const telemetryRetentionDays = Number.parseInt(process.env.TELEMETRY_RETENTION_DAYS ?? '', 10);
 const telemetryWorker = createTelemetryWorker({
   db: built.db,
   config,
   log: app.log,
+  // Condivide i contatori con `GET /api/telemetry/stats`.
+  stats: built.telemetryStats,
   ...(Number.isFinite(telemetryIntervalMs) ? { sampleIntervalMs: telemetryIntervalMs } : {}),
+  ...(Number.isFinite(telemetryDeltaRatio) ? { significantDeltaRatio: telemetryDeltaRatio } : {}),
+  ...(Number.isFinite(telemetryHeartbeatMs) ? { heartbeatMs: telemetryHeartbeatMs } : {}),
+  ...(Number.isFinite(telemetryRetentionIntervalMs)
+    ? { retentionIntervalMs: telemetryRetentionIntervalMs }
+    : {}),
+  ...(Number.isFinite(telemetryRetentionDays) ? { retentionDays: telemetryRetentionDays } : {}),
 });
 
 const shutdown = async (signal: string) => {

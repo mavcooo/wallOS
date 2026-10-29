@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -17,6 +17,26 @@ const PADDING = { top: 14, right: 12, bottom: 18, left: 44 } as const;
 
 const RANGES: TelemetryRange[] = ['24h', '7d', '30d'];
 const EMPTY_POINTS: TelemetryPoint[] = [];
+
+/**
+ * Tetto di sicurezza lato client, allineato a `MAX_TELEMETRY_POINTS` del
+ * server: il server aggrega già entro il budget, ma un proxy o una cache
+ * vecchia non devono poter mandare in crisi il tablet.
+ */
+const MAX_RENDER_POINTS = 2000;
+
+/** Media aggregata del bucket; `value` è il fallback dei payload legacy. */
+function average(point: TelemetryPoint): number {
+  return point.avg ?? point.value;
+}
+
+function lowerBound(point: TelemetryPoint): number {
+  return point.min ?? average(point);
+}
+
+function upperBound(point: TelemetryPoint): number {
+  return point.max ?? average(point);
+}
 
 export interface TelemetryChartProps {
   /** Dispositivo da interrogare; `null` = aggregato di tutta la casa. */
@@ -65,9 +85,18 @@ export function TelemetryChart({
     queryFn: ({ signal }) => fetchTelemetryHistory(deviceId, metric, selectedRange, signal),
     enabled,
     staleTime: 60_000,
+    // Un cambio di filtro non deve lasciare in cache serie vecchie di device
+    // diversi: dopo due minuti il GC di TanStack libera l'array.
+    gcTime: 2 * 60_000,
   });
 
-  const points = query.data ?? EMPTY_POINTS;
+  // Il server è già cappato a 2000 punti; qui si tiene solo l'ultima finestra,
+  // così la memoria del tablet non cresce con i cambi di filtro.
+  const points = useMemo(() => {
+    const data = query.data;
+    if (!data) return EMPTY_POINTS;
+    return data.length > MAX_RENDER_POINTS ? data.slice(-MAX_RENDER_POINTS) : data;
+  }, [query.data]);
   const lastPoint = points.length > 0 ? points[points.length - 1] : undefined;
 
   useEffect(() => {
@@ -90,11 +119,15 @@ export function TelemetryChart({
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      let minValue = points[0]?.value ?? 0;
-      let maxValue = minValue;
+      // Il dominio include anche gli estremi della banda: un picco di
+      // accensione deve restare visibile, non essere tagliato in alto.
+      let minValue = points[0] ? lowerBound(points[0]) : 0;
+      let maxValue = points[0] ? upperBound(points[0]) : 0;
+      let hasBand = false;
       for (const point of points) {
-        if (point.value < minValue) minValue = point.value;
-        if (point.value > maxValue) maxValue = point.value;
+        if (point.min != null && point.max != null) hasBand = true;
+        if (lowerBound(point) < minValue) minValue = lowerBound(point);
+        if (upperBound(point) > maxValue) maxValue = upperBound(point);
       }
 
       const chartWidth = Math.max(1, width - PADDING.left - PADDING.right);
@@ -124,14 +157,35 @@ export function TelemetryChart({
       ctx.fillText(formatTelemetryValue(metric, maxValue), PADDING.left - 6, PADDING.top);
       ctx.fillText(formatTelemetryValue(metric, minValue), PADDING.left - 6, PADDING.top + chartHeight);
 
-      // Linea della serie.
+      // Banda min–max del bucket: un solo path (sopra in avanti, sotto a
+      // ritroso) invece di una serie di rettangoli, per non pesare sul canvas
+      // del tablet.
+      if (hasBand) {
+        ctx.beginPath();
+        points.forEach((point, index) => {
+          const x = xScale(index);
+          const y = yScale(upperBound(point));
+          if (index === 0) ctx.moveTo(x, y);
+          else ctx.lineTo(x, y);
+        });
+        for (let index = points.length - 1; index >= 0; index -= 1) {
+          const point = points[index];
+          if (!point) continue;
+          ctx.lineTo(xScale(index), yScale(lowerBound(point)));
+        }
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255, 107, 107, 0.14)';
+        ctx.fill();
+      }
+
+      // Linea della serie (media del bucket).
       ctx.strokeStyle = '#ff6b6b';
       ctx.lineWidth = 2;
       ctx.lineJoin = 'round';
       ctx.beginPath();
       points.forEach((point, index) => {
         const x = xScale(index);
-        const y = yScale(point.value);
+        const y = yScale(average(point));
         if (index === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       });
@@ -142,7 +196,7 @@ export function TelemetryChart({
         const index = points.length - 1;
         ctx.fillStyle = '#ff6b6b';
         ctx.beginPath();
-        ctx.arc(xScale(index), yScale(lastPoint.value), 3, 0, Math.PI * 2);
+        ctx.arc(xScale(index), yScale(average(lastPoint)), 3, 0, Math.PI * 2);
         ctx.fill();
       }
     };
@@ -165,6 +219,11 @@ export function TelemetryChart({
     const index = Math.round(fraction * (points.length - 1));
     setHovered(points[index] ?? null);
   };
+
+  const hoveredRange =
+    hovered && hovered.min != null && hovered.max != null && hovered.min !== hovered.max
+      ? `${formatTelemetryValue(metric, hovered.min)} – ${formatTelemetryValue(metric, hovered.max)}`
+      : null;
 
   const loading = enabled && query.isFetching;
   const failed = query.isError;
@@ -241,8 +300,9 @@ export function TelemetryChart({
         )}
 
         {hovered ? (
-          <div className="pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-panel px-3 py-1 text-[10px] text-fg shadow-sm">
-            {formatTelemetryValue(metric, hovered.value)}
+          <div className="pointer-events-none absolute bottom-2 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full bg-panel px-3 py-1 text-[10px] text-fg shadow-sm">
+            <span>{formatTelemetryValue(metric, average(hovered))}</span>
+            {hoveredRange ? <span className="text-fg-subtle">{hoveredRange}</span> : null}
           </div>
         ) : null}
       </div>
@@ -250,7 +310,7 @@ export function TelemetryChart({
       {points.length > 0 && !loading ? (
         <div className="flex justify-between text-[10px] text-fg-subtle">
           <span>{t('telemetry.points', { count: points.length })}</span>
-          {lastPoint ? <span>{formatTelemetryValue(metric, lastPoint.value)}</span> : null}
+          {lastPoint ? <span>{formatTelemetryValue(metric, average(lastPoint))}</span> : null}
         </div>
       ) : null}
     </div>

@@ -28,8 +28,10 @@ import {
 import {
   registerTelemetryIngestRoutes,
   registerTelemetryRoutes,
+  registerTelemetryStatsRoutes,
   registerTelemetrySummaryRoutes,
 } from './routes/telemetry.js';
+import { createTelemetryStatsStore, type TelemetryStatsStore } from './services/telemetryWorker.js';
 import { hashSecret, randomToken } from './security.js';
 import { seedDatabase } from './seed.js';
 import type { AuthConfig } from './types.js';
@@ -61,6 +63,12 @@ export interface BuiltApp {
   db: Database;
   /** Motore delle automazioni: `start()`/`stop()` li pilota `server/index.ts`. */
   automations: AutomationEngine;
+  /**
+   * Metriche del worker di telemetria. Il worker creato da `server/index.ts`
+   * scrive qui, così `GET /api/telemetry/stats` legge i contatori del processo
+   * senza che `buildApp` debba avviare socket o timer.
+   */
+  telemetryStats: TelemetryStatsStore;
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -236,6 +244,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     });
   });
 
+  const telemetryStats = createTelemetryStatsStore();
+
   const topologyEvents =
     options.topologyEvents ?? createTopologyEventBus(config, app.log);
   const kioskPublisher =
@@ -259,6 +269,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   registerTopologyEventRoutes(app, { db, config, events: topologyEvents });
   registerTelemetryRoutes(app, { db, config });
   registerTelemetrySummaryRoutes(app, { db, config });
+  registerTelemetryStatsRoutes(app, { db, config, stats: telemetryStats });
   registerTelemetryIngestRoutes(app, { db, config });
   // Diagnostica: storico dei controlli scritti da `logDatabaseCheck()` (status,
   // latenza ed errore). Richiede una sessione, a differenza di `/api/health`.
@@ -284,5 +295,5 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     await db.close();
   });
 
-  return { app, db, automations };
+  return { app, db, automations, telemetryStats };
 }
