@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { BOOT_RECOVERY } from '@/config/app.config';
+import { BOOT_RECOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import { captureRollback } from '@/mqtt/optimistic';
 import { resetBrowserStorage } from '@/test/browserEnv';
 import type { QueuedCommand } from '@/mqtt/offlineQueue';
@@ -77,6 +77,29 @@ function enqueueBrightness(ctx: Context, brightness: number, timeoutMs = TTL_MS)
 
 function lastToast(ctx: Context) {
   return ctx.useToastStore.getState().toasts.at(-1);
+}
+
+/** Comando autonomo su un device arbitrario: serve ai casi di capacità. */
+function enqueueDevice(ctx: Context, id: string) {
+  return ctx.useOfflineQueue.getState().enqueue({
+    deviceId: id,
+    deviceName: `Device ${id}`,
+    topic: `test/${id}/set`,
+    payload: JSON.stringify({ power: true }),
+    qos: 1,
+    timeoutMs: TTL_MS,
+    collapseKey: 'power',
+    label: 'Accensione',
+    optimistic: null,
+    rollback: null,
+  });
+}
+
+/** Contenuto effettivo di `localStorage`, non solo lo stato in memoria. */
+function persistedCommands(): QueuedCommand[] {
+  const raw = window.localStorage.getItem('wallos_offline_queue');
+  if (!raw) return [];
+  return (JSON.parse(raw) as { state: { commands: QueuedCommand[] } }).state.commands;
 }
 
 describe('coda offline: TTL', () => {
@@ -306,3 +329,161 @@ describe('coda offline: flush, retry e rollback', () => {
     expect(lastToast(ctx)).toMatchObject({ title: 'Comando non sincronizzato', tone: 'error' });
   });
 });
+
+describe('coda offline: limite FIFO', () => {
+  it('non supera MAX_QUEUE_SIZE e scarta i comandi più vecchi anche su storage', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const ctx = await setup();
+      for (let index = 0; index < ctx.MAX_QUEUE_SIZE + 5; index += 1) {
+        enqueueDevice(ctx, `device-${index}`);
+      }
+
+      const commands = ctx.useOfflineQueue.getState().commands;
+      expect(commands).toHaveLength(ctx.MAX_QUEUE_SIZE);
+      expect(commands[0]?.deviceId).toBe('device-5');
+      expect(commands.at(-1)?.deviceId).toBe(`device-${ctx.MAX_QUEUE_SIZE + 4}`);
+      // La copia persistita è limitata allo stesso modo: nessuna crescita
+      // illimitata in localStorage durante un offline prolungato.
+      expect(persistedCommands()).toHaveLength(ctx.MAX_QUEUE_SIZE);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Coda satura'));
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('un comando collassato non consuma capacità aggiuntiva a coda piena', async () => {
+    const ctx = await setup();
+    for (let index = 0; index < ctx.MAX_QUEUE_SIZE; index += 1) {
+      enqueueDevice(ctx, `device-${index}`);
+    }
+
+    enqueueDevice(ctx, `device-${ctx.MAX_QUEUE_SIZE - 1}`);
+
+    const commands = ctx.useOfflineQueue.getState().commands;
+    expect(commands).toHaveLength(ctx.MAX_QUEUE_SIZE);
+    expect(commands[0]?.deviceId).toBe('device-0');
+    expect(persistedCommands()).toHaveLength(ctx.MAX_QUEUE_SIZE);
+  });
+});
+
+describe('coda offline: collasso dei valori intermedi', () => {
+  it('cinque variazioni dello stesso slider lasciano solo l’ultimo valore', async () => {
+    const ctx = await setup();
+    const original = brightnessOf(ctx);
+
+    for (const brightness of [20, 35, 50, 30, 55]) {
+      enqueueBrightness(ctx, brightness);
+    }
+
+    const commands = ctx.useOfflineQueue.getState().commands;
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toMatchObject({
+      deviceId: LIGHT_ID,
+      payload: JSON.stringify({ brightness: 55 }),
+      revision: 5,
+    });
+    expect(commands[0]?.rollback).toEqual({ kind: 'light', state: { brightness: original } });
+    expect(brightnessOf(ctx)).toBe(55);
+    expect(persistedCommands()).toHaveLength(1);
+  });
+
+  it('due campi diversi dello stesso device restano due comandi distinti', async () => {
+    const ctx = await setup();
+    enqueueBrightness(ctx, 40);
+    enqueueDevice(ctx, LIGHT_ID);
+
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(2);
+  });
+});
+
+describe('coda offline: flush cadenzato', () => {
+  it('distanzia i publish di flushGapMs (50 ms) senza raffica', async () => {
+    vi.useFakeTimers();
+    const ctx = await setup();
+    for (const id of ['device-a', 'device-b', 'device-c']) enqueueDevice(ctx, id);
+
+    const sentAt: number[] = [];
+    const publish = vi.fn(async (_command: QueuedCommand) => {
+      sentAt.push(Date.now());
+      return true;
+    });
+    ctx.installQueueRuntime({ isConnected: () => true, publish });
+
+    const done = ctx.flushOfflineQueue();
+
+    // Primo comando subito, senza attesa.
+    await vi.advanceTimersByTimeAsync(0);
+    expect(publish).toHaveBeenCalledTimes(1);
+
+    // Il secondo non parte prima della pausa configurata.
+    await vi.advanceTimersByTimeAsync(OFFLINE_QUEUE.flushGapMs - 1);
+    expect(publish).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(publish).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(OFFLINE_QUEUE.flushGapMs);
+    expect(publish).toHaveBeenCalledTimes(3);
+
+    // L'ultimo intervallo atteso è quello conclusivo del flush.
+    await vi.advanceTimersByTimeAsync(OFFLINE_QUEUE.flushGapMs);
+    await expect(done).resolves.toEqual({ sent: 3, expired: 0, failed: 0 });
+
+    expect(OFFLINE_QUEUE.flushGapMs).toBe(50);
+    expect(sentAt[1]! - sentAt[0]!).toBe(OFFLINE_QUEUE.flushGapMs);
+    expect(sentAt[2]! - sentAt[1]!).toBe(OFFLINE_QUEUE.flushGapMs);
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(0);
+  });
+
+  it('se la connessione cade durante il flush i comandi residui restano persistiti', async () => {
+    const ctx = await setup();
+    for (const id of ['device-a', 'device-b', 'device-c']) enqueueDevice(ctx, id);
+
+    let connected = true;
+    const publish = vi.fn(async (_command: QueuedCommand) => {
+      // Il broker chiude la socket dopo il primo PUBACK.
+      connected = false;
+      return true;
+    });
+    ctx.installQueueRuntime({ isConnected: () => connected, publish });
+
+    const result = await ctx.flushOfflineQueue();
+
+    expect(result.sent).toBe(1);
+    expect(publish).toHaveBeenCalledTimes(1);
+    const residual = ['device-b', 'device-c'];
+    expect(ctx.useOfflineQueue.getState().commands.map((command) => command.deviceId)).toEqual(
+      residual,
+    );
+    expect(persistedCommands().map((command) => command.deviceId)).toEqual(residual);
+  });
+});
+
+describe('coda offline: storage non disponibile', () => {
+  it('una scrittura rifiutata (QuotaExceededError) non blocca l’accodamento', async () => {
+    const ctx = await setup();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const nativeSetItem = Storage.prototype.setItem;
+    // Solo la coda rifiuta la scrittura: lo store delle preferenze resta sano.
+    const setItem = vi
+      .spyOn(Storage.prototype, 'setItem')
+      .mockImplementation(function (this: Storage, key: string, value: string) {
+        if (key === 'wallos_offline_queue') {
+          throw new DOMException('Quota exceeded', 'QuotaExceededError');
+        }
+        nativeSetItem.call(this, key, value);
+      });
+
+    try {
+      expect(() => enqueueBrightness(ctx, 42)).not.toThrow();
+    } finally {
+      setItem.mockRestore();
+      warn.mockRestore();
+    }
+
+    expect(ctx.useOfflineQueue.getState().commands).toHaveLength(1);
+    expect(brightnessOf(ctx)).toBe(42);
+  });
+});
+

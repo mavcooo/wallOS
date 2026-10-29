@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, type PersistStorage, type StorageValue } from 'zustand/middleware';
 
 import { APP_BOOT_AT, BOOT_RECOVERY, OFFLINE_QUEUE } from '@/config/app.config';
 import i18n from '@/i18n';
@@ -10,13 +10,25 @@ import { useHomeStore } from '@/store/homeStore';
 import { useToastStore } from '@/store/toastStore';
 import type { ControlAction, DecodedState } from '@/types/device';
 
+/** Limite fisso della coda: oltre, i comandi più vecchi escono in FIFO. */
+export const MAX_QUEUE_SIZE = OFFLINE_QUEUE.maxQueueSize;
+/** Finestra ammessa per la pausa tra due publish del flush. */
+const FLUSH_GAP_MIN_MS = 30;
+const FLUSH_GAP_MAX_MS = 100;
+const LOG_PREFIX = '[OfflineQueue]';
+
 /**
- * Coda comandi offline con QoS, TTL, collasso e rollback ottimistico.
+ * Coda comandi offline con QoS, TTL, collasso, limite FIFO e rollback
+ * ottimistico.
  *
  * Un comando resta in coda finché il broker non lo conferma (PUBACK sui QoS 1).
  * Se la connessione cade il flush si ferma e riparte al reconnect; se il TTL
  * scade o il publish fallisce in modo definitivo, la patch ottimistica viene
  * annullata nello store e l'utente riceve un toast.
+ *
+ * La coda è **bounded** (`MAX_QUEUE_SIZE`) e collassa per device/campo: un
+ * tablet offline per ore non accumula né comandi intermedi né scritture
+ * illimitate in `localStorage`.
  */
 export interface QueuedCommand {
   /** UUID del comando: resta stabile anche quando il payload viene collassato. */
@@ -54,7 +66,8 @@ export interface EnqueueCommandInput {
   qos: 0 | 1;
   retain?: boolean;
   timeoutMs: number;
-  collapseKey: string;
+  /** Chiave di collasso; se omessa coincide con il topic del comando. */
+  collapseKey?: string;
   label: string;
   optimistic: DecodedState | null;
   rollback: DecodedState | null;
@@ -67,6 +80,8 @@ export interface OfflineQueueState {
   /** Rimuove solo se la revisione coincide (un comando collassato resta in coda). */
   remove(id: string, revision?: number): boolean;
   markRetry(id: string, revision: number): void;
+  /** Svuota la coda e la copia persistita (cambio casa, logout, reset). */
+  clear(): void;
 }
 
 /** Ciò che serve alla coda per pubblicare: fornito da `useMqtt` per ogni socket. */
@@ -83,6 +98,69 @@ export interface FlushResult {
 
 type PersistedQueue = Pick<OfflineQueueState, 'commands'>;
 
+/** Tronca FIFO la coda al limite: i comandi più vecchi escono per primi. */
+function boundQueue(commands: QueuedCommand[]): QueuedCommand[] {
+  if (commands.length <= MAX_QUEUE_SIZE) return commands;
+  const overflow = commands.length - MAX_QUEUE_SIZE;
+  console.warn(`${LOG_PREFIX} Coda satura: eliminato comando obsoleto (${overflow})`);
+  return commands.slice(overflow);
+}
+
+/**
+ * Storage della coda: ogni accesso a `localStorage` è protetto.
+ *
+ * In navigazione privata o a quota esaurita `setItem` lancia
+ * `QuotaExceededError`: la coda continua a vivere in memoria e, prima di
+ * rinunciare alla persistenza, salva i soli comandi più recenti.
+ */
+const queueStorage: PersistStorage<PersistedQueue> = {
+  getItem(name) {
+    try {
+      const raw = window.localStorage.getItem(name);
+      if (!raw) return null;
+      return JSON.parse(raw) as StorageValue<PersistedQueue>;
+    } catch {
+      // Storage inibito o JSON corrotto: si riparte da una coda vuota.
+      return null;
+    }
+  },
+
+  setItem(name, value) {
+    try {
+      window.localStorage.setItem(name, JSON.stringify(value));
+      return;
+    } catch {
+      // Quota esaurita: si tenta con i soli comandi recenti.
+    }
+
+    const commands = value.state.commands;
+    if (commands.length > 1) {
+      try {
+        const trimmed: StorageValue<PersistedQueue> = {
+          ...value,
+          state: {
+            commands: commands.slice(-Math.max(1, Math.floor(MAX_QUEUE_SIZE / 2))),
+          },
+        };
+        window.localStorage.setItem(name, JSON.stringify(trimmed));
+        console.warn(`${LOG_PREFIX} Quota storage ridotta: persistiti i comandi più recenti`);
+        return;
+      } catch {
+        // Storage inibito del tutto (private mode, permessi negati).
+      }
+    }
+    console.warn(`${LOG_PREFIX} Storage non disponibile: coda mantenuta solo in memoria`);
+  },
+
+  removeItem(name) {
+    try {
+      window.localStorage.removeItem(name);
+    } catch {
+      // Storage inibito: non c'è nulla da rimuovere.
+    }
+  },
+};
+
 export const useOfflineQueue = create<OfflineQueueState>()(
   persist(
     (set, get) => ({
@@ -90,10 +168,10 @@ export const useOfflineQueue = create<OfflineQueueState>()(
 
       enqueue(input) {
         const now = Date.now();
+        const collapseKey = input.collapseKey ?? input.topic;
         const existing = get().commands.find(
           (command) =>
-            command.deviceId === input.deviceId &&
-            command.collapseKey === input.collapseKey,
+            command.deviceId === input.deviceId && command.collapseKey === collapseKey,
         );
 
         if (existing) {
@@ -132,13 +210,15 @@ export const useOfflineQueue = create<OfflineQueueState>()(
           timeoutMs: input.timeoutMs,
           timestamp: now,
           retryCount: 0,
-          collapseKey: input.collapseKey,
+          collapseKey,
           label: input.label,
           optimistic: input.optimistic,
           rollback: input.rollback,
           revision: 1,
         };
-        set((state) => ({ commands: [...state.commands, command] }));
+        // Un comando per un device nuovo può far uscire il più vecchio: la
+        // cardinalità resta costante qualunque sia la durata dell'offline.
+        set((state) => ({ commands: boundQueue([...state.commands, command]) }));
         return command;
       },
 
@@ -161,10 +241,15 @@ export const useOfflineQueue = create<OfflineQueueState>()(
           ),
         }));
       },
+
+      clear() {
+        set({ commands: [] });
+      },
     }),
     {
-      name: 'domus-kiosk-offline-queue',
+      name: 'wallos_offline_queue',
       version: 1,
+      storage: queueStorage,
       partialize: (state): PersistedQueue => ({ commands: state.commands }),
       merge: (persisted, current) => {
         const saved = persisted as Partial<PersistedQueue> | undefined;
@@ -177,7 +262,8 @@ export const useOfflineQueue = create<OfflineQueueState>()(
             Number.isFinite(command.timestamp) &&
             (command.qos === 0 || command.qos === 1),
         );
-        return { ...current, commands };
+        // Anche uno storage legacy o manomesso non può superare il limite.
+        return { ...current, commands: boundQueue(commands) };
       },
     },
   ),
@@ -390,7 +476,11 @@ export async function flushOfflineQueue(options?: { announce?: boolean }): Promi
           result.sent += 1;
         }
         if (!ctx.isConnected()) break;
-        await sleep(OFFLINE_QUEUE.flushGapMs);
+        // Ritmo controllato: una raffica di PUBLISH al reconnect riempie il
+        // buffer della WebSocket e fa chiudere la socket da Mosquitto.
+        await sleep(
+          Math.min(FLUSH_GAP_MAX_MS, Math.max(FLUSH_GAP_MIN_MS, OFFLINE_QUEUE.flushGapMs)),
+        );
         continue;
       }
 

@@ -255,8 +255,13 @@ export const BOOT_RECOVERY = {
 export const OFFLINE_QUEUE = {
   /** Ogni quanto la coda scarta i comandi scaduti anche senza riconnessione. */
   sweepIntervalMs: 1_000,
-  /** Pausa tra due publish consecutivi durante il flush FIFO. */
-  flushGapMs: 40,
+  /**
+   * Limite fisso della coda: oltre, i comandi più vecchi escono in FIFO.
+   * Tiene costante la pressione su `localStorage` durante un offline lungo.
+   */
+  maxQueueSize: 25,
+  /** Pausa tra due publish consecutivi durante il flush FIFO (30–100 ms). */
+  flushGapMs: 50,
   /** Tentativi di pubblicazione oltre il primo prima del rollback definitivo. */
   maxRetries: 2,
   /** Attesa massima della conferma broker (PUBACK) per un comando QoS 1. */
