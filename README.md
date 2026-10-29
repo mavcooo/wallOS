@@ -34,7 +34,7 @@ Allo startup il servizio esegue una query di identità (`version()`,
 `current_database()`, `current_user`) e logga:
 
 ```
-[db] connesso · 192.168.0.59:5432/wallos · PostgreSQL 17.4 · utente wallos_user · 3 ms
+[db] connesso · 192.168.0.59:5432/wallos · PostgreSQL 17.4 · 3 ms
 ```
 
 Se la connessione non riesce, il processo termina con un messaggio operativo

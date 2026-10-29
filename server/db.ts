@@ -25,6 +25,7 @@ import type {
   UserRole,
   UserRow,
 } from './types.js';
+import { INVALID_DATABASE_TARGET, sanitizeDatabaseUrl } from './utils/sanitize.js';
 
 export interface QueryResult<T> {
   rows: T[];
@@ -456,24 +457,25 @@ export interface DatabasePoolConfig {
   ssl: boolean;
 }
 
-/** `postgres://utente:password@host:5432/db` → `host:5432/db` (mai la password). */
+/**
+ * `postgres://utente:password@host:5432/db` → `host:5432/db`.
+ * La sanitizzazione vive in `utils/sanitize.ts`, condivisa con il bootstrap:
+ * una sola implementazione, nessuna possibilità di reintrodurre la URL grezza.
+ */
 export function describeDatabaseTarget(connectionString: string): string {
-  try {
-    const parsed = new URL(connectionString);
-    const database = decodeURIComponent(parsed.pathname.replace(/^\/+/, '')) || '?';
-    return `${parsed.hostname}:${parsed.port || '5432'}/${database}`;
-  } catch {
-    return 'destinazione PostgreSQL sconosciuta';
-  }
+  const target = sanitizeDatabaseUrl(connectionString);
+  return target === INVALID_DATABASE_TARGET ? 'destinazione PostgreSQL sconosciuta' : target;
 }
 
-/** Suggerimento operativo senza esporre la password contenuta nell'URL. */
+/**
+ * Suggerimento operativo senza credenziali: il messaggio non riporta né la
+ * password né il nome utente, così anche i log di errore all'avvio possono
+ * essere condivisi in un ticket senza esporre il ruolo del database.
+ */
 export function describeDatabaseError(error: unknown, connectionString: string): string {
-  let user = 'sconosciuto';
   let database = 'sconosciuto';
   try {
     const parsed = new URL(connectionString);
-    user = decodeURIComponent(parsed.username) || user;
     database = decodeURIComponent(parsed.pathname.replace(/^\/+/, '')) || database;
   } catch {
     // URL già validata da loadConfig: qui si arriva solo con valori strani.
@@ -486,11 +488,11 @@ export function describeDatabaseError(error: unknown, connectionString: string):
   switch (code) {
     case '28P01':
       return (
-        `PostgreSQL ha rifiutato la password dell'utente "${user}" su ${target}. ` +
+        `PostgreSQL ha rifiutato la password per ${target}. ` +
         `Allinea DATABASE_URL/DB_PASSWORD con le credenziali reali (es. postgres://utente:password@${target}).`
       );
     case '28000':
-      return `L'utente "${user}" non è autorizzato a connettersi a ${target} (pg_hba.conf).`;
+      return `L'utente configurato non è autorizzato a connettersi a ${target} (pg_hba.conf).`;
     case '3D000':
       return (
         `Il database "${database}" non esiste su ${target}: crealo (createdb ${database}) ` +
@@ -711,7 +713,7 @@ export async function checkDatabaseConnection(
   const origin = options.source ? ` · config ${options.source}` : '';
   log(
     `[db] connesso · ${describeDatabaseTarget(options.connectionString)} · ` +
-      `${shortVersion(info.version)} · utente ${info.user}${origin} · ${Date.now() - startedAt} ms`,
+      `${shortVersion(info.version)}${origin} · ${Date.now() - startedAt} ms`,
   );
   return info;
 }

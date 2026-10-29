@@ -5,6 +5,7 @@ import { loadConfig } from './config.js';
 import { bootstrapMigrations } from './migrate.js';
 import { createClimateScheduler, createMqttClimatePublisher } from './services/climateScheduler.js';
 import { createTelemetryWorker } from './services/telemetryWorker.js';
+import { formatStartupMessage } from './utils/sanitize.js';
 
 try {
   // Node 24: carica `.env` senza dipendenze aggiuntive. Se il file manca si
@@ -100,9 +101,8 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 try {
   await app.listen({ host: config.host, port: config.port });
-  app.log.info(
-    `auth pronta · http://${config.host}:${config.port} · db ${config.databaseUrl}`,
-  );
+  // Destinazione DB sanitizzata: la URL completa contiene utente e password.
+  app.log.info(formatStartupMessage(config));
   climateScheduler.start();
   // Motore di automazioni: cache dal database, sottoscrizioni MQTT e tick al
   // minuto. Vive qui e non in `buildApp` perché nei test l'istanza Fastify deve

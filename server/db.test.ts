@@ -48,8 +48,9 @@ describe('diagnostica della connessione PostgreSQL', () => {
     expect(info).toMatchObject({ version: 'PostgreSQL 17.4 on x86_64-pc-linux-gnu', user: 'wallos_user' });
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('[db] connesso · 192.168.0.59:5432/wallos');
-    expect(lines[0]).toContain('PostgreSQL 17.4 · utente wallos_user');
-    expect(lines[0]).toContain('config DATABASE_URL');
+    expect(lines[0]).toContain('PostgreSQL 17.4 · config DATABASE_URL');
+    // Nessuna credenziale nei log di routine, nemmeno il nome utente.
+    expect(lines[0]).not.toContain('wallos_user');
     expect(lines[0]).not.toContain('s3cret');
   });
 
@@ -72,6 +73,17 @@ describe('diagnostica della connessione PostgreSQL', () => {
       DATABASE_URL,
     );
     expect(reason).toContain('Nessun PostgreSQL in ascolto su 192.168.0.59:5432/wallos');
+    expect(reason).not.toContain('s3cret');
+  });
+
+  it('anche l’errore di autenticazione non riporta il ruolo del database', () => {
+    const reason = describeDatabaseError(
+      Object.assign(new Error('password authentication failed'), { code: '28P01' }),
+      DATABASE_URL,
+    );
+
+    expect(reason).toContain('192.168.0.59:5432/wallos');
+    expect(reason).not.toContain('wallos_user');
     expect(reason).not.toContain('s3cret');
   });
 });
