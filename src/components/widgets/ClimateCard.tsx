@@ -168,8 +168,10 @@ export const ClimateCard = memo(function ClimateCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="flex items-center gap-1.5 truncate text-sm font-medium text-fg">
-            {device.name}
+          <p className="flex w-full items-center gap-1.5 text-sm font-medium text-fg">
+            <span className="min-w-0 truncate" title={device.name}>
+              {device.name}
+            </span>
             <SyncIndicator pending={pending} />
             {onToggleFavorite ? (
               <button

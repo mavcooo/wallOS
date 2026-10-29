@@ -187,6 +187,29 @@
   }
 }
 
+@utility scrollbar-none {
+  /* Pannello kiosk: si scrolla, ma la barra nativa non si vede. `width: 0`
+     invece di `display: none` sul thumb evita il salto di layout quando il
+     contenuto supera l'altezza. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Il rimbalzo resta nel contenitore: non si propaga alla pagina sotto. */
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
+  }
+}
+
+@utility safe-area-pb {
+  /* iPhone con notch e iPad in PWA: la bottom bar non finisce sotto la home
+     indicator. `0px` come fallback sui browser che non espongono la variabile. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
 @utility tabular {
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum';

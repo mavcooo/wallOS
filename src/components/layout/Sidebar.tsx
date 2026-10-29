@@ -7,13 +7,17 @@ import { canView } from '@/lib/permissions';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useHomeStore, type ViewId } from '@/store/homeStore';
 
-interface NavItem {
+export interface NavItem {
   id: ViewId;
   icon: LucideIcon;
 }
 
-// Solo dati strutturali: le etichette arrivano da `nav.*` nel dizionario.
-const NAV: readonly NavItem[] = [
+/**
+ * Voci di navigazione condivise da Sidebar (>= md) e BottomNav (< md): un'unica
+ * lista evita che le due shell mostrino viste diverse dopo un refactor.
+ * Solo dati strutturali: le etichette arrivano da `nav.*` nel dizionario.
+ */
+export const NAV_ITEMS: readonly NavItem[] = [
   { id: 'overview', icon: LayoutGrid },
   { id: 'rooms', icon: House },
   { id: 'energy', icon: ChartNoAxesColumn },
@@ -30,7 +34,10 @@ export function Sidebar() {
   const roleLabel = t(`roles.${user.role}`);
 
   return (
-    <aside className="flex w-[84px] shrink-0 flex-col border-r border-line bg-panel/60 xl:w-[236px]">
+    <aside
+      data-testid="app-sidebar"
+      className="hidden w-[84px] shrink-0 flex-col border-r border-line bg-panel/60 md:flex xl:w-[236px]"
+    >
       <div className="flex h-20 items-center gap-3 px-4 xl:px-5">
         <div className="flex size-11 shrink-0 items-center justify-center rounded-2xl border border-accent/25 bg-accent-soft text-accent">
           <House className="size-5" strokeWidth={2.2} />
@@ -49,7 +56,7 @@ export function Sidebar() {
         className="flex flex-1 flex-col gap-1.5 px-2.5 py-4 xl:px-3"
         aria-label={t('nav.label')}
       >
-        {NAV.map((item) => {
+        {NAV_ITEMS.map((item) => {
           const disabled = !canView(user, user.elevated, item.id);
           const active = view === item.id;
           const Icon = item.icon;

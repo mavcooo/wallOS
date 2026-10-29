@@ -11,6 +11,14 @@
     "settings": "Settings",
     "users": "Users",
     "admin": "Administration",
+    "short": {
+      "overview": "Home",
+      "rooms": "Rooms",
+      "energy": "Energy",
+      "settings": "Setup",
+      "users": "Users",
+      "admin": "Admin"
+    },
     "denied": "{{label}} is not allowed for {{role}}"
   },
   "roles": {

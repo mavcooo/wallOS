@@ -421,8 +421,16 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Lingua + Kiosk + PIN */}
-        <div className="flex flex-col gap-4">
+        {/* Lingua, kiosk, identità display, diagnostica e PIN.
+            Prima erano una colonna flex da un terzo di schermo dentro questa
+            griglia (terzo item dopo broker e sync): tutte impilate, con i due
+            terzi accanto vuoti. Ora il blocco occupa la riga intera
+            (`xl:col-span-full`) e distribuisce le card su due colonne
+            bilanciate: ognuna mantiene la propria altezza naturale, quindi la
+            card alta del kiosk non viene né stirata né lasciata sola in una
+            colonna stretta. `break-inside-avoid` impedisce che una card venga
+            tagliata a metà fra le due colonne. */}
+        <div className="columns-1 gap-4 [&>*]:mb-4 [&>*]:break-inside-avoid md:columns-2 xl:col-span-full">
           <LanguageSwitcher />
           <SunlightModeCard />
           <PerformanceModeCard />
@@ -633,12 +641,17 @@ export function SettingsPage() {
       {/* Sicurezza: armamento dell'impianto, zone e registro persistente degli
           allarmi. Lo stato arriva da `security_events`, non dai toast: un
           allarme scattato con il tablet spento compare qui appena il pannello
-          si riaccende. */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          si riaccende.
+
+          Le due card stanno a metà larghezza: nella vecchia 1/3 + 2/3 la card
+          dell'impianto finiva in ~400px, dove i tre pulsanti di armamento e i
+          selettori di zona andavano a capo a ogni riga (card altissima e
+          illeggibile) mentre lo storico aveva spazio in eccesso. `items-start`
+          lascia a ciascuna la propria altezza: la più corta non viene stirata
+          con centinaia di pixel vuoti dentro il bordo. */}
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <SecuritySystemCard />
-        <div className="xl:col-span-2">
-          <SecurityHistoryCard />
-        </div>
+        <SecurityHistoryCard />
       </div>
 
       {role === 'admin' ? <TopologyManager /> : null}

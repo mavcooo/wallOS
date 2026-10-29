@@ -325,7 +325,7 @@ export function RoomsPage() {
       {...swipe.handlers}
       style={{ touchAction: 'pan-y' }}
       className={cn(
-        'flex flex-col gap-5 transition-transform duration-200 ease-out motion-reduce:transition-none',
+        'flex w-full min-w-0 flex-col gap-5 transition-transform duration-200 ease-out motion-reduce:transition-none',
         edgeNudge === 'start' && 'translate-x-1',
         edgeNudge === 'end' && '-translate-x-1',
       )}
@@ -497,8 +497,8 @@ export function RoomsPage() {
                     adapters: [...new Set(roomDevices.map((device) => device.adapter))].join(' · '),
                   })}
                 </span>
-                <span className="flex items-center gap-1.5">
-                  <Power className="size-3.5" />{' '}
+                <span className="flex min-w-0 items-center gap-1.5 break-all">
+                  <Power className="size-3.5 shrink-0" />{' '}
                   {t('rooms.topic', { topic: roomDevices[0]?.topics.state })}
                 </span>
               </div>

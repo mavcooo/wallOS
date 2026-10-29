@@ -48,7 +48,9 @@ export function PowerCard({
           </span>
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 truncate text-sm font-medium text-fg">
-              <span className="truncate">{device.name}</span>
+              <span className="min-w-0 truncate" title={device.name}>
+                {device.name}
+              </span>
               {device.protected ? <Lock className="size-3 shrink-0 text-fg-subtle" /> : null}
               <SyncIndicator pending={pending} />
             </p>

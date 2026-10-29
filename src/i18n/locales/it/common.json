@@ -11,6 +11,14 @@
     "settings": "Impostazioni",
     "users": "Utenti",
     "admin": "Amministrazione",
+    "short": {
+      "overview": "Home",
+      "rooms": "Stanze",
+      "energy": "Consumi",
+      "settings": "Setup",
+      "users": "Utenti",
+      "admin": "Admin"
+    },
     "denied": "{{label}} non consentito per {{role}}"
   },
   "roles": {

@@ -105,4 +105,50 @@ describe('App', () => {
     );
     expect(active?.textContent).toContain('Stanze');
   });
+
+  it('sotto i 768px monta la Bottom Navigation al posto della Sidebar', async () => {
+    // jsdom non applica i breakpoint Tailwind: qui conta il gate JS della
+    // shell, che sostituisce davvero un albero di navigazione con l'altro.
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      matches: media.includes('max-width: 767px'),
+      media,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }));
+
+    try {
+      useAuthStore.setState({
+        status: 'authenticated',
+        elevated: false,
+        user: {
+          id: 'u-admin',
+          username: 'admin',
+          name: 'Amministratore',
+          initials: 'AM',
+          role: 'admin',
+          allowedRooms: null,
+          active: true,
+          isKioskDevice: false,
+          kioskDeviceId: null,
+          lastAccess: null,
+          pinLength: 4,
+        },
+      });
+
+      render(<App />);
+
+      expect(await screen.findByTestId('bottom-nav')).toBeInTheDocument();
+      expect(screen.queryByTestId('app-sidebar')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Stanze' }));
+      expect(await screen.findByRole('heading', { level: 1, name: 'Stanze' })).toBeInTheDocument();
+      expect(useHomeStore.getState().ui.view).toBe('rooms');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });

@@ -24,8 +24,10 @@ export function Toaster() {
   if (visible.length === 0) return null;
 
   return (
+    // Su smartphone i toast salgono sopra la Bottom Navigation invece di
+    // coprirla; da `md` tornano in basso come sul pannello a parete.
     <div
-      className="pointer-events-none fixed bottom-5 left-1/2 z-[90] flex w-[min(92vw,26rem)] -translate-x-1/2 flex-col gap-2"
+      className="pointer-events-none fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom,0px))] left-1/2 z-[90] flex w-[min(92vw,26rem)] -translate-x-1/2 flex-col gap-2 md:bottom-5"
       role="status"
       aria-live="polite"
     >

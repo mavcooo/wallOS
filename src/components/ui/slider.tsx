@@ -18,7 +18,12 @@ export function Slider({
     <SliderPrimitive.Root
       className={cn(
         // `ignore-swipe`: trascinare lo slider non deve cambiare pagina/stanza.
-        'ignore-swipe relative flex h-11 w-full touch-none select-none items-center',
+        // `px-1`: il thumb è centrato sull'estremo della track, quindi metà
+        // del suo diametro esce dal box dello slider. Con 4px di inset il
+        // pollice resta dentro il padding della card (16px) anche a 40px di
+        // diametro del tema alto contrasto: niente clipping né scroll laterale
+        // durante il drag.
+        'ignore-swipe relative flex h-11 w-full touch-none select-none items-center px-1',
         className,
       )}
       {...props}

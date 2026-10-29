@@ -59,7 +59,10 @@ export const LightCard = memo(function LightCard({
   return (
     <div
       className={cn(
-        'flex flex-col gap-4 rounded-[var(--radius-card)] border p-4 transition-colors',
+        // Larghezza dal grid item (`w-full`), mai in pixel: la card scala da
+        // 390px a 1920px senza fuoriuscire dalla cella. `min-w-0` fa troncare
+        // il nome invece di allargare la card.
+        'flex w-full min-w-0 flex-col gap-4 rounded-[var(--radius-card)] border p-4 transition-colors',
         active ? 'border-line bg-panel' : 'border-line/70 bg-panel/60',
         className,
       )}
@@ -77,8 +80,10 @@ export const LightCard = memo(function LightCard({
             <Lightbulb className="size-5" />
           </span>
           <div className="min-w-0">
-            <p className="flex items-center gap-1.5 text-sm font-medium text-fg">
-              <span className="truncate">{device.name}</span>
+            <p className="flex w-full items-center gap-1.5 text-sm font-medium text-fg">
+              <span className="min-w-0 truncate" title={device.name}>
+                {device.name}
+              </span>
               <SyncIndicator pending={pending} />
             </p>
             <p className="truncate text-[11px] text-fg-subtle">

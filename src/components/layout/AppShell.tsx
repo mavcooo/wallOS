@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps,
 
 import { cn } from '@/lib/utils';
 import { KioskDimmerOverlay } from '@/components/kiosk/KioskDimmerOverlay';
+import { useCompactViewport } from '@/hooks/useCompactViewport';
 import { useKioskDimmer } from '@/hooks/useKioskDimmer';
 import { usePixelShift } from '@/hooks/usePixelShift';
 import { useHomeStore } from '@/store/homeStore';
 import { selectActiveAlarmCount, useSecurityStore } from '@/store/securityStore';
 import { selectCriticalCount, useToastStore } from '@/store/toastStore';
+import { BottomNav } from './BottomNav';
 import { Header } from './Header';
 import { HydrationBanner } from './HydrationBanner';
 import { ScrollContainerProvider } from './ScrollContainerContext';
@@ -53,6 +55,12 @@ export function AppShell({ children, mainProps }: AppShellProps) {
   const systemAlerts = useToastStore(selectCriticalCount);
   const activeAlarms = securityAlarms + systemAlerts;
   const { isDimmed, sleep, wake } = useKioskDimmer({ timeoutMs, hold: activeAlarms > 0 });
+  // Una sola shell alla volta: sotto i 768px la Sidebar non viene montata e al
+  // suo posto compare la Bottom Navigation. Il CSS (`hidden md:flex` /
+  // `md:hidden`) resta come seconda barriera, ma il gate JS evita due alberi di
+  // navigazione nello stesso documento (nomi accessibili duplicati, tab stop
+  // doppi, test ambigui).
+  const compact = useCompactViewport();
 
   // L'allarme deve trovare lo schermo acceso: il risveglio usa la stessa
   // pipeline del tap, quindi l'overlay è subito visibile e toccabile.
@@ -89,11 +97,15 @@ export function AppShell({ children, mainProps }: AppShellProps) {
   }, [activeAlarms, sleep]);
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-bg">
+    // Root vincolata all'altezza della viewport: l'unico contenitore che
+    // scrolla è <main>, il body non si muove (niente rimbalzo né scrollbar
+    // del documento sui browser touch). `w-full` invece di `w-screen`: con
+    // `overflow-hidden` una scrollbar lascerebbe comunque una striscia.
+    <div className="flex h-dvh max-h-dvh w-full select-none flex-col overflow-hidden bg-bg text-fg">
       {/* Il contenuto trasla dentro un contenitore che clippa: nessun bordo scoperto. */}
-      <div className="flex h-full w-full" style={shift.style}>
-        <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex h-full min-h-0 w-full flex-col md:flex-row" style={shift.style}>
+        {compact ? null : <Sidebar />}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Header onStandby={sleep} />
           {/* Safe boot: spiega perché i widget sono fermi durante l'idratazione. */}
           <HydrationBanner />
@@ -101,13 +113,27 @@ export function AppShell({ children, mainProps }: AppShellProps) {
             {...mainProps}
             ref={setMainRef}
             className={cn(
-              'kiosk-scroll min-h-0 flex-1 px-4 pb-8 pt-4 lg:px-6',
+              // `scrollbar-none`: nessuna barra nativa sul pannello kiosk, lo
+              // scroll (inerziale sul touch) resta. `overflow-x-hidden` evita
+              // che un contenuto più largo della colonna generi un pan
+              // orizzontale: il layout deve adattarsi, non scorrere di lato.
+              'scrollbar-none min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pb-6 pt-4 lg:px-6',
               mainProps?.className,
             )}
           >
-            <ScrollContainerProvider value={scrollContext}>{children}</ScrollContainerProvider>
+            {/* Larghezza massima centrata: su un 1920px le card non si
+                allargano all'infinito, su tablet la colonna usa tutto lo
+                spazio disponibile. */}
+            <div className="mx-auto w-full max-w-7xl">
+              <ScrollContainerProvider value={scrollContext}>{children}</ScrollContainerProvider>
+            </div>
           </main>
         </div>
+        {/* Fuori dallo scroll (flex sibling): la barra non si muove con la
+            pagina e non copre l'ultima card. Montata solo sul viewport
+            compatto, così sul pannello a parete non esistono due alberi di
+            navigazione (nomi accessibili e tab stop doppi). */}
+        {compact ? <BottomNav /> : null}
       </div>
       <KioskDimmerOverlay
         visible={isDimmed}

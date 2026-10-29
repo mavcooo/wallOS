@@ -187,7 +187,9 @@ export const CameraCard = memo(function CameraCard({
 
         <div className="flex items-center justify-between gap-2 p-3">
           <div className="min-w-0">
-            <p className="truncate text-sm font-medium text-fg">{device.name}</p>
+            <p className="truncate text-sm font-medium text-fg" title={device.name}>
+              {device.name}
+            </p>
             <p className="truncate text-[11px] text-fg-subtle">
               {roomName}
               {camera.transport ? ` · ${t(`camera.mode.${camera.transport}`)}` : ''}

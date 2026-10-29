@@ -44,7 +44,9 @@ export function MediaCard({ device, onAction, pending = false, className }: Medi
           </span>
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-sm font-medium text-fg">
-              <span className="truncate">{device.name}</span>
+              <span className="min-w-0 truncate" title={device.name}>
+                {device.name}
+              </span>
               <SyncIndicator pending={pending} />
             </p>
             <p className="truncate text-[11px] text-fg-subtle">

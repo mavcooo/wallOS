@@ -70,7 +70,9 @@ export const LivePowerCard = memo(function LivePowerCard({
   return (
     <article
       className={cn(
-        'flex flex-col gap-3 rounded-[var(--radius-card)] border border-line bg-panel p-4',
+        // Nessuna larghezza fissa: la cella della griglia decide (`w-full`),
+        // `min-w-0` permette al testo lungo di troncare invece di allargare.
+        'flex w-full min-w-0 flex-col gap-3 rounded-[var(--radius-card)] border border-line bg-panel p-4',
         className,
       )}
     >
@@ -87,7 +89,9 @@ export const LivePowerCard = memo(function LivePowerCard({
             <PlugZap className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium text-fg">{metrics.name}</p>
+            <p className="w-full truncate text-xs font-medium text-fg" title={metrics.name}>
+              {metrics.name}
+            </p>
             <p className="mt-0.5 flex items-center gap-1.5 text-[10px] text-fg-subtle">
               <span
                 className={cn(

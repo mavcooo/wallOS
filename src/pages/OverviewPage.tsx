@@ -89,7 +89,10 @@ function OverviewKpis({ devices }: { devices: readonly DeviceMetadata[] }) {
   );
 
   return (
-    <section aria-label={t('overview.statusAria')} className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <section
+      aria-label={t('overview.statusAria')}
+      className="grid grid-cols-2 gap-3 sm:grid-cols-4"
+    >
       <SummaryCard
         label={t('overview.kpi.lights.label')}
         value={`${kpi.lightsOn} / ${kpi.lights}`}
@@ -188,7 +191,7 @@ function FavoriteDevices() {
   return (
     <VirtualizedDeviceGrid
       deviceIds={favoriteIds}
-      columnsCount={{ sm: 1, md: 2, xl: 3 }}
+      columnsCount={{ sm: 1, md: 2, lg: 3, xl: 4 }}
       estimatedCardHeight={240}
       showFavorite
       emptyPlaceholder={
@@ -254,7 +257,7 @@ export function OverviewPage() {
   }, [devices]);
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex w-full min-w-0 flex-col gap-5">
       {/* Scenari rapidi */}
       <section aria-labelledby="scenarios-title" className="flex flex-col gap-3">
         <div className="flex items-end justify-between">
@@ -267,7 +270,7 @@ export function OverviewPage() {
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
           {scenarios.map((scenario) => (
             <ScenarioButton key={scenario.id} scenario={scenario} />
           ))}
@@ -294,7 +297,7 @@ export function OverviewPage() {
             {t('overview.rooms.detail')} <ChevronRight className="size-3.5" />
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
           {rooms.map((room) => (
             <RoomSummaryButton
               key={room.id}

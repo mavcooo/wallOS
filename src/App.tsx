@@ -193,8 +193,10 @@ function AppNavigation() {
         </Suspense>
       </AppShell>
       {pages.length > 1 && swipe.currentIndex >= 0 ? (
+        // Su mobile i puntini stanno sopra la Bottom Navigation (64px + area
+        // sicura): a `bottom-2` finirebbero sopra le etichette dei tab.
         <div
-          className="pointer-events-none fixed inset-x-0 bottom-2 z-20 flex justify-center"
+          className="pointer-events-none fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom,0px))] z-20 flex justify-center md:bottom-2"
           data-testid="page-swipe-dots"
         >
           <div className="rounded-full border border-line/70 bg-panel/85 px-2 py-1 shadow-lg shadow-black/20">
