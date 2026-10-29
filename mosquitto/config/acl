@@ -1,0 +1,83 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# wallOS · ACL Mosquitto (least privilege)
+#
+# Regole valide solo se `acl_file` è impostato (mosquitto.prod.conf). Un topic
+# non elencato per quell'utente viene scartato dal broker: nessun client può
+# leggere telemetrie o comandare attuatori fuori dal proprio perimetro, anche
+# conoscendo URL e porta del broker.
+#
+# ATTENZIONE al base topic: se MQTT_BASE_TOPIC non è vuoto, ogni pattern va
+# prefissato (es. `topic read casa/stat/#`). Qui si assume base topic vuoto,
+# il default del docker-compose.
+#
+# Ogni blocco `user` termina quando inizia il successivo. L'utente indicato in
+# `password_file` senza un blocco qui non può fare nulla (fail-closed).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Backend Node (rule engine, automazioni, telemetria) ─────────────────────
+# Identità più potente dello stack: deve poter leggere ogni stato e pubblicare
+# comandi/eventi su topic decisi a runtime dal database. Resta comunque un
+# utente autenticato: se la sua password trapela va ruotata subito.
+user wallos_backend
+topic readwrite #
+
+# ── Pannello kiosk (browser, WebSocket 9001) ────────────────────────────────
+# Può LEGGERE stati/telemetrie/discovery e SCRIVERE solo sui topic di comando.
+# Nessun permesso di scrittura su stat/#, wallos/system/#, wallos/kiosk/# altrui
+# o sulle configurazioni: i retained di stato non sono sovrascrivibili e un
+# client MQTT autonomo non può bypassare PIN/ruoli del frontend.
+user wallos_kiosk
+
+# Stato e disponibilità dei dispositivi.
+topic read stat/#
+topic read tele/#
+topic read shellies/#
+topic read shelly/#
+topic read zigbee2mqtt/#
+topic read domus/#
+
+# Eventi e configurazione pubblicati dal backend.
+topic read wallos/system/#
+topic read wallos/climate/#
+topic read wallos/heartbeat/#
+
+# Discovery Home Assistant (i prefissi extra vanno aggiunti a mano).
+topic read homeassistant/#
+
+# Comandi verso gli attuatori (gli stessi topic che il pannello usa davvero).
+topic write cmnd/#
+topic write zigbee2mqtt/+/set
+topic write shellies/+/relay/+/command
+topic write shellies/+/rpc
+topic write shelly/+/+/rpc
+topic write domus/+/+/set
+topic write wallos/climate/+/set
+
+# Diagnostica del pannello: ping/probe e telemetria batteria del kiosk.
+topic write wallos/heartbeat/ping
+topic write domus/kiosk/ping
+topic write wallos/kiosk/+/battery
+
+# ── Simulatore IoT (solo ambienti di test) ──────────────────────────────────
+# Pubblica telemetria e stati retained, ascolta i comandi come un attuatore.
+# Non ha accesso a wallos/system/# né ai topic di configurazione.
+user wallos_simulator
+topic read cmnd/#
+topic read zigbee2mqtt/+/set
+topic read shellies/+/relay/+/command
+topic read wallos/climate/+/set
+topic read wallos/heartbeat/ping
+topic write stat/#
+topic write tele/#
+topic write zigbee2mqtt/#
+topic write homeassistant/#
+topic write wallos/heartbeat/pong
+
+# ── Dispositivo singolo (esempio, da scommentare e duplicare) ───────────────
+# Per ogni nodo fisico conviene un'utenza dedicata: compromesso un dispositivo,
+# l'attaccante non può comandare gli altri. Il nome utente deve essere univoco
+# e la password va generata con tools/init-mqtt-auth.sh.
+#
+# user dispositivo_luce_soggiorno
+# topic write zigbee2mqtt/luce_soggiorno
+# topic read zigbee2mqtt/luce_soggiorno/set

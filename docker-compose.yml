@@ -1,6 +1,12 @@
 # Stack minimo per il gateway wallOS: API Fastify + PostgreSQL + broker MQTT.
 # Il frontend (dist/) va servito a parte (nginx, Caddy, ...) con proxy /api su
 # `api:8787`. Richiede le variabili indicate con `:?` (vedi README, "Docker").
+#
+# Broker: il profilo `prod` (default operativo) richiede auth + ACL; il profilo
+# `dev` avvia un broker anonimo isolato su 127.0.0.1 per la simulazione.
+#   ./tools/init-mqtt-auth.sh
+#   docker compose --profile prod up -d --build
+#   docker compose --profile dev up -d mqtt-dev
 services:
   db:
     image: postgres:17-alpine
@@ -20,14 +26,42 @@ services:
     expose:
       - '5432'
 
+  # Broker di produzione: allow_anonymous false, password_file + ACL.
+  # L'entrypoint blocca l'avvio se l'auth manca o è disattivata.
   mqtt:
     image: eclipse-mosquitto:2
+    profiles: ['prod']
     restart: unless-stopped
-    ports:
-      - '1883:1883' # MQTT TCP (dispositivi)
-      - '9001:9001' # MQTT over WebSocket (pannello nel browser)
+    entrypoint: ['/bin/sh', '/mosquitto/entrypoint.sh']
+    environment:
+      MQTT_CONFIG: /mosquitto/config/mosquitto.prod.conf
+      MQTT_REQUIRE_AUTH: 'true'
     volumes:
-      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/entrypoint.sh:/mosquitto/entrypoint.sh:ro
+      - ./mosquitto/config:/mosquitto/config:ro
+      # Generato da tools/init-mqtt-auth.sh, fuori dal versionamento.
+      - ./mosquitto/auth:/mosquitto/config/auth:ro
+      - wallos-mqtt:/mosquitto/data
+      # TLS/WSS (opzionale): scommenta insieme al listener 9002 del prod.conf.
+      # - ./mosquitto/certs:/mosquitto/certs:ro
+    ports:
+      # Default: solo loopback. Per i dispositivi/tablet in LAN imposta
+      # MOSQUITTO_BIND_IP sull'IP dell'interfaccia autorizzata (es. 192.168.0.10),
+      # mai 0.0.0.0 su una rete con ospiti.
+      - '${MOSQUITTO_BIND_IP:-127.0.0.1}:1883:1883' # MQTT TCP (backend + IoT)
+      - '${MOSQUITTO_BIND_IP:-127.0.0.1}:9001:9001' # MQTT over WebSocket (pannello)
+
+  # Broker di sviluppo: anonimo, senza volumi persistenti, raggiungibile solo
+  # dall'host. Non usare insieme al profilo prod (stesse porte).
+  mqtt-dev:
+    image: eclipse-mosquitto:2
+    profiles: ['dev']
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - '127.0.0.1:1883:1883'
+      - '127.0.0.1:9001:9001'
 
   api:
     build: .
@@ -35,8 +69,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mqtt:
-        condition: service_started
     ports:
       - '8787:8787'
     environment:
@@ -57,7 +89,15 @@ services:
       # Eventi di topologia → broker dello stack sul listener TCP (non il 9001
       # WebSocket del browser). Senza questa variabile il server resta muto su
       # MQTT e i pannelli ricevono gli aggiornamenti solo via SSE.
+      # Profilo dev: esporta MQTT_SERVER_URL=mqtt://mqtt-dev:1883.
       MQTT_SERVER_URL: ${MQTT_SERVER_URL:-mqtt://mqtt:1883}
+      # Utenza del BACKEND (rule engine/automazioni), distinta da quella del
+      # pannello. I nomi sono MOSQUITTO_* di proposito: vite.config.ts espone al
+      # browser ogni variabile MQTT_*, quindi un segreto con quel prefisso
+      # finirebbe nel bundle. MQTT_USERNAME qui è solo l'env del container api.
+      MQTT_USERNAME: ${MOSQUITTO_BACKEND_USERNAME:-wallos_backend}
+      MQTT_PASSWORD: ${MOSQUITTO_BACKEND_PASSWORD:-}
 
 volumes:
   wallos-db:
+  wallos-mqtt:

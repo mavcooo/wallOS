@@ -177,8 +177,14 @@ In alternativa i valori iniziali del broker arrivano dalle variabili d'ambiente
 `Dockerfile` è multi-stage su Node 24 Alpine: compila solo il servizio
 (`npm run build:server`), l'immagine finale contiene le dipendenze di produzione,
 gira con l'utente `node` e ha un healthcheck su `/api/health` (503 = unhealthy).
-`docker-compose.yml` avvia `api`, `db` (PostgreSQL 17, volume `wallos-db`) e
-`mqtt` (Mosquitto con 1883 e WebSocket 9001).
+`docker-compose.yml` avvia `api`, `db` (PostgreSQL 17, volume `wallos-db`) e il
+broker Mosquitto. Il broker ha due profili espliciti:
+
+- `prod` (default operativo): `mosquitto.prod.conf`, `allow_anonymous false`,
+  `password_file` + ACL; il container **non parte** se l'autenticazione manca o
+  se trova `allow_anonymous true`.
+- `dev`: `mosquitto.conf`, anonimo, senza volume dati e pubblicato solo su
+  `127.0.0.1`. Va usato da solo (occupa le stesse porte del profilo prod).
 
 ```bash
 export POSTGRES_PASSWORD='...'
@@ -186,16 +192,23 @@ export JWT_SECRET='...almeno 32 caratteri...'
 export ADMIN_PASSWORD='...almeno 10 caratteri...'
 export ADMIN_PIN=13579
 export KIOSK_PIN=24680
-docker compose up -d --build
+
+# Utenze broker (minimo 16 caratteri, diverse tra loro)
+export MOSQUITTO_BACKEND_PASSWORD='...'
+export MOSQUITTO_KIOSK_PASSWORD='...'
+./tools/init-mqtt-auth.sh          # crea mosquitto/auth/passwd (PBKDF2)
+
+docker compose --profile prod up -d --build
 docker compose logs -f api
 ```
 
 - API su `http://<host>:8787`. Il frontend statico (`npm run build` → `dist/`)
   va servito da nginx/Caddy con `location /api { proxy_pass http://api:8787; }`:
   il browser resta same-origin e i cookie `SameSite=Strict` continuano a valere.
-- Broker: il pannello usa `ws://<host>:9001` (MQTT WebSocket), i dispositivi
-  `1883`. La configurazione `docker/mosquitto.conf` è **anonima**: abilita
-  `password_file` e ACL per topic prima di esporla fuori dalla LAN.
+- Broker: il pannello usa `ws://<host>:9001` (MQTT WebSocket) autenticato come
+  `wallos_kiosk`, i dispositivi `1883`. In produzione l'anonimato è sempre
+  disattivato: vedi *Broker MQTT: autenticazione, ACL e binding*. Per una
+  simulazione anonima isolata usa `docker compose --profile dev up -d mqtt-dev`.
 - **Eventi di topologia in tempo reale**: il container `api` parla con il broker
   dello stack sul listener **TCP** (`1883`), non sul WebSocket. Nel
   `docker-compose.yml` è già impostato
@@ -210,6 +223,36 @@ docker compose logs -f api
   `AUTH_TRUST_PROXY=true` dietro il reverse proxy.
 - In produzione il servizio rifiuta i PIN demo: `ADMIN_PIN` e `KIOSK_PIN`
   devono essere espliciti e diversi da `2468`/`1234`.
+
+#### Broker MQTT: autenticazione, ACL e binding
+
+| Utenza | Accesso | Uso |
+| --- | --- | --- |
+| `wallos_backend` | `readwrite #` | rule engine e automazioni (container `api`) |
+| `wallos_kiosk` | lettura `stat/#`, `tele/#`, `zigbee2mqtt/#`, `shelly/#`, `domus/#`, `homeassistant/#`, `wallos/system/#`; scrittura solo `cmnd/#`, `zigbee2mqtt/+/set`, `shelly/+/+/rpc`, `domus/+/+/set`, `wallos/heartbeat/ping`, … | pannello WebSocket |
+| `wallos_simulator` | pubblica `stat/#` e `tele/#`, legge i comandi | solo ambienti di test |
+
+- **Anonimo rifiutato**: un client senza credenziali riceve
+  `Connection Refused: Not Authorized` (RC 5) sia su `1883` sia su `9001`. Un
+  client MQTT autonomo non può più aggirare PIN e ruoli del frontend: il broker
+  scarta i publish fuori perimetro, compresa la sovrascrittura dei retained di
+  `stat/#`.
+- **Binding**: `MOSQUITTO_BIND_IP` vale `127.0.0.1` per default. Per tablet e
+  dispositivi in LAN va impostato sull'IP dell'interfaccia autorizzata (es.
+  `192.168.0.10`), mai `0.0.0.0` su una rete con ospiti. Il backend raggiunge il
+  broker dalla rete interna (`mqtt:1883`) senza porte pubblicate.
+- **Base topic**: se `MQTT_BASE_TOPIC` non è vuoto, prefissa allo stesso modo i
+  pattern in `mosquitto/config/acl`.
+- **WSS**: per uscire dalla LAN abilita il listener TLS 9002 in
+  `mosquitto.prod.conf`, monta i certificati in `mosquitto/certs` e ricostruisci
+  il pannello con `MQTT_PROTOCOL=wss`, `MQTT_PORT=9002`.
+- **Verifica**: `npm run test:mqtt-auth` (o `node tools/mqtt-auth-check.mjs`)
+  controlla blocco anonimo, comando kiosk consentito, publish di sistema negato,
+  retained non sovrascrivibile e operatività del backend.
+- **Gateway server-side**: per non distribuire credenziali broker al browser, il
+  passo successivo è far parlare il pannello con un WebSocket autenticato del
+  backend (`/api/realtime`), che valida JWT/PIN e inoltra i comandi sul `1883`
+  privato. L'ACL kiosk è già la configurazione di transizione.
 
 ### Discovery Home Assistant (opzionale)
 
@@ -302,7 +345,12 @@ domus-kiosk/
 ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json / tsconfig.server.json
 ├── tsconfig.build-server.json      # emit del servizio per l'immagine Docker
 ├── Dockerfile / docker-compose.yml / .dockerignore
-├── docker/mosquitto.conf           # 1883 TCP + 9001 WebSocket (dev/LAN)
+├── mosquitto/
+│   ├── entrypoint.sh               # validazione auth bloccante (prod)
+│   ├── config/mosquitto.conf       # dev: anonimo, solo 127.0.0.1
+│   ├── config/mosquitto.prod.conf  # prod: password_file + ACL
+│   ├── config/acl                  # least privilege per utenza
+│   └── auth/passwd                 # hash PBKDF2 (generato, non versionato)
 ├── server/                         # API auth + topologia (Node + TypeScript)
 │   ├── index.ts                    # bootstrap, .env, graceful shutdown
 │   ├── app.ts                      # Fastify, cookie, CORS, helmet, CSRF origin
@@ -741,14 +789,16 @@ payload è identico sui due canali.
 | `MQTT_SERVER_URL` | — | Endpoint usato dal server per pubblicare gli eventi. Ha precedenza su tutto e accetta `mqtt://`, `mqtts://`, `ws://`, `wss://` (es. `mqtt://192.168.0.10:1883`, il **listener TCP**: il 9001 è il WebSocket del browser). |
 | `MQTT_SERVER_PORT` | `1883` | Porta TCP con cui viene composto l'endpoint da `MQTT_HOST`. |
 | `MQTT_HOST` | — | Host del broker, condiviso con il browser (dove compone l'URL WebSocket con `MQTT_PORT`). Se né `MQTT_SERVER_URL` né `MQTT_HOST` sono impostati la pubblicazione MQTT resta disabilitata: il server avverte nel log e gli eventi arrivano comunque via SSE. |
-| `MQTT_USERNAME` / `MQTT_PASSWORD` | — | Credenziali del broker, condivise tra server e browser (utenza dedicata con ACL topic). |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | — | Utenza broker del processo che le legge: nel container `api` arrivano da `MOSQUITTO_BACKEND_*`; nella **build del pannello** sono `wallos_kiosk` (scrittura solo comandi). |
+| `MOSQUITTO_BACKEND_USERNAME` / `MOSQUITTO_BACKEND_PASSWORD` | `wallos_backend` / — | Solo Docker Compose: credenziali del rule engine, iniettate nel container come `MQTT_USERNAME`/`MQTT_PASSWORD`. Niente prefisso `MQTT_` per non finire nel bundle. |
 | `MQTT_BASE_TOPIC` | — | Prefisso applicato a tutti i topic, identico a lato client. |
 
 **Verifica rapida** (due finestre affiancate sullo stesso pannello):
 
 ```bash
 # 1. osserva gli eventi di sistema sul broker
-mosquitto_sub -h 192.168.0.10 -p 1883 -t 'wallos/system/#' -v
+mosquitto_sub -h 192.168.0.10 -p 1883 \
+  -u wallos_backend -P "$MOSQUITTO_BACKEND_PASSWORD" -t 'wallos/system/#' -v
 
 # 2. genera una mutazione autenticata: l'altra finestra si riallinea da sola
 curl -s -c /tmp/w.cookies -H 'Content-Type: application/json' \
@@ -762,7 +812,9 @@ curl -s -b /tmp/w.cookies -H 'Content-Type: application/json' \
 Per simulare un evento senza toccare il server:
 
 ```bash
-mosquitto_pub -h 192.168.0.10 -p 1883 -t 'wallos/system/topology_changed' \
+mosquitto_pub -h 192.168.0.10 -p 1883 \
+  -u wallos_backend -P "$MOSQUITTO_BACKEND_PASSWORD" \
+  -t 'wallos/system/topology_changed' \
   -m '{"event":"device_updated","entity":"device","id":"light-living-main","timestamp":1730000000000}'
 ```
 

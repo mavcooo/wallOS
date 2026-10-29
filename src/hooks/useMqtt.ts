@@ -799,6 +799,19 @@ export function useMqtt(
         if (disposed || client !== instance) return;
         patchConnection({ lastError: error.message, status: 'error' });
         logRaw('system', 'client', `Errore: ${error.message}`);
+        // CONNACK 5 = credenziali assenti o errate. Contro un broker hardened
+        // l'errore grezzo non basta: serve dire quale utenza/ACL controllare.
+        const connack = (error as { connack?: { returnCode?: number } }).connack;
+        const denied =
+          connack?.returnCode === 5 ||
+          /not authori[sz]ed|bad user ?name|unauthorized/i.test(error.message);
+        if (denied) {
+          logRaw(
+            'system',
+            'client',
+            'Autenticazione broker rifiutata: verifica MQTT_USERNAME/MQTT_PASSWORD (utenza kiosk) e le ACL',
+          );
+        }
         // mqtt.js emette `close` subito dopo: il retry è gestito lì.
       });
 

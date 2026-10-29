@@ -14,6 +14,19 @@ node tools/capture.mjs       # screenshot delle viste in artifacts/
 node tools/mqtt-e2e.mjs      # broker aedes: connect, decode, comandi, reconnect
 ```
 
+## Hardening del broker
+
+Con lo stack di produzione attivo (`docker compose --profile prod up -d`) e le
+credenziali provisionate:
+
+```bash
+./tools/init-mqtt-auth.sh     # crea mosquitto/auth/passwd (PBKDF2)
+npm run test:mqtt-auth        # anonimo bloccato, ACL e retained protetti
+```
+
+Lo script legge `.env` (o l'ambiente) per `MOSQUITTO_BACKEND_*` e
+`MOSQUITTO_KIOSK_*`. Non fa parte di `npm test`: richiede un broker reale.
+
 `tools/broker.mjs` avvia un broker WebSocket di test su `127.0.0.1:9001/mqtt` con
 API HTTP di controllo su `127.0.0.1:9002` (`/publish`, `/commands`, `/health`).
 

@@ -26,3 +26,7 @@ data/
 *.log
 /freebuff-sites-build/
 .freebuff/
+
+# Credenziali generate dal broker MQTT (tools/init-mqtt-auth.sh)
+mosquitto/auth/*
+!mosquitto/auth/.gitkeep
