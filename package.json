@@ -27,6 +27,7 @@
     "migrate:up": "tsx server/migrate.ts up",
     "migrate:down": "tsx server/migrate.ts down",
     "migrate:create": "tsx server/migrate.ts create",
+    "lint:filenames": "node tools/lint-naming-conventions.mjs",
     "test:all": "npm run test && npm run test:server",
     "bench:mqtt": "vitest run --mode benchmark src/perf/mqttPipeline.bench.test.ts",
     "preview": "vite preview"

@@ -1402,6 +1402,87 @@ Gli script di verifica MQTT in `tools/` richiedono dipendenze opzionali
 
 ---
 
+## Convenzioni di naming e linee guida file
+
+I nomi dei file non sono gusto personale: sono l'interfaccia con cui il runner delle
+migrazioni decide cosa applicare, il bundler decide cosa includere e Vitest decide cosa
+eseguire. Le regole sotto sono **verificate** da `npm run lint:filenames`
+(`tools/lint-naming-conventions.mjs`), che gira in CI: un file fuori regola blocca la PR.
+
+| Categoria | Dove | Convenzione | Esempio conforme |
+| --- | --- | --- | --- |
+| Nuove migrazioni DB | `server/migrations/` | `YYYYMMDDHHmmss` (UTC, 14 cifre) + `_` + descrizione in kebab-case | `20261029175800_add-climate-schedules.sql` |
+| Migrazioni storiche | `server/migrations/` | prefisso sequenziale a tre cifre, **congelato** | `001_initial_schema.sql` … `009_security_system.sql` |
+| Componenti React | `src/components/`, `src/pages/` | PascalCase, `.tsx` | `LivePowerCard.tsx`, `KioskDimmerOverlay.tsx` |
+| Primitivi UI | `src/components/ui/` | kebab-case minuscolo (shadcn) oppure PascalCase | `switch.tsx`, `button.tsx`, `CriticalAlertOverlay.tsx` |
+| Custom hook | `src/hooks/` | `use` + PascalCase, `.ts` o `.tsx` | `useMqtt.ts`, `useKioskDimmer.ts` |
+| Moduli, servizi, store, utility | `src/lib`, `src/services`, `src/store`, `src/utils`, `server/services`, `server/routes`, … | camelCase, `.ts` | `telemetryWorker.ts`, `apiClient.ts`, `securityApi.ts` |
+| Test automatizzati | `__tests__/` (server) o accanto al target | `<target>.test.ts` / `<target>.test.tsx` (anche `.spec.`) | `telemetryWorker.test.ts`, `LivePowerCard.test.tsx` |
+
+Regole operative:
+
+- Un file sotto `src/components/` o `src/pages/` che finisce in `.tsx` è un componente e va in
+  PascalCase; l'unica eccezione sono i primitivi shadcn in `src/components/ui/`, che restano
+  kebab-case perché li rigenera il generatore shadcn. `src/components/admin/fields.tsx` è un
+  modulo di helper di form (esporta JSX, non è una schermata) ed è ammesso come eccezione esplicita.
+- I file in `server/__tests__/` devono dichiararsi test con il suffisso `.test.ts`: un nome
+  qualsiasi lì dentro non verrebbe eseguito da `npm run test:server` né controllato.
+- La descrizione delle migrazioni è **kebab-case**, non camelCase né snake_case: le parole restano
+  separate (`add-climate-schedules`, non `addclimateschedules`).
+
+### Creare una migrazione
+
+```bash
+npm run migrate:create "add solar inverter"
+# → server/migrations/20261029175800_add-solar-inverter.sql
+```
+
+Il generatore (`createMigration` in `server/migrate.ts`):
+
+1. calcola il timestamp **UTC** a 14 cifre (`YYYYMMDDHHmmss`), lo stesso ordine in cui le
+   migrazioni vanno applicate e senza il limite delle tre cifre sequenziali;
+2. normalizza il nome in kebab-case — minuscolo, spazi multipli, `_`, trattini ripetuti e
+   caratteri speciali (`!@#$%`) collassati in un singolo `-`, niente trattini ai bordi,
+   accenti traslitterati — e ripiega su `unnamed-migration` se non resta nulla;
+3. rifiuta di creare un secondo file con lo **stesso timestamp**: due migrazioni nello stesso
+   secondo non avrebbero un ordine di applicazione stabile;
+4. scrive il template con i blocchi commentati `-- Up Migration` e `-- Down Migration`, più i
+   marcatori `-- <file> - UP | DOWN | END` che il runner usa per separare le sezioni.
+
+### Immutabilità delle migrazioni SQL
+
+Il ledger `schema_migrations` identifica una migrazione **per nome file**: è quella stringa che
+viene confrontata a ogni bootstrap. Ridenominare un file già applicato lo fa sembrare nuovo al
+runner — che tenta di riapplicarlo e, se l'SQL non è idempotente, fallisce in modo bloccante — e
+lascia nel ledger una riga che non corrisponde più a nessun file (rollback impossibile).
+
+Quindi: **i file già distribuiti non si rinominano e non si modificano**. Le migrazioni
+`001`–`009` sono la fase legacy a prefisso sequenziale e restano come sono, duplicazione di `003`
+compresa (due migrazioni dello stesso giorno, applicate dal ledger come voci distinte).
+Se davvero servisse correggere il nome di una storica, va fatto in una finestra di manutenzione,
+verificando prima il ledger di **ogni** ambiente distribuito (il PostgreSQL di casa su
+`192.168.0.59:5432` e qualsiasi replica):
+
+```sql
+SELECT version, applied_at FROM schema_migrations ORDER BY id;
+```
+
+La rinomina richiede l'aggiornamento della riga nel ledger nella stessa finestra, oppure un
+rollback del file originale prima della rinomina. In tutti gli altri casi: si aggiunge una nuova
+migrazione, non si riscrive la storia.
+
+### Verifica automatica
+
+```bash
+npm run lint:filenames   # exit 0 = conforme, exit 1 = violazioni (bloccante in CI)
+```
+
+Lo script controlla: pattern e unicità delle migrazioni (le storiche sono in una allowlist chiusa),
+PascalCase dei componenti, prefisso `use` degli hook, camelCase dei moduli e suffisso `.test`/`.spec`
+dei test. Nessuna dipendenza esterna, stesso esito su Windows e Linux.
+
+---
+
 ## Migrazioni versionate del database
 
 Tutte le evoluzioni dello schema risiedono in `server/migrations/` come file SQL con blocchi `UP` e `DOWN`,
@@ -1416,6 +1497,15 @@ applicati dal runner di `server/migrate.ts`:
 | `004_automations.sql` | Motore di automazioni: `automations` (trigger/conditions/actions JSONB) e `automation_logs` con retention rotativa |
 | `005_automation_condition_groups.sql` | Gruppi di condizioni in OR: `condition_groups` JSONB sulla regola |
 | `006_kiosk_displays.sql` | Profili dei display a parete (`kiosk_displays`): preferenze hardware e di layout sincronizzate dal server |
+| `007_add_floorplan_schema.sql` | Planimetria: `floors` e posizionamento dei device sul disegno |
+| `008_add_db_health_checks.sql` | Storico dei controlli di salute del database (`db_health_checks`) |
+| `009_security_system.sql` | Impianto di sicurezza: zone, sensori armabili ed eventi con presa in carico |
+
+Le migrazioni `001`–`009` appartengono alla fase legacy a prefisso sequenziale e restano
+immutabili; **ogni migrazione successiva** deve usare il formato
+`YYYYMMDDHHmmss_<kebab-case>.sql` generato da `npm run migrate:create` (vedi
+[Convenzioni di naming](#convenzioni-di-naming-e-linee-guida-file) e
+*Immutabilità delle migrazioni SQL*).
 
 ### Ledger, transazione e lock
 
@@ -1440,7 +1530,8 @@ modifiche.
 | --- | --- |
 | `npm run migrate:up` | Applica le migrazioni non ancora registrate nel ledger, in ordine di nome |
 | `npm run migrate:down` | Rollback reale dell'ultima migrazione applicata (sezione `DOWN` + riga dal ledger) |
-| `npm run migrate:create <nome>` | Crea un nuovo file di migrazione timestamped nella cartella `server/migrations/` |
+| `npm run migrate:create "<descrizione>"` | Crea `server/migrations/<YYYYMMDDHHmmss>_<descrizione-kebab-case>.sql` con il template UP/DOWN |
+| `npm run lint:filenames` | Verifica le convenzioni di naming (migrazioni, componenti, hook, moduli, test) |
 
 ### Bootstrap all'avvio
 

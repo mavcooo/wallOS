@@ -467,26 +467,127 @@ export async function migrateDown(options: MigrateOptions = {}): Promise<Migrate
   }
 }
 
-// Create a new migration file with timestamp
-export async function createMigration(name: string): Promise<{ success: boolean; error?: string; filePath?: string }> {
-  try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
-    const safeName = (name || 'migration').replace(/[^a-z0-9]/gi, '') || 'migration';
-    const filename = `${timestamp}_${safeName}.sql`;
-    const filePath = path.resolve(resolveMigrationDir(), filename);
+/**
+ * Nome del file di migrazione richiesto dal lint (`tools/lint-naming-conventions.mjs`):
+ * timestamp UTC a 14 cifre, underscore, descrizione in kebab-case.
+ */
+export const MIGRATION_FILE_PATTERN = /^\d{14}_[a-z0-9]+(-[a-z0-9]+)*\.sql$/;
 
-    // Check if file already exists
+/** Descrizione usata quando il nome fornito non lascia nulla di utile. */
+export const FALLBACK_MIGRATION_NAME = 'unnamed-migration';
+
+const pad2 = (value: number): string => String(value).padStart(2, '0');
+
+/**
+ * Timestamp UTC a 14 cifre (`YYYYMMDDHHmmss`) usato come prefisso delle nuove
+ * migrazioni. Niente separatori: il nome deve ordinarsi alfabeticamente come si
+ * ordina nel tempo, e un prefisso a larghezza fissa lo garantisce anche fra
+ * anni diversi (a differenza di `001`, `002`, … che si ferma a tre cifre).
+ */
+export function formatMigrationTimestamp(date: Date = new Date()): string {
+  return (
+    `${date.getUTCFullYear()}` +
+    pad2(date.getUTCMonth() + 1) +
+    pad2(date.getUTCDate()) +
+    pad2(date.getUTCHours()) +
+    pad2(date.getUTCMinutes()) +
+    pad2(date.getUTCSeconds())
+  );
+}
+
+/**
+ * Normalizza la descrizione libera in kebab-case: minuscolo, ogni sequenza di
+ * caratteri non alfanumerici (spazi multipli, `_`, punteggiatura) diventa un
+ * singolo trattino, niente trattini di testa o di coda. Gli accenti vengono
+ * traslitterati (`Città` → `citta`) invece di sparire insieme alla lettera.
+ *
+ * `add  Solar_Inverter!` → `add-solar-inverter`, non `addsolarinverter`.
+ */
+export function kebabCaseMigrationName(name: string): string {
+  const slug = (name ?? '')
+    .normalize('NFKD')
+    // Segni diacritici scomposti da NFKD: restano solo le lettere base.
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || FALLBACK_MIGRATION_NAME;
+}
+
+/** Nome completo del file: `<YYYYMMDDHHmmss>_<kebab-case>.sql`. */
+export function buildMigrationFileName(name: string, date: Date = new Date()): string {
+  return `${formatMigrationTimestamp(date)}_${kebabCaseMigrationName(name)}.sql`;
+}
+
+export interface CreateMigrationOptions {
+  /** Directory di destinazione (default: `MIGRATION_DIR` o `server/migrations`). */
+  dir?: string;
+  /** Istante da usare nel nome (default: adesso). Iniettabile nei test. */
+  now?: Date;
+}
+
+/**
+ * Crea un nuovo file di migrazione con nome conforme alle convenzioni
+ * (`YYYYMMDDHHmmss_add-solar-inverter.sql`) e il template UP/DOWN/END già
+ * riconosciuto da `parseMigration`.
+ *
+ * I marcatori macchina restano `-- <file> - UP|DOWN|END` (l'unica forma che il
+ * runner sa tagliare, e quella di tutte le migrazioni storiche); le righe
+ * `-- Up Migration` / `-- Down Migration` sono le etichette leggibili richieste
+ * dal template e non interferiscono con il parser.
+ */
+export async function createMigration(
+  name: string,
+  options: CreateMigrationOptions = {},
+): Promise<{ success: boolean; error?: string; filePath?: string; filename?: string }> {
+  try {
+    const migrationDir = resolveMigrationDir(options.dir);
+    const filename = buildMigrationFileName(name, options.now ?? new Date());
+    const filePath = path.resolve(migrationDir, filename);
+
     if (fs.existsSync(filePath)) {
       return { success: false, error: `File already exists: ${filePath}` };
     }
 
-    // Create template with UP/DOWN blocks
-    const content = `-- ----------------------------\n-- ${filename} - UP\n-- ----------------------------\n\n-- Add your migration SQL here\n\n-- ----------------------------\n-- ${filename} - DOWN\n-- ----------------------------\n\n-- Revert the changes made in the UP section above\n\n-- ----------------------------\n-- ${filename} - END\n-- ----------------------------\n`;
+    // Due migrazioni con lo stesso timestamp non sarebbero ordinabili in modo
+    // stabile: il lint le blocca, qui evitiamo proprio di generararle.
+    const prefix = filename.slice(0, 14);
+    const collision = listMigrationFiles(migrationDir).find((file) => file.startsWith(`${prefix}_`));
+    if (collision) {
+      return {
+        success: false,
+        error:
+          `Esiste già una migrazione con questo timestamp (${collision}): ` +
+          'riprova fra un secondo, il prefisso deve essere unico',
+      };
+    }
+
+    const content = `-- ----------------------------
+-- ${filename} - UP
+-- ----------------------------
+-- Up Migration
+
+-- Scrivi qui l'SQL della migrazione. UP e riga nel ledger girano nella stessa
+-- transazione: se un solo statement fallisce, lo schema resta invariato.
+
+-- ----------------------------
+-- ${filename} - DOWN
+-- ----------------------------
+-- Down Migration
+
+-- Annulla le modifiche della sezione UP (ordine inverso). Un DOWN vuoto blocca
+-- \`migrate:down\` con NO_DOWN_SECTION: un rollback non deve dichiarare
+-- successo senza aver toccato lo schema.
+
+-- ----------------------------
+-- ${filename} - END
+-- ----------------------------
+`;
 
     fs.writeFileSync(filePath, content, 'utf8');
 
     console.log(`[migrate] Created migration file: ${filePath}`);
-    return { success: true, filePath };
+    return { success: true, filePath, filename };
   } catch (error) {
     console.error('[migrate] Error creating migration:', error);
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -554,7 +655,9 @@ if (isDirectRun) {
       });
       break;
     case 'create': {
-      const name = process.argv.slice(3).join(' ') || 'new-migration';
+      // Nome libero (anche più parole): la normalizzazione in kebab-case avviene
+      // in `createMigration`, che ripiega su `unnamed-migration` se resta vuoto.
+      const name = process.argv.slice(3).join(' ');
       void createMigration(name).then((result) => {
         console.log(
           result.success ? `[migrate] Creato ${result.filePath}` : `[migrate] ${result.error}`,
@@ -564,7 +667,10 @@ if (isDirectRun) {
       break;
     }
     default:
-      console.log('Usage: node server/migrate.ts <up|down|create> [name]');
+      console.log(
+        'Usage: node server/migrate.ts <up|down|create> [name]\n' +
+          '  create "add solar inverter" → server/migrations/<YYYYMMDDHHmmss>_add-solar-inverter.sql',
+      );
       process.exit(1);
   }
 }

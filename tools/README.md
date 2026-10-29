@@ -14,6 +14,17 @@ node tools/capture.mjs       # screenshot delle viste in artifacts/
 node tools/mqtt-e2e.mjs      # broker aedes: connect, decode, comandi, reconnect
 ```
 
+## Convenzioni di naming
+
+```bash
+npm run lint:filenames   # node tools/lint-naming-conventions.mjs
+```
+
+Controllo bloccante in CI (nessuna dipendenza): pattern e unicità delle
+migrazioni, PascalCase di componenti e hook, camelCase dei moduli, suffisso
+dei test. Le regole e l'eccezione per le migrazioni storiche sono in
+`README.md` → *Convenzioni di naming e linee guida file*.
+
 ## Hardening del broker
 
 Con lo stack di produzione attivo (`docker compose --profile prod up -d`) e le

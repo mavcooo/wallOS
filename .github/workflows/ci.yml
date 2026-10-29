@@ -31,6 +31,9 @@ jobs:
       - name: Typecheck (strict)
         run: npm run typecheck
 
+      - name: Convenzioni di naming (migrazioni, componenti, hook, test)
+        run: npm run lint:filenames
+
       - name: Build del servizio (emit per Docker)
         run: npm run build:server
 
