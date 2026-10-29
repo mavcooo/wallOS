@@ -426,7 +426,7 @@ describe('cronotermostato · job periodico sul database reale', () => {
       publisher: {
         publish(topic, payload) {
           published.push({ topic, payload });
-          return true;
+          return Promise.resolve(true);
         },
         close: async () => undefined,
       },
@@ -486,7 +486,7 @@ describe('cronotermostato · job periodico sul database reale', () => {
       publisher: {
         publish(_topic, payload) {
           published.push(payload);
-          return true;
+          return Promise.resolve(true);
         },
         close: async () => undefined,
       },

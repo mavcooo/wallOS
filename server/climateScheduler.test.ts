@@ -1,17 +1,32 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Database } from './db.js';
 import {
   buildClimateCommands,
   createClimateScheduler,
+  createMqttClimatePublisher,
   normalizeWindows,
   nextWindowStart,
   planClimateDevice,
+  PUBLISH_ACK_TIMEOUT_MS,
   resolveActiveWindow,
   timeOfMinutes,
   type ClimatePublisher,
 } from './services/climateScheduler.js';
-import type { ClimateRuntimeRow, ClimateScheduleRow, DeviceRow } from './types.js';
+import type { AuthConfig, ClimateRuntimeRow, ClimateScheduleRow, DeviceRow } from './types.js';
+
+// Broker finto: `publish` non chiama mai il callback da solo, così i test
+// controllano quando (e se) arriva il PUBACK.
+const mqttMock = vi.hoisted(() => {
+  const socket = {
+    on: vi.fn(),
+    publish: vi.fn(),
+    end: vi.fn(),
+  };
+  return { socket, connect: vi.fn(() => socket) };
+});
+
+vi.mock('mqtt', () => ({ default: { connect: mqttMock.connect } }));
 
 /** Mercoledì 21 ottobre 2026, 12:00 locali (0 = domenica → 3 = mercoledì). */
 const WEDNESDAY_NOON = new Date(2026, 9, 21, 12, 0, 0, 0);
@@ -300,7 +315,7 @@ describe('createClimateScheduler', () => {
       published,
       publish(topic, payload) {
         published.push({ topic, payload });
-        return true;
+        return Promise.resolve(true);
       },
       close: async () => undefined,
     };
@@ -330,7 +345,7 @@ describe('createClimateScheduler', () => {
     const db = fakeDatabase([schedule()], runtime());
     const scheduler = createClimateScheduler({
       db: db as unknown as Database,
-      publisher: { publish: () => false, close: async () => undefined },
+      publisher: { publish: async () => false, close: async () => undefined },
     });
 
     const result = await scheduler.tick(new Date(2026, 9, 21, 7, 30));
@@ -369,5 +384,181 @@ describe('createClimateScheduler', () => {
 
     expect(result.errors).toBe(1);
     expect(result.evaluated).toBe(1);
+  });
+
+  it('se il PUBACK manca non memorizza il setpoint e lo ripete al giro successivo', async () => {
+    const db = fakeDatabase([schedule()], runtime());
+    const published: string[] = [];
+    let confirmed = false;
+    const scheduler = createClimateScheduler({
+      db: db as unknown as Database,
+      publisher: {
+        publish(_topic, payload) {
+          published.push(payload);
+          return Promise.resolve(confirmed);
+        },
+        close: async () => undefined,
+      },
+    });
+
+    const failed = await scheduler.tick(new Date(2026, 9, 21, 7, 30));
+
+    expect(failed.errors).toBe(1);
+    expect(published).toHaveLength(1);
+    expect(db.recordClimateCommand).not.toHaveBeenCalled();
+
+    // Errore rientrato: il tick successivo ritrova la discrepanza e riapplica
+    // il setpoint che il broker non aveva confermato.
+    confirmed = true;
+    const retried = await scheduler.tick(new Date(2026, 9, 21, 7, 31));
+
+    expect(retried.published).toBe(1);
+    expect(retried.errors).toBe(0);
+    expect(published).toHaveLength(2);
+    expect(db.recordClimateCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it('il primo giro dopo il boot ripubblica la fascia attiva ignorando la cache', async () => {
+    const db = fakeDatabase(
+      [schedule()],
+      runtime({
+        last_sent_target_temp: '20.5',
+        last_sent_hvac_mode: 'comfort',
+        last_sent_at: new Date(2026, 9, 21, 7, 0),
+      }),
+    );
+    const publisher = fakePublisher();
+    const scheduler = createClimateScheduler({
+      db: db as unknown as Database,
+      publisher,
+    });
+
+    // Un giro ordinario rispetta la cache: nessun comando al broker.
+    const steady = await scheduler.tick(new Date(2026, 9, 21, 7, 30));
+    expect(steady.unchanged).toBe(1);
+    expect(publisher.published).toHaveLength(0);
+
+    // Dopo un riavvio, invece, il termostato va riallineato subito.
+    const boot = await scheduler.tick(new Date(2026, 9, 21, 7, 30), { force: true });
+
+    expect(boot.published).toBe(1);
+    expect(publisher.published).toHaveLength(1);
+    expect(JSON.parse(publisher.published[0]?.payload ?? '{}')).toEqual({
+      system_mode: 'heat',
+      occupied_heating_setpoint: 20.5,
+    });
+    expect(db.recordClimateCommand).toHaveBeenCalledWith(
+      'climate-living',
+      20.5,
+      'comfort',
+      expect.any(Date),
+    );
+  });
+
+  it('start() esegue subito il giro di recupero, senza aspettare un minuto', async () => {
+    vi.useFakeTimers({ now: new Date(2026, 9, 21, 7, 30) });
+    try {
+      const db = fakeDatabase(
+        [schedule()],
+        runtime({
+          last_sent_target_temp: '20.5',
+          last_sent_hvac_mode: 'comfort',
+          last_sent_at: new Date(2026, 9, 21, 7, 0),
+        }),
+      );
+      const publisher = fakePublisher();
+      const scheduler = createClimateScheduler({
+        db: db as unknown as Database,
+        publisher,
+      });
+
+      scheduler.start();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(publisher.published).toHaveLength(1);
+      expect(db.recordClimateCommand).toHaveBeenCalledTimes(1);
+      scheduler.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('createMqttClimatePublisher', () => {
+  const config = {
+    mqtt: {
+      url: 'mqtt://broker.local:1883',
+      username: null,
+      password: null,
+      baseTopic: '',
+    },
+  } as unknown as AuthConfig;
+
+  let acks: ((error?: Error) => void)[] = [];
+
+  beforeEach(() => {
+    acks = [];
+    vi.resetAllMocks();
+    mqttMock.connect.mockReturnValue(mqttMock.socket);
+    mqttMock.socket.end.mockImplementation((_force: boolean, callback: () => void) => callback());
+    mqttMock.socket.publish.mockImplementation(
+      (_topic: string, _payload: string, _options: unknown, callback: (error?: Error) => void) => {
+        acks.push(callback);
+        return mqttMock.socket;
+      },
+    );
+  });
+
+  it('conferma il comando solo alla ricezione del PUBACK', async () => {
+    const publisher = createMqttClimatePublisher(config);
+
+    const pending = publisher.publish('casa/termostato/set', '{"system_mode":"heat"}');
+    await Promise.resolve();
+
+    expect(mqttMock.socket.publish).toHaveBeenCalledWith(
+      'casa/termostato/set',
+      '{"system_mode":"heat"}',
+      { qos: 1 },
+      expect.any(Function),
+    );
+
+    acks[0]?.();
+    await expect(pending).resolves.toBe(true);
+    await publisher.close();
+  });
+
+  it('un errore nel callback è un comando non consegnato', async () => {
+    const publisher = createMqttClimatePublisher(config);
+
+    const pending = publisher.publish('casa/termostato/set', '{}');
+    await Promise.resolve();
+    acks[0]?.(new Error('broker offline'));
+
+    await expect(pending).resolves.toBe(false);
+    await publisher.close();
+  });
+
+  it('senza PUBACK scade, così il tick non resta appeso', async () => {
+    vi.useFakeTimers();
+    try {
+      const publisher = createMqttClimatePublisher(config);
+
+      const pending = publisher.publish('casa/termostato/set', '{}');
+      await vi.advanceTimersByTimeAsync(PUBLISH_ACK_TIMEOUT_MS);
+
+      await expect(pending).resolves.toBe(false);
+      await publisher.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('senza broker configurato ogni comando è non consegnato', async () => {
+    const publisher = createMqttClimatePublisher({
+      mqtt: { url: null, username: null, password: null, baseTopic: '' },
+    } as unknown as AuthConfig);
+
+    await expect(publisher.publish('casa/termostato/set', '{}')).resolves.toBe(false);
+    expect(mqttMock.connect).not.toHaveBeenCalled();
   });
 });

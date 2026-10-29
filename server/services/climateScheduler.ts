@@ -26,9 +26,12 @@ import type {
  * 4. **fascia attiva** → `day_of_week` + ora locale del server; fuori da ogni
  *    fascia il termostato va in `off` (lo spegnimento tra le fasce è parte del
  *    programma, non un errore);
- * 5. **pubblicazione** → solo se il setpoint differisce dall'ultimo trasmesso:
- *    un publish al minuto su un broker locale è rumore inutile e consuma la
- *    batteria delle valvole.
+ * 5. **pubblicazione** → solo se il setpoint differisce dall'ultimo **confermato**
+ *    dal broker: un publish al minuto su un broker locale è rumore inutile e
+ *    consuma la batteria delle valvole. QoS 1 con attesa del PUBACK: finché il
+ *    broker non conferma, `last_sent_*` resta invariato e il giro successivo
+ *    ripete il comando. Al boot il primo giro ignora la cache e riallinea
+ *    comunque il termostato al profilo attivo.
  *
  * Se un dispositivo non ha **nessuna** fascia configurata il motore non lo
  * tocca: non è compito di un cronotermostato appena aggiunto spegnere un
@@ -370,15 +373,23 @@ export function planClimateDevice(
 // ── Pubblicazione ───────────────────────────────────────────────────────────
 
 export interface ClimatePublisher {
-  /** `false` = nessun broker disponibile: il setpoint non va memorizzato. */
-  publish(topic: string, payload: string): boolean;
+  /**
+   * `true` solo alla conferma PUBACK del broker (QoS 1). `false` = broker
+   * assente, errore del socket o timeout: il setpoint non va memorizzato.
+   */
+  publish(topic: string, payload: string): Promise<boolean>;
   close(): Promise<void>;
 }
+
+/** Attesa massima del PUBACK: oltre, il comando è perso e va ritentato. */
+export const PUBLISH_ACK_TIMEOUT_MS = 5_000;
 
 /**
  * Connessione persistente al broker locale per i comandi programmati. QoS 1:
  * mqtt.js accoda finché la socket non è pronta, quindi un broker che riparte
- * dopo il server non perde il primo setpoint.
+ * dopo il server non perde il primo setpoint. `publish` risolve solo al PUBACK
+ * (o al timeout), così il chiamante sa se il broker ha davvero accettato il
+ * comando prima di memorizzarlo.
  */
 export function createMqttClimatePublisher(
   config: AuthConfig,
@@ -391,7 +402,7 @@ export function createMqttClimatePublisher(
         'non vengono pubblicati (le fasce restano salvate e ripartono appena il broker è configurato)',
     );
     return {
-      publish: () => false,
+      publish: () => Promise.resolve(false),
       close: () => Promise.resolve(),
     };
   }
@@ -415,13 +426,39 @@ export function createMqttClimatePublisher(
   return {
     publish(topic, payload) {
       const socket = client;
-      if (!socket) return false;
-      socket.publish(topic, payload, { qos: 1 }, (error) => {
-        if (error) {
-          log?.warn(`cronotermostato: publish fallito su ${topic}: ${error.message}`);
-        }
+      if (!socket) return Promise.resolve(false);
+
+      // Il callback di `publish` con QoS 1 arriva al PUBACK del broker, non
+      // all'uscita del pacchetto: è l'unica conferma che il comando è stato
+      // accettato. Il timeout copre socket cadute o broker che non risponde,
+      // altrimenti il tick resterebbe appeso per sempre.
+      return new Promise<boolean>((resolve) => {
+        let settled = false;
+        let timer: NodeJS.Timeout | null = null;
+        const settle = (confirmed: boolean) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          resolve(confirmed);
+        };
+        timer = setTimeout(() => {
+          log?.warn(
+            `cronotermostato: PUBACK non ricevuto entro ${PUBLISH_ACK_TIMEOUT_MS} ms su ${topic}`,
+          );
+          settle(false);
+        }, PUBLISH_ACK_TIMEOUT_MS);
+        // Il timer non deve tenere vivo il processo durante lo shutdown.
+        timer.unref?.();
+
+        socket.publish(topic, payload, { qos: 1 }, (error) => {
+          if (error) {
+            log?.warn(`cronotermostato: publish fallito su ${topic}: ${error.message}`);
+            settle(false);
+            return;
+          }
+          settle(true);
+        });
       });
-      return true;
     },
     close() {
       if (!client) return Promise.resolve();
@@ -446,9 +483,18 @@ export interface ClimateTickResult {
   details: string[];
 }
 
+export interface ClimateTickOptions {
+  /**
+   * Ripubblica anche un setpoint identico all'ultimo confermato. Usato dal
+   * primo giro dopo il boot: dopo un riavvio la cache non è una prova che il
+   * termostato abbia ricevuto il comando.
+   */
+  force?: boolean;
+}
+
 export interface ClimateScheduler {
   /** Un giro completo; esposto per i test e per un eventuale trigger manuale. */
-  tick(now?: Date): Promise<ClimateTickResult>;
+  tick(now?: Date, options?: ClimateTickOptions): Promise<ClimateTickResult>;
   start(): void;
   stop(): void;
 }
@@ -470,7 +516,10 @@ export function createClimateScheduler({
   let timer: NodeJS.Timeout | null = null;
   let running = false;
 
-  async function tick(now = new Date()): Promise<ClimateTickResult> {
+  async function tick(
+    now = new Date(),
+    { force = false }: ClimateTickOptions = {},
+  ): Promise<ClimateTickResult> {
     const result: ClimateTickResult = {
       evaluated: 0,
       published: 0,
@@ -501,18 +550,36 @@ export function createClimateScheduler({
           result.details.push(`${device.id}: vacanza terminata`);
         }
 
-        if (plan.commands.length === 0) {
+        // Al boot il comando viene rimandato anche se coincide con l'ultimo
+        // confermato: dopo un crash la cache su DB non garantisce che il
+        // termostato abbia davvero applicato il setpoint.
+        const commands =
+          force && plan.reason === 'unchanged'
+            ? buildClimateCommands(device, plan.target)
+            : plan.commands;
+
+        if (commands.length === 0) {
           if (plan.reason === 'unchanged' || plan.reason === 'no-program') result.unchanged += 1;
           continue;
         }
 
-        const accepted = plan.commands.every((command) =>
-          publisher.publish(command.topic, command.payload),
-        );
-        if (!accepted) {
-          // Nessun broker: non memorizzare il setpoint, così il prossimo giro
-          // riprova invece di considerarlo già trasmesso.
+        // QoS 1: si prosegue solo dopo il PUBACK del broker. Se una conferma
+        // manca (errore o timeout) non si memorizza nulla: `last_sent_*` resta
+        // quello dell'ultimo comando realmente consegnato, quindi il giro
+        // successivo ritrova la discrepanza e ripete l'invio.
+        let confirmed = true;
+        for (const command of commands) {
+          if (!(await publisher.publish(command.topic, command.payload))) {
+            confirmed = false;
+            break;
+          }
+        }
+        if (!confirmed) {
           result.errors += 1;
+          log?.warn(
+            `cronotermostato: invio non confermato per ${device.id}, ` +
+              'il setpoint non viene memorizzato e sarà ritentato al prossimo giro',
+          );
           continue;
         }
 
@@ -540,9 +607,10 @@ export function createClimateScheduler({
     tick,
     start() {
       if (timer) return;
-      // Primo giro subito: dopo un riavvio il pannello non deve aspettare un
-      // minuto per vedere il setpoint programmato.
-      void tick().catch((error: unknown) => {
+      // Primo giro subito e forzato: dopo un riavvio il pannello non deve
+      // aspettare un minuto, e il termostato deve ricevere il setpoint della
+      // fascia attiva anche se il database dice che era già stato inviato.
+      void tick(new Date(), { force: true }).catch((error: unknown) => {
         log?.warn(
           `cronotermostato: primo giro fallito: ${
             error instanceof Error ? error.message : String(error)
