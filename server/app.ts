@@ -10,6 +10,7 @@ import type { MqttLink } from './mqttClient.js';
 import { createAutomationEngine, type AutomationEngine } from './services/automationEngine.js';
 import { registerAutomationRoutes } from './routes/automations.js';
 import { registerAuthRoutes } from './routes/auth.js';
+import { registerSecurityRoutes } from './routes/security.js';
 import { registerClimateRoutes } from './routes/climate.js';
 import { registerDatabaseRoutes } from './routes/database.js';
 import { registerFloorRoutes } from './routes/floors.js';
@@ -31,6 +32,11 @@ import {
   registerTelemetryStatsRoutes,
   registerTelemetrySummaryRoutes,
 } from './routes/telemetry.js';
+import { createAlarmManager, type AlarmManager } from './services/alarmManager.js';
+import {
+  createSecurityEventBus,
+  type SecurityEventBus,
+} from './services/securityEvents.js';
 import { createTelemetryStatsStore, type TelemetryStatsStore } from './services/telemetryWorker.js';
 import { hashSecret, randomToken } from './security.js';
 import { seedDatabase } from './seed.js';
@@ -56,6 +62,14 @@ export interface BuildAppOptions {
    * verificare il topic senza aprire socket.
    */
   kioskPublisher?: KioskConfigPublisher;
+  /**
+   * Collegamento MQTT del worker di sicurezza. Come per le automazioni, in
+   * produzione lo costruisce `start()` (chiamato da `server/index.ts`); nei test
+   * si inietta un falso per osservare sottoscrizioni e allarmi senza socket.
+   */
+  securityLink?: MqttLink;
+  /** Bus degli eventi di sicurezza: nei test si inietta per contare le notifiche. */
+  securityEvents?: SecurityEventBus;
 }
 
 export interface BuiltApp {
@@ -69,6 +83,13 @@ export interface BuiltApp {
    * senza che `buildApp` debba avviare socket o timer.
    */
   telemetryStats: TelemetryStatsStore;
+  /**
+   * Worker degli allarmi: `start()`/`stop()` li pilota `server/index.ts`, così
+   * l'istanza Fastify dei test resta senza socket e senza timer.
+   */
+  alarmManager: AlarmManager;
+  /** Bus SSE degli allarmi: il worker e le rotte vi pubblicano gli eventi. */
+  securityEvents: SecurityEventBus;
 }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -262,8 +283,23 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     ...(options.mqttLink ? { link: options.mqttLink } : {}),
   });
 
+  // Allarmi: stessa separazione del motore di automazioni. L'istanza è inerte
+  // finché `index.ts` non chiama `start()`; le rotte la usano solo per sapere
+  // quali contatti sono aperti (blocco dell'armamento).
+  const securityEvents = options.securityEvents ?? createSecurityEventBus(app.log);
+  const alarmManager = createAlarmManager({
+    db,
+    config,
+    log: app.log,
+    events: securityEvents,
+    ...(options.securityLink ? { link: options.securityLink } : {}),
+  });
+
   registerAuthRoutes(app, { db, config, dummyPasswordHash });
   registerUserRoutes(app, { db, config });
+  // Sicurezza: stato, armamento, registro eventi e stream SSE. Il worker che
+  // scrive gli allarmi vive fuori dal processo HTTP della UI (index.ts).
+  registerSecurityRoutes(app, { db, config, events: securityEvents, alarmManager });
   registerTopologyRoutes(app, { db, config, events: topologyEvents });
   // Ripiego SSE: i client la aprono solo quando la socket MQTT non è viva.
   registerTopologyEventRoutes(app, { db, config, events: topologyEvents });
@@ -290,10 +326,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
 
   app.addHook('onClose', async () => {
     await automations.stop();
+    await alarmManager.stop();
+    securityEvents.close();
     await kioskPublisher.close();
     await topologyEvents.close();
     await db.close();
   });
 
-  return { app, db, automations, telemetryStats };
+  return { app, db, automations, telemetryStats, alarmManager, securityEvents };
 }

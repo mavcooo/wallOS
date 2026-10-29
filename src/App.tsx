@@ -23,6 +23,7 @@ import { useKioskTelemetry } from '@/hooks/useKioskTelemetry';
 import { useHighContrast } from '@/hooks/useHighContrast';
 import { usePerformanceMode } from '@/hooks/usePerformanceMode';
 import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
+import { useSecuritySync } from '@/hooks/useSecuritySync';
 import { useSwipeNavigation } from '@/hooks/useSwipeNavigation';
 import { useTopologySync } from '@/hooks/useTopologySync';
 import { canView } from '@/lib/permissions';
@@ -223,6 +224,18 @@ function TopologySync() {
 }
 
 /**
+ * Allarmi: legge `/api/security/state` e ascolta lo stream SSE, scrivendo lo
+ * snapshot nello store che alimenta overlay e risveglio del dimmer. Vive fuori
+ * da `AuthGate` perché il lock screen deve poter mostrare un allarme pendente
+ * scattato mentre il pannello era spento; con sessione assente il hook si
+ * limita a non interrogare il server.
+ */
+function SecuritySync() {
+  useSecuritySync();
+  return null;
+}
+
+/**
  * Profilo del display: idratazione da PostgreSQL all'avvio (`/api/kiosk/:id`) e
  * applicazione a caldo delle modifiche fatte dall'amministratore, che arrivano
  * su `wallos/system/kiosk/<id>/config_updated`. Vive accanto a `TopologySync`
@@ -277,6 +290,9 @@ export default function App() {
       {/* Il PIN è condiviso da azioni protette e riconoscimento allarmi, anche
           sul lock screen: il provider avvolge l'intera applicazione. */}
       <PinProvider>
+        {/* Allarmi persistiti: overlay e risveglio del kiosk leggono questo
+            store, non i toast effimeri della socket del browser. */}
+        <SecuritySync />
         {/* Health del database a livello applicazione: notifiche e badge anche
             sul lock screen, prima che la topologia sia caricata. */}
         <DatabaseHealthMonitor />

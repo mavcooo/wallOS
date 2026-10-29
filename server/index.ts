@@ -107,6 +107,7 @@ const shutdown = async (signal: string) => {
   app.log.info({ signal }, 'arresto del servizio auth');
   climateScheduler.stop();
   await telemetryWorker.stop();
+  await built.alarmManager.stop();
   await built.automations.stop();
   await climatePublisher.close();
   await app.close();
@@ -125,6 +126,17 @@ try {
   // minuto. Vive qui e non in `buildApp` perché nei test l'istanza Fastify deve
   // restare senza timer attivi e senza socket verso il broker.
   built.automations.start();
+  // Sicurezza: da questo momento il broker viene ascoltato anche con tutti i
+  // browser chiusi. Un broker momentaneamente assente non deve impedire al
+  // pannello di funzionare: l'errore viene loggato e il worker resta inerte.
+  void built.alarmManager.start().catch((error: unknown) => {
+    app.log.warn(
+      `sicurezza: avvio del worker allarmi fallito · ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  });
+
   // Ingestion telemetria: un errore all'avvio non deve impedire al pannello di
   // funzionare, quindi viene loggato senza terminare il processo.
   void telemetryWorker.start().catch((error: unknown) => {

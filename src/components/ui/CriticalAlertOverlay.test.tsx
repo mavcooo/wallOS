@@ -1,8 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PinProvider } from '@/components/kiosk/PinProvider';
 import { CriticalAlertOverlay } from '@/components/ui/CriticalAlertOverlay';
+import type { SecurityEventRecord } from '@/lib/securityApi';
+import { useSecurityStore } from '@/store/securityStore';
 import { useToastStore } from '@/store/toastStore';
 
 const audio = vi.hoisted(() => ({
@@ -16,60 +18,171 @@ vi.mock('@/utils/audioAlert', () => ({
   bindAudioUnlockOnFirstGesture: vi.fn(),
 }));
 
-beforeEach(() => {
-  useToastStore.setState({ toasts: [], history: [], alarmSilenced: false });
-  audio.playAlarm.mockClear();
-  audio.stopAlarm.mockClear();
-});
+const api = vi.hoisted(() => ({
+  acknowledge: vi.fn(),
+  resolve: vi.fn(),
+}));
+
+vi.mock('@/lib/securityApi', () => ({ securityApi: api }));
+
+/**
+ * Il PIN è testato in `PinProtectionDialog.test.tsx`: qui interessa il
+ * contratto dell'overlay, quindi il guard conferma subito come farebbe
+ * l'utente dopo aver digitato il PIN corretto.
+ */
+vi.mock('@/components/kiosk/PinProvider', () => ({
+  usePinGuard: () => (request: { onConfirm: () => void }) => request.onConfirm(),
+}));
+
+function securityEvent(overrides: Partial<SecurityEventRecord> = {}): SecurityEventRecord {
+  return {
+    id: 'evt-1',
+    deviceId: 'sensor-kitchen-smoke',
+    deviceName: 'Sensore fumo',
+    roomId: 'kitchen',
+    roomName: 'Cucina',
+    zoneId: 'emergency',
+    eventType: 'smoke',
+    severity: 'critical',
+    payload: null,
+    triggeredAt: new Date('2026-10-29T08:15:00Z').toISOString(),
+    acknowledgedAt: null,
+    acknowledgedBy: null,
+    resolvedAt: null,
+    notes: null,
+    ...overrides,
+  };
+}
+
+function setActiveEvents(events: SecurityEventRecord[]): void {
+  act(() => {
+    useSecurityStore.getState().setSnapshot({
+      state: {
+        status: events.length > 0 ? 'TRIGGERED' : 'DISARMED',
+        armedBy: null,
+        armedAt: null,
+        disarmedBy: null,
+        disarmedAt: null,
+        updatedAt: new Date().toISOString(),
+      },
+      zones: [],
+      activeEvents: events,
+      openSensors: [],
+    });
+  });
+}
 
 function renderOverlay() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <PinProvider>
+    <QueryClientProvider client={client}>
       <CriticalAlertOverlay />
-    </PinProvider>,
+    </QueryClientProvider>,
   );
 }
 
+beforeEach(() => {
+  useSecurityStore.getState().reset();
+  useToastStore.setState({ toasts: [], history: [], alarmSilenced: false });
+  audio.playAlarm.mockClear();
+  audio.stopAlarm.mockClear();
+  api.acknowledge.mockReset();
+  api.resolve.mockReset();
+  api.acknowledge.mockResolvedValue(securityEvent({ acknowledgedAt: new Date().toISOString() }));
+  api.resolve.mockResolvedValue(securityEvent({ resolvedAt: new Date().toISOString() }));
+});
+
 describe('CriticalAlertOverlay', () => {
-  it('mostra il primo allarme, gli altri e avvia la sirena', () => {
-    const { addCritical } = useToastStore.getState();
-    addCritical({
-      title: 'Fumo in cucina',
-      description: 'Cucina · Sensore fumo',
-      metadata: { type: 'smoke' },
-    });
-    addCritical({ title: 'Perdita in bagno', metadata: { type: 'flood' } });
+  it('mostra gli allarmi persistiti e avvia la sirena', () => {
+    setActiveEvents([
+      securityEvent(),
+      securityEvent({ id: 'evt-2', deviceId: 'sensor-bath', deviceName: 'Sensore bagno', eventType: 'flood' }),
+    ]);
 
     renderOverlay();
 
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Fumo in cucina' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Fumo rilevato' })).toBeInTheDocument();
+    expect(screen.getByText('Sensore fumo · Cucina')).toBeInTheDocument();
     expect(screen.getByText('1 altro allarme attivo')).toBeInTheDocument();
     expect(audio.playAlarm).toHaveBeenCalledWith('siren');
   });
 
-  it('"Tacita segnale sonoro" ferma l’audio senza chiudere l’allarme', () => {
-    useToastStore.getState().addCritical({ title: 'Fumo in cucina', metadata: { type: 'smoke' } });
+  it('non mostra nulla senza eventi aperti (anche dopo un reload)', () => {
+    renderOverlay();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(audio.playAlarm).not.toHaveBeenCalled();
+  });
+
+  it('«Tacita segnale sonoro» ferma solo l’audio locale e non chiude l’allarme', () => {
+    setActiveEvents([securityEvent()]);
     renderOverlay();
 
     fireEvent.click(screen.getByRole('button', { name: 'Tacita segnale sonoro' }));
 
-    expect(useToastStore.getState().alarmSilenced).toBe(true);
     expect(audio.stopAlarm).toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: 'Fumo in cucina' })).toBeInTheDocument();
+    // Nessuna chiamata al server: l'evento resta aperto su PostgreSQL.
+    expect(api.acknowledge).not.toHaveBeenCalled();
+    expect(api.resolve).not.toHaveBeenCalled();
+    expect(useSecurityStore.getState().snapshot?.activeEvents).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: 'Fumo rilevato' })).toBeInTheDocument();
   });
 
-  it('"Riconosci e chiudi" rimuove l’allarme e lo archivia', () => {
-    const id = useToastStore
-      .getState()
-      .addCritical({ title: 'Fumo in cucina', metadata: { type: 'smoke' } });
+  it('«Conferma allarme (ACK)» passa dal PIN e registra l’acknowledgment', async () => {
+    setActiveEvents([securityEvent()]);
     renderOverlay();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Riconosci e chiudi' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Conferma allarme (ACK)' }));
 
-    const state = useToastStore.getState();
-    expect(state.toasts).toHaveLength(0);
-    expect(state.history[0]?.id).toBe(id);
+    await waitFor(() => expect(api.acknowledge).toHaveBeenCalledWith('evt-1'));
+
+    // Lo snapshot successivo porta `acknowledgedAt`: l'evento resta a schermo.
+    setActiveEvents([securityEvent({ acknowledgedAt: new Date().toISOString() })]);
+    const ackButton = screen.getByRole('button', { name: 'Allarme confermato' });
+    expect(ackButton).toBeDisabled();
+    expect(screen.getByText('Allarme preso in carico')).toBeInTheDocument();
+    expect(audio.stopAlarm).toHaveBeenCalled();
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+  });
+
+  it('mostra ancora gli avvisi di sistema (broker/database) senza allarmi di sicurezza', () => {
+    const id = useToastStore.getState().addCritical({
+      title: 'Broker MQTT offline',
+      description: 'Nessuna connessione da oltre un minuto.',
+      metadata: { type: 'connection', source: 'broker' },
+    });
+    renderOverlay();
+
+    expect(screen.getByRole('heading', { name: 'Broker MQTT offline' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Tacita segnale sonoro' }));
+    expect(useToastStore.getState().alarmSilenced).toBe(true);
+    expect(useToastStore.getState().toasts).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Riconosci e chiudi' }));
+    expect(useToastStore.getState().toasts).toHaveLength(0);
+    expect(useToastStore.getState().history[0]?.id).toBe(id);
+  });
+
+  it('un allarme di sicurezza ha la precedenza su un avviso di sistema', () => {
+    useToastStore.getState().addCritical({ title: 'Broker MQTT offline' });
+    setActiveEvents([securityEvent()]);
+
+    renderOverlay();
+
+    expect(screen.getByRole('heading', { name: 'Fumo rilevato' })).toBeInTheDocument();
+    expect(screen.queryByText('Broker MQTT offline')).not.toBeInTheDocument();
+  });
+
+  it('«Segna risolto» chiude l’evento tramite API', async () => {
+    setActiveEvents([securityEvent({ acknowledgedAt: new Date().toISOString() })]);
+    renderOverlay();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Segna risolto' }));
+
+    await waitFor(() => expect(api.resolve).toHaveBeenCalledWith('evt-1'));
+
+    // Il server ha chiuso l'evento: lo snapshot successivo è vuoto.
+    setActiveEvents([]);
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
   });
 });

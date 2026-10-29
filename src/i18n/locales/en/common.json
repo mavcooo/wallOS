@@ -298,6 +298,8 @@
     "types": {
       "smoke": "Smoke detected",
       "flood": "Water leak",
+      "gas": "Gas leak",
+      "co": "Carbon monoxide",
       "intrusion": "Intrusion detected",
       "connection": "System offline",
       "generic": "Critical alert"
@@ -307,10 +309,18 @@
     "others_other": "{{count}} more active alarms",
     "silence": "Silence sound",
     "silenced": "Sound silenced",
-    "acknowledge": "Acknowledge and close",
+    "acknowledge": "Acknowledge (ACK)",
+    "acknowledgeSystem": "Acknowledge and close",
+    "acknowledged": "Alarm acknowledged",
+    "acknowledgedBadge": "Alarm taken over",
+    "acknowledgedAt": "Acknowledged at {{time}}",
+    "resolve": "Mark resolved",
     "pinTitle": "Confirm alarm acknowledgement",
     "pinDescription": "“{{title}}” requires an authorised profile.",
+    "resolvePinTitle": "Confirm alarm resolution",
+    "resolvePinDescription": "“{{title}}” will be closed and kept in the history.",
     "pinAction": "The alarm stays active until the PIN is verified.",
+    "actionFailed": "Operation failed: {{message}}",
     "watchdog": {
       "databaseTitle": "Database unreachable",
       "databaseDescription": "No response for over a minute: home data may be stale.",

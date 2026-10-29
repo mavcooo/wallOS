@@ -77,59 +77,6 @@ const MAX_PAYLOAD_CHARS = 4_000;
 const BROKER_WATCHDOG_MS = 60_000;
 const WATCHDOG_TICK_MS = 10_000;
 
-type AlarmKind = 'smoke' | 'flood' | 'intrusion';
-
-/** Booleani o stringhe (`true`, `"alarm"`) usati dai vari firmware. */
-function isAlarmFlag(value: unknown): boolean {
-  if (value === true) return true;
-  return typeof value === 'string' && /^(alarm|alarm_active|detected|true)$/i.test(value.trim());
-}
-
-/** Stato esplicito di allarme: `{"state": "ALARM"}`. */
-function isAlarmState(value: unknown): boolean {
-  return typeof value === 'string' && /^(alarm|alarm_active|detected)$/i.test(value.trim());
-}
-
-/** Tipo di allarme dedotto dal sensore quando il payload non lo dichiara. */
-function sensorAlarmKind(device: Device): AlarmKind {
-  if (device.kind === 'sensor') {
-    if (device.state.type === 'smoke') return 'smoke';
-    if (device.state.type === 'motion' || device.state.type === 'contact') return 'intrusion';
-  }
-  return 'intrusion';
-}
-
-/**
- * Riconosce gli allarmi nei payload dei sensori (Zigbee2MQTT, Tasmota, JSON
- * custom): restituisce `null` per la telemetria normale.
- */
-function detectAlarm(device: Device, payload: string): AlarmKind | null {
-  if (device.kind !== 'sensor') return null;
-
-  let data: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(payload);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    data = parsed as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-
-  if (isAlarmFlag(data['smoke']) || isAlarmFlag(data['smoke_detected'])) return 'smoke';
-  if (
-    isAlarmFlag(data['water_leak']) ||
-    isAlarmFlag(data['flood']) ||
-    isAlarmFlag(data['water_detected'])
-  ) {
-    return 'flood';
-  }
-  if (isAlarmFlag(data['intrusion']) || isAlarmFlag(data['tamper']) || isAlarmFlag(data['alarm'])) {
-    return 'intrusion';
-  }
-  if (isAlarmState(data['state']) || isAlarmState(data['status'])) return sensorAlarmKind(device);
-  return null;
-}
-
 type PublishFn = (topic: string, payload: string, options?: PublishOptions) => void;
 
 function logRaw(
@@ -285,8 +232,6 @@ export function useMqtt(
     let attempts = 0;
     let queueRuntimeCleanup: (() => void) | null = null;
     const pendingProbes = new Map<number, number>();
-    // Allarmi già notificati: un payload retained non deve generare raffiche.
-    const activeAlarms = new Set<string>();
     let brokerOfflineSince: number | null = null;
     let brokerAlertId: string | null = null;
     // Toast "freeze" già mostrato: un blackout lungo non deve ripetere il messaggio.
@@ -560,27 +505,9 @@ export function useMqtt(
         return;
       }
 
-      // Allarmi: il payload di un sensore fumo/allagamento può non produrre
-      // telemetria, quindi il controllo precede il decode.
-      const alarm = detectAlarm(device, payload);
-      if (alarm) {
-        const key = `${device.id}:${alarm}`;
-        if (!activeAlarms.has(key)) {
-          activeAlarms.add(key);
-          const roomName = roomNamesRef.current.get(device.room) ?? device.room;
-          useToastStore.getState().addCritical({
-            title: i18n.t(`alarm.types.${alarm}`),
-            description: `${device.name} · ${roomName}`,
-            metadata: { type: alarm, sensorId: device.id, room: device.room, roomName },
-          });
-        }
-      } else if (device.kind === 'sensor') {
-        // Sensore tornato in quiete: il prossimo allarme deve suonare di nuovo.
-        for (const key of activeAlarms) {
-          if (key.startsWith(`${device.id}:`)) activeAlarms.delete(key);
-        }
-      }
-
+      // Gli allarmi **non** vengono più rilevati qui: il worker `alarmManager`
+      // ascolta il broker dal backend, scrive `security_events` e sveglia il
+      // pannello via SSE. Il pannello spento non può più perdere un allarme.
       const decoded = getAdapter(device.adapter).decode({ device, topic, payload });
       if (!decoded) return;
       // Se lo `stat` conferma un comando in coda, il comando è già applicato.

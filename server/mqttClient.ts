@@ -28,8 +28,12 @@ export interface MqttLinkOptions {
 export interface MqttLink {
   /** `false` quando `MQTT_HOST`/`MQTT_SERVER_URL` non sono configurati. */
   readonly enabled: boolean;
-  /** Pubblica su un topic relativo; `false` se il broker non è configurato. */
-  publish(topic: string, payload: string): boolean;
+  /**
+   * Pubblica su un topic relativo; `false` se il broker non è configurato.
+   * `retain` conserva l'ultimo valore sul broker: lo stato di allarme resta
+   * leggibile a un client che si collega dopo un blackout.
+   */
+  publish(topic: string, payload: string, options?: { retain?: boolean }): boolean;
   subscribe(topic: string): void;
   unsubscribe(topic: string): void;
   /** Ascoltatore dei messaggi: riceve topic relativo e payload testuale. */
@@ -126,11 +130,16 @@ export function createMqttLink(settings: MqttEventsConfig, options: MqttLinkOpti
 
   return {
     enabled: true,
-    publish(topic, payload) {
+    publish(topic, payload, options) {
       if (closed) return false;
-      socket.publish(absoluteTopic(settings.baseTopic, topic), payload, { qos: 1 }, (error) => {
-        if (error) log?.warn(`automazioni: publish fallito su ${topic}: ${error.message}`);
-      });
+      socket.publish(
+        absoluteTopic(settings.baseTopic, topic),
+        payload,
+        { qos: 1, retain: options?.retain ?? false },
+        (error) => {
+          if (error) log?.warn(`automazioni: publish fallito su ${topic}: ${error.message}`);
+        },
+      );
       return true;
     },
     subscribe(topic) {

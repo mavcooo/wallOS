@@ -298,6 +298,8 @@
     "types": {
       "smoke": "Fumo rilevato",
       "flood": "Allagamento rilevato",
+      "gas": "Perdita di gas",
+      "co": "Monossido di carbonio",
       "intrusion": "Intrusione rilevata",
       "connection": "Sistema non connesso",
       "generic": "Allarme critico"
@@ -307,10 +309,18 @@
     "others_other": "{{count}} altri allarmi attivi",
     "silence": "Tacita segnale sonoro",
     "silenced": "Segnale sonoro tacitato",
-    "acknowledge": "Riconosci e chiudi",
+    "acknowledge": "Conferma allarme (ACK)",
+    "acknowledgeSystem": "Riconosci e chiudi",
+    "acknowledged": "Allarme confermato",
+    "acknowledgedBadge": "Allarme preso in carico",
+    "acknowledgedAt": "Confermato alle {{time}}",
+    "resolve": "Segna risolto",
     "pinTitle": "Conferma riconoscimento allarme",
     "pinDescription": "“{{title}}” richiede un profilo autorizzato.",
+    "resolvePinTitle": "Conferma rientro allarme",
+    "resolvePinDescription": "“{{title}}” verrà chiuso e resterà nello storico.",
     "pinAction": "L'allarme resta attivo finché il PIN non è verificato.",
+    "actionFailed": "Operazione non riuscita: {{message}}",
     "watchdog": {
       "databaseTitle": "Database non raggiungibile",
       "databaseDescription": "Nessuna risposta da oltre un minuto: i dati della casa potrebbero essere obsoleti.",

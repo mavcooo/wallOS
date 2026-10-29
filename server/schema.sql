@@ -331,6 +331,86 @@ CREATE TABLE IF NOT EXISTS db_health_checks (
 
 CREATE INDEX IF NOT EXISTS idx_db_checks_time ON db_health_checks (checked_at DESC);
 
+-- ── Sistema di allarme ─────────────────────────────────────────────────────
+-- Replica di `009_security_system.sql`: `db.init()` applica questo file a ogni
+-- avvio e i test usano PGlite senza il runner delle migrazioni, quindi il worker
+-- `alarmManager.ts` e `routes/security.ts` devono trovare qui stato, zone e
+-- registro eventi. Le DDL sono identiche alla migrazione (unica fonte: quella
+-- cartella), compresi gli indici parziali che impediscono eventi aperti
+-- duplicati per lo stesso sensore.
+CREATE TABLE IF NOT EXISTS security_system_state (
+  id          VARCHAR(32) PRIMARY KEY DEFAULT 'primary',
+  status      VARCHAR(32) NOT NULL DEFAULT 'DISARMED',
+  armed_by    UUID REFERENCES users(id) ON DELETE SET NULL,
+  armed_at    TIMESTAMPTZ,
+  disarmed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  disarmed_at TIMESTAMPTZ,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+  CONSTRAINT security_system_state_singleton CHECK (id = 'primary'),
+  CONSTRAINT security_system_state_status CHECK (
+    status IN ('DISARMED', 'ARMED_HOME', 'ARMED_AWAY', 'TRIGGERED')
+  )
+);
+
+INSERT INTO security_system_state (id) VALUES ('primary') ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS security_zones (
+  id            VARCHAR(32) PRIMARY KEY,
+  name          VARCHAR(64) NOT NULL,
+  kind          VARCHAR(16) NOT NULL
+                  CHECK (kind IN ('perimeter', 'interior', 'emergency')),
+  arm_home      BOOLEAN NOT NULL DEFAULT FALSE,
+  arm_away      BOOLEAN NOT NULL DEFAULT TRUE,
+  display_order INTEGER NOT NULL DEFAULT 0,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO security_zones (id, name, kind, arm_home, arm_away, display_order) VALUES
+  ('emergency', 'Emergenza 24H', 'emergency', TRUE, TRUE, 0),
+  ('perimeter', 'Perimetrale', 'perimeter', FALSE, TRUE, 1),
+  ('interior', 'Interna', 'interior', TRUE, TRUE, 2)
+ON CONFLICT (id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS security_zone_devices (
+  device_id  TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+  zone_id    VARCHAR(32) NOT NULL REFERENCES security_zones(id) ON DELETE RESTRICT,
+  event_type VARCHAR(32) NOT NULL DEFAULT 'intrusion',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_security_zone_devices_zone
+  ON security_zone_devices (zone_id);
+
+CREATE TABLE IF NOT EXISTS security_events (
+  id              BIGSERIAL PRIMARY KEY,
+  device_id       TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+  event_type      VARCHAR(32) NOT NULL,
+  severity        VARCHAR(16) NOT NULL DEFAULT 'critical'
+                    CHECK (severity IN ('info', 'warning', 'critical')),
+  payload         JSONB,
+  triggered_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  acknowledged_at TIMESTAMPTZ,
+  acknowledged_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  resolved_at     TIMESTAMPTZ,
+  notes           TEXT
+);
+
+-- Un solo evento aperto per sensore+tipo: i messaggi retained all'avvio e le
+-- raffiche di riconnessione non duplicano l'allarme (gli eventi chiusi no).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sec_events_one_active
+  ON security_events (device_id, event_type) WHERE resolved_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_sec_events_active
+  ON security_events (triggered_at DESC) WHERE resolved_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_sec_events_history
+  ON security_events (triggered_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_sec_events_device
+  ON security_events (device_id, triggered_at DESC);
+
 -- ── Ledger delle migrazioni ─────────────────────────────────────────────────
 -- Non è schema applicativo: è il registro di `server/migrate.ts`, che lo crea
 -- da sé (stessa DDL) prima di applicare le migrazioni pendenti. La riga

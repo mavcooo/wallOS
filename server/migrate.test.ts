@@ -198,16 +198,17 @@ describe('migrateDown · rollback reale', () => {
 
     const rolled = await migrateDown({ connection, dir: REAL_MIGRATION_DIR, log: noop });
 
-    expect(rolled.rolledBack).toBe('008_add_db_health_checks.sql');
-    expect(await tableNames(connection, 'db_health_checks')).toEqual([]);
+    expect(rolled.rolledBack).toBe('009_security_system.sql');
+    expect(await tableNames(connection, 'security_events')).toEqual([]);
     // Le migrazioni precedenti restano applicate: si annulla solo l'ultima.
     expect(await tableNames(connection, 'floors')).toEqual(['floors']);
-    expect(await ledgerVersions(connection)).not.toContain('008_add_db_health_checks.sql');
+    expect(await tableNames(connection, 'db_health_checks')).toEqual(['db_health_checks']);
+    expect(await ledgerVersions(connection)).not.toContain('009_security_system.sql');
 
     // Riapplicare è possibile: il ledger è la fonte dell'ordine, non i file.
     const again = await migrateUp({ connection, dir: REAL_MIGRATION_DIR, log: noop });
-    expect(again.applied).toEqual(['008_add_db_health_checks.sql']);
-    expect(await tableNames(connection, 'db_health_checks')).toEqual(['db_health_checks']);
+    expect(again.applied).toEqual(['009_security_system.sql']);
+    expect(await tableNames(connection, 'security_events')).toEqual(['security_events']);
   });
 
   it('senza sezione DOWN solleva un errore esplicito e non tocca schema né ledger', async () => {
