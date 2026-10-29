@@ -176,6 +176,7 @@ interface SecurityEventDto {
   deviceId: string;
   deviceName: string;
   roomName: string;
+  zoneId: string | null;
   eventType: string;
   severity: string;
   triggeredAt: string;
@@ -514,6 +515,102 @@ describe('alarmManager', () => {
       cookies,
     });
     expect(invalidCursor.statusCode).toBe(400);
+  });
+
+  it('solo un admin configura zone e sensori, e il worker applica subito', async () => {
+    const { app, db, manager, config } = await setup();
+    await insertMotionSensor(db);
+    await manager.refreshSensors();
+    const cookies = await login(app);
+
+    const emptyPatch = await app.inject({
+      method: 'PATCH',
+      url: '/api/security/zones/interior',
+      cookies,
+      payload: {},
+    });
+    expect(emptyPatch.statusCode).toBe(400);
+
+    const unknownZone = await app.inject({
+      method: 'PATCH',
+      url: '/api/security/zones/garage',
+      cookies,
+      payload: { armHome: true },
+    });
+    expect(unknownZone.statusCode).toBe(404);
+
+    const patched = await app.inject({
+      method: 'PATCH',
+      url: '/api/security/zones/interior',
+      cookies,
+      payload: { name: 'Interna test', armHome: false },
+    });
+    expect(patched.statusCode).toBe(200);
+    const patchedZones = patched.json<{ zones: { id: string; name: string; armHome: boolean }[] }>();
+    expect(patchedZones.zones.find((zone) => zone.id === 'interior')).toMatchObject({
+      name: 'Interna test',
+      armHome: false,
+    });
+
+    // Il kiosk non amministra la configurazione, nemmeno con sessione valida.
+    const kioskCookies = await session(app, '/api/auth/kiosk-session', {
+      deviceId: config.seed.kioskDeviceId,
+      pin: config.seed.kioskPin,
+    });
+    const denied = await app.inject({
+      method: 'PATCH',
+      url: '/api/security/zones/interior',
+      cookies: kioskCookies,
+      payload: { armHome: true },
+    });
+    expect(denied.statusCode).toBe(403);
+
+    // Zona interna disattivata in HOME: il PIR non deve scattare.
+    const armHome = await app.inject({
+      method: 'POST',
+      url: '/api/security/arm',
+      cookies,
+      payload: { mode: 'ARMED_HOME', pin: ADMIN_PIN },
+    });
+    expect(armHome.statusCode).toBe(200);
+    await manager.handleMessage('zigbee2mqtt/living/motion', '{"occupancy":true}');
+    expect((await securityState(app, cookies)).activeEvents).toHaveLength(0);
+
+    // Spostato nel perimetro e armato fuori: la stessa rilevazione scatta.
+    const moved = await app.inject({
+      method: 'PATCH',
+      url: '/api/security/sensors/sensor-hall-motion',
+      cookies,
+      payload: { zoneId: 'perimeter' },
+    });
+    expect(moved.statusCode).toBe(200);
+
+    const missingSensor = await app.inject({
+      method: 'PATCH',
+      url: '/api/security/sensors/sensor-unknown',
+      cookies,
+      payload: { zoneId: 'perimeter' },
+    });
+    expect(missingSensor.statusCode).toBe(404);
+
+    await app.inject({
+      method: 'POST',
+      url: '/api/security/disarm',
+      cookies,
+      payload: { pin: ADMIN_PIN },
+    });
+    const armAway = await app.inject({
+      method: 'POST',
+      url: '/api/security/arm',
+      cookies,
+      payload: { mode: 'ARMED_AWAY', pin: ADMIN_PIN },
+    });
+    expect(armAway.statusCode).toBe(200);
+
+    await manager.handleMessage('zigbee2mqtt/living/motion', '{"occupancy":true}');
+    const state = await securityState(app, cookies);
+    expect(state.activeEvents).toHaveLength(1);
+    expect(state.activeEvents[0]?.zoneId).toBe('perimeter');
   });
 
   it('accetta un trigger esterno su security/trigger per un device censito', async () => {

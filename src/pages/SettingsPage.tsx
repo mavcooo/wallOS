@@ -21,6 +21,8 @@ import { useKioskQuery, useUpdateKiosk } from '@/hooks/useKioskProfile';
 import { getKioskId } from '@/utils/kioskIdentity';
 import { LanguageSwitcher } from '@/components/settings/LanguageSwitcher';
 import { PerformanceModeCard } from '@/components/settings/PerformanceModeCard';
+import { SecurityHistoryCard } from '@/components/settings/SecurityHistoryCard';
+import { SecuritySystemCard } from '@/components/settings/SecuritySystemCard';
 import { SunlightModeCard } from '@/components/settings/SunlightModeCard';
 import { TopologyManager } from '@/components/settings/TopologyManager';
 import { KIOSK_DEFAULTS } from '@/config/app.config';
@@ -625,6 +627,17 @@ export function SettingsPage() {
               <p className="text-[10px] leading-relaxed text-fg-subtle">{t('pin.note')}</p>
             </CardContent>
           </Card>
+        </div>
+      </div>
+
+      {/* Sicurezza: armamento dell'impianto, zone e registro persistente degli
+          allarmi. Lo stato arriva da `security_events`, non dai toast: un
+          allarme scattato con il tablet spento compare qui appena il pannello
+          si riaccende. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <SecuritySystemCard />
+        <div className="xl:col-span-2">
+          <SecurityHistoryCard />
         </div>
       </div>
 

@@ -7,38 +7,20 @@ import { useShallow } from 'zustand/react/shallow';
 import { usePinGuard } from '@/components/kiosk/PinProvider';
 import { SECURITY_QUERY_KEY } from '@/hooks/useSecuritySync';
 import { securityApi } from '@/lib/securityApi';
+import { securityAlarmKind, type SecurityAlarmKind } from '@/lib/securityLabels';
 import { formatTime } from '@/lib/utils';
 import { selectActiveAlarms, useSecurityStore } from '@/store/securityStore';
 import { useToastStore, type ToastMessage } from '@/store/toastStore';
 import { audioAlert, bindAudioUnlockOnFirstGesture } from '@/utils/audioAlert';
 
-type AlarmKind = 'smoke' | 'flood' | 'gas' | 'co' | 'intrusion' | 'generic';
-
-const ALARM_ICONS = {
+const ALARM_ICONS: Record<SecurityAlarmKind, typeof Flame> = {
   smoke: Flame,
   flood: Droplets,
   gas: Flame,
   co: TriangleAlert,
   intrusion: ShieldAlert,
   generic: TriangleAlert,
-} as const;
-
-function alarmKind(eventType: string): AlarmKind {
-  switch (eventType) {
-    case 'smoke':
-    case 'flood':
-    case 'gas':
-    case 'co':
-      return eventType;
-    case 'motion':
-    case 'contact':
-    case 'tamper':
-    case 'intrusion':
-      return 'intrusion';
-    default:
-      return 'generic';
-  }
-}
+};
 
 /**
  * Overlay di emergenza.
@@ -207,7 +189,7 @@ export function CriticalAlertOverlay() {
   if (!active) return null;
 
   // ── Allarme di sicurezza persistito ───────────────────────────────────────
-  const kind = alarmKind(active.eventType);
+  const kind = securityAlarmKind(active.eventType);
   const Icon = ALARM_ICONS[kind];
   const others = events.slice(1);
   const triggeredAt = formatTime(new Date(active.triggeredAt));
@@ -293,7 +275,7 @@ export function CriticalAlertOverlay() {
             <ul className="mt-1 flex flex-col gap-0.5 text-xs text-white/85">
               {others.slice(0, 3).map((event) => (
                 <li key={event.id}>
-                  · {t(`alarm.types.${alarmKind(event.eventType)}`)} —{' '}
+                  · {t(`alarm.types.${securityAlarmKind(event.eventType)}`)} —{' '}
                   {[event.deviceName, event.roomName].filter(Boolean).join(' · ')}
                 </li>
               ))}

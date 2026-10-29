@@ -322,6 +322,81 @@
       }
     }
   },
+  "security": {
+    "title": "Alarm system",
+    "description": "System state and zones. Alarms are persisted on PostgreSQL by the gateway, so they stay visible even when the tablet was off or just rebooted.",
+    "status": {
+      "DISARMED": "Disarmed",
+      "ARMED_HOME": "Armed · home",
+      "ARMED_AWAY": "Armed · away",
+      "TRIGGERED": "Alarm in progress"
+    },
+    "armHome": "Arm (home)",
+    "armAway": "Arm (away)",
+    "disarm": "Disarm",
+    "armedSince": "Armed at {{when}}",
+    "pinArmTitle": "Confirm arming the system",
+    "pinArmDescription": "Switching to “{{mode}}”: confirm with the security PIN.",
+    "pinDisarmTitle": "Confirm disarming the system",
+    "pinDisarmDescription": "Disarming the system always requires the PIN, even with an active session.",
+    "pinAction": "The system changes state only after verification.",
+    "zones": {
+      "title": "Security zones",
+      "description": "A zone enabled in “home” triggers when armed at home, “away” only when armed away. 24H sensors are always active.",
+      "empty": "No sensors assigned yet: the worker maps them on first start based on the sensor type.",
+      "noSensors": "No sensors in this zone.",
+      "home": "Home",
+      "away": "Away",
+      "alwaysOn": "Always active",
+      "move": "Move {{name}} to another zone",
+      "kind": {
+        "emergency": "24H emergency · smoke, water, gas",
+        "perimeter": "Perimeter · doors and windows",
+        "interior": "Interior · motion sensors"
+      }
+    },
+    "openSensors": {
+      "title": "Sensors not at rest: the system cannot be armed"
+    },
+    "history": {
+      "title": "Alarm history",
+      "description": "Persistent log: no event is ever deleted, acknowledgements and resolutions stay tracked with who handled them.",
+      "refresh": "Refresh",
+      "rangeLabel": "Time range",
+      "severityLabel": "Severity",
+      "count_one": "{{count}} event · {{open}} open",
+      "count_other": "{{count}} events · {{open}} open",
+      "range": {
+        "24h": "24 hours",
+        "7d": "7 days",
+        "30d": "30 days",
+        "all": "All"
+      },
+      "severity": {
+        "all": "All",
+        "critical": "Critical",
+        "warning": "Warning",
+        "info": "Info"
+      },
+      "status": {
+        "open": "Open",
+        "acknowledged": "Acknowledged",
+        "resolved": "Resolved"
+      },
+      "acknowledgedAt": "Acknowledged {{when}}",
+      "resolvedAt": "Resolved {{when}}",
+      "note": "Note: {{notes}}",
+      "noteLabel": "Resolution note for event {{id}}",
+      "notePlaceholder": "E.g. smoke cleared after ventilation",
+      "resolve": "Resolve",
+      "resolvePinTitle": "Confirm alarm resolution",
+      "resolvePinDescription": "“{{title}}” will be closed and kept in the history.",
+      "resolvePinAction": "Security PIN required.",
+      "loading": "Loading history…",
+      "empty": "No alarms in the selected period.",
+      "error": "History unavailable: {{message}}"
+    }
+  },
   "topology": {
     "title": "Devices and rooms",
     "description": "PostgreSQL records. Every save invalidates the topology, updates the UI and realigns MQTT subscriptions without reloading the browser.",

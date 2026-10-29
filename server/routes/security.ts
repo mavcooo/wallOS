@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Database } from '../db.js';
 import { HttpError } from '../http.js';
 import { verifySecret } from '../security.js';
-import { assertNotLocked, requireAuth } from '../session.js';
+import { assertNotLocked, requireAuth, requireRole } from '../session.js';
 import type { SecurityEventBus } from '../services/securityEvents.js';
 import type { AlarmManager } from '../services/alarmManager.js';
 import {
@@ -16,7 +16,10 @@ import {
   readSecurityHistory,
   readSecuritySnapshot,
   readSecurityState,
+  readSecurityZones,
+  moveSensorToZone,
   resolveSecurityEvent,
+  updateSecurityZone,
   type ArmBlocker,
   type SecuritySeverity,
 } from '../services/securityStore.js';
@@ -27,8 +30,11 @@ export interface SecurityRouteDeps {
   config: AuthConfig;
   /** Bus real-time: il worker MQTT vi inoltra gli allarmi, le rotte le azioni. */
   events: SecurityEventBus;
-  /** Worker: serve solo per gli allarmi bloccanti (contatti aperti). */
-  alarmManager?: Pick<AlarmManager, 'openSensors'>;
+  /**
+   * Worker: serve per gli allarmi bloccanti (contatti aperti) e per far
+   * rileggere subito zone e sensori dopo una modifica di configurazione.
+   */
+  alarmManager?: Pick<AlarmManager, 'openSensors' | 'refreshSensors'>;
 }
 
 /** Un PIN valido resta valido per la richiesta corrente; l'elevazione dura. */
@@ -50,6 +56,27 @@ const pinOnlySchema = z.object({
 const eventParamsSchema = z.object({
   id: z.string().regex(/^\d+$/, 'id evento non valido'),
 });
+
+/** Slug di zona e device: stesso alfabeto di `rooms`/`devices` e dei topic MQTT. */
+const slugSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9:_-]{0,63}$/, 'Identificativo non valido');
+
+const zoneParamsSchema = z.object({ id: slugSchema });
+const sensorParamsSchema = z.object({ deviceId: slugSchema });
+
+const zonePatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64).optional(),
+    armHome: z.boolean().optional(),
+    armAway: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'Serve almeno un campo da aggiornare');
+
+const sensorZoneSchema = z.object({ zoneId: slugSchema });
 
 const resolveSchema = z.object({
   pin: pinSchema.optional(),
@@ -336,6 +363,51 @@ export function registerSecurityRoutes(app: FastifyInstance, deps: SecurityRoute
     });
 
     return reply.send(page);
+  });
+
+  // ── Configurazione zone (solo amministratore) ────────────────────────────
+  // Sono parametri d'impianto, non azioni operative: cambiarli richiede lo
+  // stesso privilegio della topologia, non il solo PIN. Dopo il commit il
+  // worker rilegge le mappature, così il nuovo perimetro vale dal messaggio
+  // successivo senza riavviare nulla.
+  const adminOnly = requireRole(deps, ['admin']);
+
+  app.patch('/api/security/zones/:id', { preHandler: adminOnly }, async (request, reply) => {
+    const params = zoneParamsSchema.safeParse(request.params);
+    if (!params.success) throw new HttpError(400, 'INVALID_BODY', 'id zona non valido');
+
+    const parsed = zonePatchSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      throw new HttpError(400, 'INVALID_BODY', 'Configurazione zona non valida', {
+        issues: parsed.error.issues.map((issue) => issue.message),
+      });
+    }
+
+    const zone = await updateSecurityZone(deps.db, params.data.id, parsed.data);
+    if (!zone) throw new HttpError(404, 'ZONE_NOT_FOUND', 'Zona non trovata');
+
+    await deps.alarmManager?.refreshSensors();
+    return reply.send({ zone, zones: await readSecurityZones(deps.db) });
+  });
+
+  app.patch('/api/security/sensors/:deviceId', { preHandler: adminOnly }, async (request, reply) => {
+    const params = sensorParamsSchema.safeParse(request.params);
+    if (!params.success) throw new HttpError(400, 'INVALID_BODY', 'deviceId non valido');
+
+    const parsed = sensorZoneSchema.safeParse(request.body ?? {});
+    if (!parsed.success) throw new HttpError(400, 'INVALID_BODY', 'zoneId obbligatorio');
+
+    const moved = await moveSensorToZone(deps.db, params.data.deviceId, parsed.data.zoneId);
+    if (!moved) {
+      throw new HttpError(
+        404,
+        'SENSOR_NOT_MAPPED',
+        'Sensore non associato a una zona o zona inesistente',
+      );
+    }
+
+    await deps.alarmManager?.refreshSensors();
+    return reply.send({ zones: await readSecurityZones(deps.db) });
   });
 
   const clients = new Set<() => void>();

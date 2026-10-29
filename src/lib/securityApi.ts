@@ -72,6 +72,12 @@ export interface SecuritySnapshot {
   openSensors: OpenSensor[];
 }
 
+export interface ZonePatch {
+  name?: string;
+  armHome?: boolean;
+  armAway?: boolean;
+}
+
 export interface SecurityHistoryPage {
   events: SecurityEventRecord[];
   hasMore: boolean;
@@ -300,6 +306,34 @@ export const securityApi = {
       `/security/events/${encodeURIComponent(id)}/resolve`,
       post({ ...(pin ? { pin } : {}), ...(notes ? { notes } : {}) }),
     ).then((body) => parseSecurityEvent(body.event));
+  },
+
+  /**
+   * Policy di una zona (nome, armamento in HOME/AWAY). Solo admin: il server
+   * risponde 403 agli altri profili. Dopo il commit il worker rilegge le zone,
+   * quindi il nuovo perimetro vale dal messaggio successivo.
+   */
+  updateZone(id: string, patch: ZonePatch): Promise<SecurityZone[]> {
+    return request<{ zones?: unknown }>(
+      `/security/zones/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(patch),
+      },
+    ).then((body) => parseZones(body.zones));
+  },
+
+  /** Sposta un sensore in un'altra zona: il tipo di evento resta invariato. */
+  assignSensorZone(deviceId: string, zoneId: string): Promise<SecurityZone[]> {
+    return request<{ zones?: unknown }>(
+      `/security/sensors/${encodeURIComponent(deviceId)}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zoneId }),
+      },
+    ).then((body) => parseZones(body.zones));
   },
 
   async history(params: {

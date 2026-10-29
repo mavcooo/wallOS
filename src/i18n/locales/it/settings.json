@@ -322,6 +322,81 @@
       }
     }
   },
+  "security": {
+    "title": "Sistema di allarme",
+    "description": "Stato dell'impianto e zone. Gli allarmi sono persistiti su PostgreSQL dal gateway, quindi restano visibili anche a tablet spento o appena riavviato.",
+    "status": {
+      "DISARMED": "Disinserito",
+      "ARMED_HOME": "Inserito · casa",
+      "ARMED_AWAY": "Inserito · fuori",
+      "TRIGGERED": "Allarme in corso"
+    },
+    "armHome": "Inserisci (casa)",
+    "armAway": "Inserisci (fuori)",
+    "disarm": "Disinserisci",
+    "armedSince": "Inserito alle {{when}}",
+    "pinArmTitle": "Conferma inserimento impianto",
+    "pinArmDescription": "Stai per passare a “{{mode}}”: conferma con il PIN di sicurezza.",
+    "pinDisarmTitle": "Conferma disinserimento impianto",
+    "pinDisarmDescription": "Disinserire l'impianto richiede sempre il PIN, anche con la sessione attiva.",
+    "pinAction": "L'impianto cambia stato solo dopo la verifica.",
+    "zones": {
+      "title": "Zone di sicurezza",
+      "description": "Una zona attiva in “casa” scatta con l'impianto inserito in casa, in “fuori” solo con l'impianto inserito fuori. I sensori 24H restano sempre attivi.",
+      "empty": "Nessun sensore associato: il worker lo fa al primo avvio in base al tipo di sensore.",
+      "noSensors": "Nessun sensore in questa zona.",
+      "home": "Casa",
+      "away": "Fuori",
+      "alwaysOn": "Sempre attiva",
+      "move": "Sposta {{name}} in un'altra zona",
+      "kind": {
+        "emergency": "Emergenza 24H · fumo, allagamento, gas",
+        "perimeter": "Perimetrale · porte e finestre",
+        "interior": "Interna · volumetrici"
+      }
+    },
+    "openSensors": {
+      "title": "Sensori non in riposo: l'impianto non si arma"
+    },
+    "history": {
+      "title": "Storico allarmi",
+      "description": "Registro persistente: nessun evento viene cancellato, acknowledgment e rientro restano tracciati con chi è intervenuto.",
+      "refresh": "Aggiorna",
+      "rangeLabel": "Intervallo temporale",
+      "severityLabel": "Severità",
+      "count_one": "{{count}} evento · {{open}} aperti",
+      "count_other": "{{count}} eventi · {{open}} aperti",
+      "range": {
+        "24h": "24 ore",
+        "7d": "7 giorni",
+        "30d": "30 giorni",
+        "all": "Tutto"
+      },
+      "severity": {
+        "all": "Tutte",
+        "critical": "Critico",
+        "warning": "Avviso",
+        "info": "Informativo"
+      },
+      "status": {
+        "open": "Aperto",
+        "acknowledged": "Preso in carico",
+        "resolved": "Risolto"
+      },
+      "acknowledgedAt": "Confermato {{when}}",
+      "resolvedAt": "Risolto {{when}}",
+      "note": "Nota: {{notes}}",
+      "noteLabel": "Nota di risoluzione per l'evento {{id}}",
+      "notePlaceholder": "Es. fumo rientrato dopo areazione",
+      "resolve": "Risolvi",
+      "resolvePinTitle": "Conferma rientro allarme",
+      "resolvePinDescription": "“{{title}}” verrà chiuso e resterà nello storico.",
+      "resolvePinAction": "Serve il PIN di sicurezza.",
+      "loading": "Caricamento storico…",
+      "empty": "Nessun allarme nel periodo selezionato.",
+      "error": "Storico non disponibile: {{message}}"
+    }
+  },
   "topology": {
     "title": "Dispositivi e stanze",
     "description": "Anagrafica su PostgreSQL. Ogni salvataggio invalida la topologia, aggiorna l’interfaccia e riallinea le sottoscrizioni MQTT senza ricaricare il browser.",

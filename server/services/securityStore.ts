@@ -338,6 +338,69 @@ export async function readSecurityZones(db: Database): Promise<SecurityZoneRecor
   }));
 }
 
+export interface ZonePatch {
+  name?: string;
+  armHome?: boolean;
+  armAway?: boolean;
+}
+
+/**
+ * Aggiorna la policy di una zona (nome e modalità in cui si arma).
+ *
+ * La zona `emergency` resta sempre attiva per costruzione (`zoneArmed`), anche
+ * se il pannello ne modifica i flag: un sensore fumo non può essere disinserito
+ * per errore da una toggle.
+ *
+ * Restituisce la zona aggiornata, o `null` se l'id non esiste.
+ */
+export async function updateSecurityZone(
+  db: Database,
+  id: string,
+  patch: ZonePatch,
+): Promise<SecurityZoneRecord | null> {
+  const result = await db.client.query<{ id: string }>(
+    `UPDATE security_zones
+     SET name = COALESCE($2, name),
+         arm_home = COALESCE($3, arm_home),
+         arm_away = COALESCE($4, arm_away)
+     WHERE id = $1
+     RETURNING id`,
+    [id, patch.name ?? null, patch.armHome ?? null, patch.armAway ?? null],
+  );
+  if (result.rows.length === 0) return null;
+
+  const zones = await readSecurityZones(db);
+  return zones.find((zone) => zone.id === id) ?? null;
+}
+
+/**
+ * Sposta un sensore in un'altra zona, conservando il tipo di evento.
+ *
+ * La mappatura deve già esistere: è il worker a crearla al primo avvio in base
+ * a `metadata.state.type`, quindi questa rotta non inventa un tipo di allarme.
+ * `false` = sensore non mappato o zona inesistente (il chiamante risponde 404).
+ */
+export async function moveSensorToZone(
+  db: Database,
+  deviceId: string,
+  zoneId: string,
+): Promise<boolean> {
+  const zone = await db.client.query<{ id: string }>(
+    `SELECT id FROM security_zones WHERE id = $1`,
+    [zoneId],
+  );
+  if (zone.rows.length === 0) return false;
+
+  const result = await db.client.query<{ device_id: string }>(
+    `UPDATE security_zone_devices
+     SET zone_id = $2, updated_at = NOW()
+     WHERE device_id = $1
+     RETURNING device_id`,
+    [deviceId, zoneId],
+  );
+  return result.rows.length > 0;
+}
+
 const EVENT_SELECT = `SELECT e.id, e.device_id, d.name AS device_name,
          d.room_id, r.name AS room_name, m.zone_id,
          e.event_type, e.severity, e.payload, e.triggered_at,
