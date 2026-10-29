@@ -16,7 +16,7 @@ server auth dentro `infisical run --env=dev`, senza `.env` nel repository.
 | `npm run dev:auth` | API auth + topologia Node/Fastify su :8787 |
 | `npm run dev:infisical` | Vite con i segreti iniettati: `infisical run --env=dev -- vite` |
 | `npm run dev:auth:infisical` | auth con i segreti iniettati: `infisical run --env=dev -- tsx watch server/index.ts` |
-| `npm run build` | `tsc -b && vite build` (verifica + bundle di produzione) |
+| `npm run build` | `tsc -b && vite build` + gate segreti su `dist/` |
 | `npm run typecheck` | `tsc -b --pretty false` |
 | `npm run test` | test frontend (`vitest run`) · `npm run test:watch` in sviluppo |
 | `npm run test:server` | test delle API (Node + PostgreSQL WASM via PGlite) |
@@ -28,32 +28,45 @@ identity* (Universal Auth), non il CLI di sviluppo.
 
 ## Variabili d'ambiente
 
-La SPA legge dal browser (`import.meta.env`) host, porta, path e credenziali del
-broker e li usa come **default**; i valori salvati da *Impostazioni → broker* nel
-persist locale del browser hanno la precedenza. Su un profilo già salvato,
-quindi, l'ambiente si vede solo dopo un reset delle impostazioni: è il
-comportamento voluto, così il pannello può sempre correggere un `.env` sbagliato.
+La SPA legge dal browser (`import.meta.env`) solo variabili `VITE_*`: host,
+porta, path, base topic e prefissi discovery del broker. Sono **default
+pubblici**; i valori salvati da *Impostazioni → broker* nel persist locale del
+browser hanno la precedenza. Su un profilo già salvato, quindi, l'ambiente si
+vede solo dopo un reset delle impostazioni: è il comportamento voluto, così il
+pannello può sempre correggere un `.env` sbagliato.
+
+Le credenziali del broker **non sono variabili di build**: si inseriscono una
+volta sul pannello (Impostazioni → broker, utenza `wallos_kiosk` con ACL di sola
+lettura stati e scrittura comandi) e restano nel persist locale del dispositivo.
+Nessun segreto deve avere prefisso `VITE_`: `vite.config.ts` blocca il build se
+il nome contiene PASSWORD/SECRET/TOKEN/KEY e `tools/verify-build-secrets.mjs`
+scansiona `dist/` a ogni `npm run build`.
 
 Il micro-servizio auth legge invece `process.env` (o il `.env` caricato da
 Node): `JWT_SECRET`, `ADMIN_PASSWORD`, `ADMIN_PIN`, `KIOSK_PIN` e le altre
-variabili `AUTH_*` restano sul server. Vite espone di default solo le variabili
-`VITE_*`; i nomi `MQTT_*` arrivano all'app perché elencati in `envPrefix` dentro
-`vite.config.ts`. Nessuna variabile di auth è in quella lista.
+variabili `AUTH_*` restano sul server. Anche `MQTT_*` e `MOSQUITTO_*` sono
+confinati al server/Compose: Vite espone esclusivamente le `VITE_*`. Nessuna
+variabile sensibile è in quella lista.
 
 I nomi riservati per l'ambiente `dev` di Infisical sono quelli elencati in
 `.env.example` (valore vuoto o placeholder, nessun segreto).
 
-Broker (visibili al browser, utenza dedicata con ACL):
+Broker (pubbliche, visibili al browser):
 
-- `MQTT_HOST`
-- `MQTT_PORT`
-- `MQTT_PROTOCOL`
-- `MQTT_PATH`
-- `MQTT_BASE_TOPIC`
-- `MQTT_DISCOVERY_PREFIXES` (prefissi Home Assistant Discovery, separati da
+- `VITE_MQTT_HOST`
+- `VITE_MQTT_PORT`
+- `VITE_MQTT_PROTOCOL`
+- `VITE_MQTT_PATH`
+- `VITE_MQTT_BASE_TOPIC`
+- `VITE_MQTT_DISCOVERY_PREFIXES` (prefissi Home Assistant Discovery, separati da
   virgola; default `homeassistant`)
-- `MQTT_USERNAME`
-- `MQTT_PASSWORD`
+
+Broker (solo server, mai nel bundle):
+
+- `MQTT_SERVER_URL`, `MQTT_HOST`, `MQTT_SERVER_PORT`, `MQTT_BASE_TOPIC`
+- `MQTT_USERNAME`, `MQTT_PASSWORD` (utenza `wallos_backend`, `readwrite #`)
+- `MOSQUITTO_BACKEND_USERNAME/PASSWORD` e `MOSQUITTO_KIOSK_PASSWORD` (provisioning
+  del broker; la password kiosk va poi inserita sul pannello)
 
 Auth (solo server, mai nel bundle):
 
@@ -70,13 +83,14 @@ Auth (solo server, mai nel bundle):
   `ELEVATION_TTL`, `SWITCH_PROFILE_TTL`
 - `PIN_MAX_ATTEMPTS`, `PIN_LOCKOUT_MS`, `LOGIN_MAX_ATTEMPTS`, `LOGIN_LOCKOUT_MS`
 
-Se almeno una variabile `MQTT_*` è impostata il kiosk parte con `demoMode`
+Se almeno una variabile `VITE_MQTT_*` è impostata il kiosk parte con `demoMode`
 spento: un ambiente che punta a un broker reale non deve restare in simulazione.
 
-`MQTT_USERNAME` e `MQTT_PASSWORD` sono segreti del broker: qui valgono come
-credenziali del client MQTT, che gira nel browser, quindi finiscono comunque nel
-bundle servito al pannello. Non metterci altro che la password del broker, e usa
-un'utenza dedicata con ACL sui soli topic della casa.
+`MQTT_USERNAME` e `MQTT_PASSWORD` sono l'utenza del backend (readwrite #) letta
+da `server/index.ts`: non sono le credenziali del pannello e non finiscono nel
+bundle. Per il browser usa esclusivamente `wallos_kiosk` dalle Impostazioni, così
+una credenziale esposta dal dispositivo non può pubblicare su `wallos/system/#`
+o sovrascrivere gli stati retained.
 
 ## Finish setup
 

@@ -67,6 +67,7 @@ describe('ACL: privilegio minimo', () => {
     expect(block).toMatch(/^topic read stat\/#$/m);
     expect(block).toMatch(/^topic write cmnd\/#$/m);
     expect(block).not.toMatch(/^topic readwrite #$/m);
+    expect(block).not.toMatch(/^topic write #$/m);
     expect(block).not.toMatch(/^topic write wallos\/system\//m);
   });
 
@@ -108,6 +109,35 @@ describe('docker-compose: esposizione e identità', () => {
       'MQTT_USERNAME: ${MOSQUITTO_BACKEND_USERNAME:-wallos_backend}',
     );
     expect(compose).toContain('MQTT_PASSWORD: ${MOSQUITTO_BACKEND_PASSWORD:-}');
+  });
+});
+
+describe('bundle client: nessuna credenziale MQTT', () => {
+  it('Vite espone esclusivamente il prefisso pubblico VITE_', () => {
+    const config = read('vite.config.ts');
+
+    expect(config).toContain("const publicEnvPrefixes = ['VITE_'];");
+    expect(config).not.toMatch(/envPrefix:\s*\[[^\]]*'MQTT_'/);
+  });
+
+  it('la configurazione client non legge utente o password del broker', () => {
+    const clientConfig = read('src/config/app.config.ts');
+
+    expect(clientConfig).toContain('VITE_MQTT_HOST');
+    expect(clientConfig).not.toMatch(/\bMQTT_(?:USERNAME|PASSWORD)\b/);
+  });
+
+  it('il template .env non offre credenziali al bundle', () => {
+    const envExample = read('.env.example');
+
+    expect(envExample).toMatch(/^VITE_MQTT_HOST=/m);
+    // Nessuna variabile pubblica può essere una credenziale. `MQTT_USERNAME`/
+    // `MQTT_PASSWORD` restano nel template solo come utenza backend del server.
+    expect(envExample).not.toMatch(/^VITE_\w*(?:PASSWORD|PASSWD|SECRET|TOKEN|KEY)\w*=/m);
+    expect(envExample).not.toMatch(/^VITE_MQTT_(?:USERNAME|PASSWORD)=/m);
+    // La password kiosk vive solo nel provisioning Mosquitto/Compose e va
+    // inserita a mano sul pannello, mai passata alla build.
+    expect(envExample).toMatch(/^MOSQUITTO_KIOSK_PASSWORD=/m);
   });
 });
 

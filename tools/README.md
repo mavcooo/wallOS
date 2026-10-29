@@ -27,6 +27,12 @@ npm run test:mqtt-auth        # anonimo bloccato, ACL e retained protetti
 Lo script legge `.env` (o l'ambiente) per `MOSQUITTO_BACKEND_*` e
 `MOSQUITTO_KIOSK_*`. Non fa parte di `npm test`: richiede un broker reale.
 
+La password kiosk non va mai nella build: inseriscila una volta sul pannello in
+*Impostazioni → broker* (utente `wallos_kiosk`). Dopo il bundle,
+`npm run verify:build-secrets` (già eseguito da `npm run build`) scansiona
+`dist/` e blocca il rilascio se trova il valore di un segreto noto, un
+riferimento a `MQTT_PASSWORD`/`JWT_SECRET`/... o un URL con credenziali.
+
 `tools/broker.mjs` avvia un broker WebSocket di test su `127.0.0.1:9001/mqtt` con
 API HTTP di controllo su `127.0.0.1:9002` (`/publish`, `/commands`, `/health`).
 

@@ -117,13 +117,17 @@ if [ -n "$SIM_PASSWORD" ]; then info "$SIM_USER  telemetria di test"; fi
 cat <<'EOF'
 
 Prossimi passi:
-  1. Build del pannello (.env letto da Vite):
-       MQTT_USERNAME=wallos_kiosk
-       MQTT_PASSWORD=<password kiosk>
-  2. Compose (.env del server, mai con prefisso MQTT_*):
+  1. Build del pannello (solo parametri PUBBLICI, nessun segreto):
+       VITE_MQTT_HOST=<IP LAN del broker>
+       VITE_MQTT_PORT=9001
+       VITE_MQTT_PATH=/mqtt
+  2. Sul pannello: Impostazioni -> broker, utente wallos_kiosk e la password
+     appena generata. Resta nel persist locale: non va mai nella build.
+  3. Compose (.env del server, mai con prefisso VITE_):
        MOSQUITTO_BACKEND_USERNAME=wallos_backend
        MOSQUITTO_BACKEND_PASSWORD=<password backend>
        MOSQUITTO_BIND_IP=<IP LAN autorizzato>
-  3. docker compose --profile prod up -d --build
-  4. node tools/mqtt-auth-check.mjs   (verifica ACL e blocco anonimo)
+  4. docker compose --profile prod up -d --build
+  5. node tools/mqtt-auth-check.mjs   (verifica ACL e blocco anonimo)
+  6. npm run verify:build-secrets    (controllo extra su dist/; gia' in build)
 EOF

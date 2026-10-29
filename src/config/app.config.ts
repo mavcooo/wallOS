@@ -22,15 +22,20 @@ function envProtocol(value: string | undefined): MqttProtocol | undefined {
   return protocol === 'ws' || protocol === 'wss' ? protocol : undefined;
 }
 
-/** Sottoinsieme di `import.meta.env` che configura il broker. */
+/**
+ * Sottoinsieme pubblico di `import.meta.env` che configura il broker.
+ *
+ * Solo `VITE_*`: host, porta, path e base topic sono informazione pubblica.
+ * Le credenziali non compaiono qui di proposito — arrivano a runtime da
+ * Impostazioni → broker (persistite sul singolo pannello) e sono vincolate
+ * dalle ACL dell'utenza `wallos_kiosk`.
+ */
 export interface BrokerEnv {
-  MQTT_HOST?: string;
-  MQTT_PORT?: string;
-  MQTT_PROTOCOL?: string;
-  MQTT_PATH?: string;
-  MQTT_BASE_TOPIC?: string;
-  MQTT_USERNAME?: string;
-  MQTT_PASSWORD?: string;
+  VITE_MQTT_HOST?: string;
+  VITE_MQTT_PORT?: string;
+  VITE_MQTT_PROTOCOL?: string;
+  VITE_MQTT_PATH?: string;
+  VITE_MQTT_BASE_TOPIC?: string;
 }
 
 export type BrokerDefaults = Pick<
@@ -39,18 +44,9 @@ export type BrokerDefaults = Pick<
 >;
 
 /**
- * Default del broker presi dalle variabili d'ambiente lette a startup (`.env`
- * locale, `infisical run` in dev, secret store della piattaforma in build).
- * Un valore malformato viene ignorato: resta il default scritto qui sotto.
- *
- * Questi sono solo *default*: le Impostazioni salvate nel persist del browser
- * hanno la precedenza (vedi `merge` del persist in `homeStore`), quindi il
- * pannello può sempre correggere quanto arriva dall'ambiente.
- */
-/**
  * Host del pannello: quello da cui il browser ha caricato la dashboard.
  *
- * Senza `MQTT_HOST` il broker si presume sulla stessa macchina del pannello:
+ * Senza `VITE_MQTT_HOST` il broker si presume sulla stessa macchina del pannello:
  * su un tablet in LAN `http://192.168.0.101:3000` significa `192.168.0.101`,
  * non `localhost` (che punterebbe al tablet stesso) e nessun IP cablato.
  * Nei test e negli script senza `window` resta `localhost`.
@@ -61,17 +57,24 @@ export function panelHostname(): string {
   return host && host.length > 0 ? host : 'localhost';
 }
 
+/**
+ * Default pubblici del broker, letti alla build (`VITE_*`). Un valore
+ * malformato viene ignorato: resta il default scritto qui sotto.
+ *
+ * Questi sono solo *default*: le Impostazioni salvate nel persist del browser
+ * hanno la precedenza (vedi `merge` del persist in `homeStore`), quindi il
+ * pannello può sempre correggere quanto arriva dall'ambiente.
+ */
 export function resolveBrokerDefaults(env: BrokerEnv): BrokerDefaults {
-  const host = envText(env.MQTT_HOST);
-  const port = envPort(env.MQTT_PORT);
-  const protocol = envProtocol(env.MQTT_PROTOCOL);
-  const path = envText(env.MQTT_PATH);
-  const baseTopic = envText(env.MQTT_BASE_TOPIC);
-  const username = envText(env.MQTT_USERNAME);
-  const password = envText(env.MQTT_PASSWORD);
+  const host = envText(env.VITE_MQTT_HOST);
+  const port = envPort(env.VITE_MQTT_PORT);
+  const protocol = envProtocol(env.VITE_MQTT_PROTOCOL);
+  const path = envText(env.VITE_MQTT_PATH);
+  const baseTopic = envText(env.VITE_MQTT_BASE_TOPIC);
 
-  // Un ambiente che punta a un broker reale non deve restare in demo.
-  const configured = [host, port, protocol, path, baseTopic, username, password].some(
+  // Un ambiente che punta a un broker reale non deve restare in demo. Le
+  // credenziali non contano: le imposta l'amministratore sul pannello.
+  const configured = [host, port, protocol, path, baseTopic].some(
     (value) => value !== undefined,
   );
 
@@ -80,15 +83,22 @@ export function resolveBrokerDefaults(env: BrokerEnv): BrokerDefaults {
     port: port ?? 9001,
     protocol: protocol ?? 'ws',
     path: path ?? '/mqtt',
-    username: username ?? '',
-    password: password ?? '',
+    // Mai da ambiente: un segreto nell'ambiente di build finirebbe in `dist/`.
+    username: '',
+    password: '',
     baseTopic: baseTopic ?? '',
     demoMode: !configured,
   };
 }
 
 export const DEFAULT_BROKER: BrokerSettings = {
-  ...resolveBrokerDefaults(import.meta.env),
+  ...resolveBrokerDefaults({
+    VITE_MQTT_HOST: import.meta.env.VITE_MQTT_HOST,
+    VITE_MQTT_PORT: import.meta.env.VITE_MQTT_PORT,
+    VITE_MQTT_PROTOCOL: import.meta.env.VITE_MQTT_PROTOCOL,
+    VITE_MQTT_PATH: import.meta.env.VITE_MQTT_PATH,
+    VITE_MQTT_BASE_TOPIC: import.meta.env.VITE_MQTT_BASE_TOPIC,
+  }),
   clientId: randomClientId(),
   keepAlive: 30,
   cleanSession: true,
@@ -190,9 +200,9 @@ export const KIOSK_DEFAULTS = {
 /**
  * Home Assistant MQTT Discovery: prefissi ascoltati e finestra di debounce.
  * Il prefisso standard è `homeassistant`; installazioni che annunciano altrove
- * (es. `zigbee2mqtt`) si configurano con `MQTT_DISCOVERY_PREFIXES=a,b`.
+ * (es. `zigbee2mqtt`) si configurano con `VITE_MQTT_DISCOVERY_PREFIXES=a,b`.
  */
-const DISCOVERY_PREFIXES = (import.meta.env.MQTT_DISCOVERY_PREFIXES ?? '')
+const DISCOVERY_PREFIXES = (import.meta.env.VITE_MQTT_DISCOVERY_PREFIXES ?? '')
   .split(',')
   .map((prefix) => prefix.trim())
   .filter((prefix) => prefix.length > 0);

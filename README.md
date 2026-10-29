@@ -109,7 +109,7 @@ npm run dev:auth
 npm run dev
 
 npm run typecheck  # tsc -b (strict, noUncheckedIndexedAccess)
-npm run build      # typecheck + bundle di produzione
+npm run build      # typecheck + bundle + verifica assenza segreti in dist/
 npm run preview    # serve dist/ su :3000
 ```
 
@@ -132,7 +132,7 @@ dal telefono apri `http://<IP-del-PC>:3000`, non `localhost`.
   comunque il PIN.
 - Il client usa solo percorsi relativi (`/api/...`): nessun URL `localhost` nel
   bundle, quindi il login da `http://192.168.0.101:3000` funziona come dal PC.
-- Broker MQTT: se `MQTT_HOST` non è impostato, l'host viene dedotto da
+- Broker MQTT: se `VITE_MQTT_HOST` non è impostato, l'host viene dedotto da
   `window.location.hostname` (il broker si presume sulla stessa macchina del
   pannello). `localhost` non viene mai usato: sul tablet punterebbe al tablet.
 - Un errore imprevisto di render o di caricamento di una pagina non lascia più
@@ -169,9 +169,11 @@ Per il campo reale: Impostazioni → disattiva *Modalità demo*, inserisci IP/po
 WebSocket del broker (es. `192.168.1.10:9001`, path `/mqtt`) → *Salva e applica*.
 La connessione riparte senza reload con backoff esponenziale.
 
-In alternativa i valori iniziali del broker arrivano dalle variabili d'ambiente
-`MQTT_*` (elenco e precedenza in `.env.example` / `INFISICAL.md`): se almeno una
-è impostata l'app parte con la modalità demo spenta.
+Gli stessi parametri pubblici (host, porta, path, base topic) possono arrivare
+da `VITE_MQTT_*` al momento del build (elenco e precedenza in `.env.example` /
+`INFISICAL.md`): se almeno uno è impostato l'app parte con la modalità demo
+spenta. **Le credenziali non passano mai dal build**: si inseriscono una volta
+sul pannello in Impostazioni → broker, con l'utenza `wallos_kiosk`.
 
 ### Docker (API + PostgreSQL + broker MQTT)
 `Dockerfile` è multi-stage su Node 24 Alpine: compila solo il servizio
@@ -215,10 +217,11 @@ docker compose logs -f api
   `MQTT_SERVER_URL=mqtt://mqtt:1883`; per un broker esterno usa
   `MQTT_SERVER_URL=mqtt://<ip>:1883` (oppure `MQTT_HOST` + `MQTT_SERVER_PORT`,
   vedi §4). Senza queste variabili il server logga un warning e i pannelli
-  ricevono gli aggiornamenti solo via SSE. Le variabili `MQTT_*` del **browser**
-  (`MQTT_HOST`, `MQTT_PORT=9001`, `MQTT_PATH=/mqtt`, `MQTT_BASE_TOPIC`) sono
-  invece lette da Vite al momento del `npm run build`: vanno passate alla build
-  del frontend, non al container `api`.
+  ricevono gli aggiornamenti solo via SSE. La configurazione **pubblica** del
+  browser (`VITE_MQTT_HOST`, `VITE_MQTT_PORT=9001`, `VITE_MQTT_PATH=/mqtt`,
+  `VITE_MQTT_BASE_TOPIC`) è letta da Vite al momento del `npm run build`: va
+  passata alla build del frontend, non al container `api`. Le credenziali del
+  pannello non sono una variabile di build: si inseriscono a runtime.
 - `COOKIE_SECURE=false` solo in HTTP locale; con TLS metti `true` e
   `AUTH_TRUST_PROXY=true` dietro il reverse proxy.
 - In produzione il servizio rifiuta i PIN demo: `ADMIN_PIN` e `KIOSK_PIN`
@@ -241,11 +244,12 @@ docker compose logs -f api
   dispositivi in LAN va impostato sull'IP dell'interfaccia autorizzata (es.
   `192.168.0.10`), mai `0.0.0.0` su una rete con ospiti. Il backend raggiunge il
   broker dalla rete interna (`mqtt:1883`) senza porte pubblicate.
-- **Base topic**: se `MQTT_BASE_TOPIC` non è vuoto, prefissa allo stesso modo i
-  pattern in `mosquitto/config/acl`.
+- **Base topic**: se impostato, `MQTT_BASE_TOPIC` (server) e
+  `VITE_MQTT_BASE_TOPIC` (pannello) devono avere lo stesso valore e prefissano
+  allo stesso modo i pattern in `mosquitto/config/acl`.
 - **WSS**: per uscire dalla LAN abilita il listener TLS 9002 in
   `mosquitto.prod.conf`, monta i certificati in `mosquitto/certs` e ricostruisci
-  il pannello con `MQTT_PROTOCOL=wss`, `MQTT_PORT=9002`.
+  il pannello con `VITE_MQTT_PROTOCOL=wss`, `VITE_MQTT_PORT=9002`.
 - **Verifica**: `npm run test:mqtt-auth` (o `node tools/mqtt-auth-check.mjs`)
   controlla blocco anonimo, comando kiosk consentito, publish di sistema negato,
   retained non sovrascrivibile e operatività del backend.
@@ -254,11 +258,25 @@ docker compose logs -f api
   backend (`/api/realtime`), che valida JWT/PIN e inoltra i comandi sul `1883`
   privato. L'ACL kiosk è già la configurazione di transizione.
 
+#### Credenziali del pannello e verifica del bundle
+
+- Il bundle statico non contiene segreti: `envPrefix` in `vite.config.ts` è
+  solo `VITE_`, un nome `VITE_*` con PASSWORD/SECRET/TOKEN/KEY blocca la build e
+  `MQTT_*` resta confinato al processo Node.
+- La password del pannello (`wallos_kiosk`, sola lettura stati + comandi) si
+  inserisce una volta in Impostazioni → broker e resta nel persist locale del
+  dispositivo. Ruotarla con `tools/init-mqtt-auth.sh` significa reinserirla su
+  ogni pannello; l'utenza `wallos_backend` non va mai usata nel browser.
+- `npm run build` esegue anche `tools/verify-build-secrets.mjs`: scansiona
+  `dist/` e fallisce se trova il valore di un segreto noto, un riferimento a
+  `MQTT_PASSWORD`/`JWT_SECRET`/... o un URL con credenziali. Per un controllo
+  separato: `npm run verify:build-secrets`.
+
 ### Discovery Home Assistant (opzionale)
 
 Fuori dalla modalità demo il kiosk si sottoscrive a `homeassistant/+/+/config` e
 `homeassistant/+/+/+/config` (prefissi configurabili con
-`MQTT_DISCOVERY_PREFIXES=homeassistant,zigbee2mqtt`). Ogni annuncio diventa un
+`VITE_MQTT_DISCOVERY_PREFIXES=homeassistant,zigbee2mqtt`). Ogni annuncio diventa un
 widget: `light`, `switch`, `binary_sensor`, `sensor` e `climate` sono mappati sul
 modello interno, `device.suggested_area` crea la stanza e i topic di stato e di
 availability vengono sottoscritti subito.
@@ -726,8 +744,8 @@ dello `staleTime` di TanStack Query.
   una modifica non produce due refetch;
 - la pubblicazione avviene **dopo** il commit, con QoS 1 e coda lato
   `server/services/topologyEvents.ts`: un broker momentaneamente giù non perde
-  l'evento; il topic è uguale a lato client perché entrambi leggono
-  `MQTT_BASE_TOPIC`.
+  l'evento; il topic è uguale a lato client perché il server legge
+  `MQTT_BASE_TOPIC` e il pannello `VITE_MQTT_BASE_TOPIC` (stesso valore).
 
 **Canale di ripiego — SSE.** Quando la socket MQTT non è viva (broker in
 manutenzione, porta WebSocket bloccata, demo mode) il client apre
@@ -788,10 +806,13 @@ payload è identico sui due canali.
 | --- | --- | --- |
 | `MQTT_SERVER_URL` | — | Endpoint usato dal server per pubblicare gli eventi. Ha precedenza su tutto e accetta `mqtt://`, `mqtts://`, `ws://`, `wss://` (es. `mqtt://192.168.0.10:1883`, il **listener TCP**: il 9001 è il WebSocket del browser). |
 | `MQTT_SERVER_PORT` | `1883` | Porta TCP con cui viene composto l'endpoint da `MQTT_HOST`. |
-| `MQTT_HOST` | — | Host del broker, condiviso con il browser (dove compone l'URL WebSocket con `MQTT_PORT`). Se né `MQTT_SERVER_URL` né `MQTT_HOST` sono impostati la pubblicazione MQTT resta disabilitata: il server avverte nel log e gli eventi arrivano comunque via SSE. |
-| `MQTT_USERNAME` / `MQTT_PASSWORD` | — | Utenza broker del processo che le legge: nel container `api` arrivano da `MOSQUITTO_BACKEND_*`; nella **build del pannello** sono `wallos_kiosk` (scrittura solo comandi). |
-| `MOSQUITTO_BACKEND_USERNAME` / `MOSQUITTO_BACKEND_PASSWORD` | `wallos_backend` / — | Solo Docker Compose: credenziali del rule engine, iniettate nel container come `MQTT_USERNAME`/`MQTT_PASSWORD`. Niente prefisso `MQTT_` per non finire nel bundle. |
-| `MQTT_BASE_TOPIC` | — | Prefisso applicato a tutti i topic, identico a lato client. |
+| `MQTT_HOST` | — | Host del broker per il **server** (listener TCP). Il browser usa `VITE_MQTT_HOST`, letto alla build del frontend. Se né `MQTT_SERVER_URL` né `MQTT_HOST` sono impostati la pubblicazione MQTT resta disabilitata: il server avverte nel log e gli eventi arrivano comunque via SSE. |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | — | Utenza `wallos_backend` (readwrite #) del processo Node: nel container `api` arrivano da `MOSQUITTO_BACKEND_*`. Non sono le credenziali del pannello e non finiscono nel bundle. |
+| `VITE_MQTT_HOST` / `VITE_MQTT_PORT` / `VITE_MQTT_PATH` / `VITE_MQTT_PROTOCOL` | — / `9001` / `/mqtt` / `ws` | Configurazione **pubblica** del pannello, letta da Vite alla build. Se `VITE_MQTT_HOST` manca si usa l'host della dashboard. |
+| `VITE_MQTT_BASE_TOPIC` | — | Prefisso topic del pannello: deve coincidere con `MQTT_BASE_TOPIC` del server. |
+| `VITE_MQTT_DISCOVERY_PREFIXES` | `homeassistant` | Prefissi Home Assistant Discovery ascoltati dal pannello. |
+| `MOSQUITTO_BACKEND_USERNAME` / `MOSQUITTO_BACKEND_PASSWORD` | `wallos_backend` / — | Solo Docker Compose: credenziali del rule engine, iniettate nel container come `MQTT_USERNAME`/`MQTT_PASSWORD`. Niente prefisso `VITE_`: un nome sensibile con quel prefisso blocca il build. |
+| `MQTT_BASE_TOPIC` | — | Prefisso applicato a tutti i topic dal server; identico a `VITE_MQTT_BASE_TOPIC` lato client. |
 
 **Verifica rapida** (due finestre affiancate sullo stesso pannello):
 
@@ -1259,7 +1280,7 @@ npm run test:all       # frontend + server
 ```
 
 - `npm run typecheck` → 0 errori (strict, `noUncheckedIndexedAccess`).
-- `npm run build` → build Vite OK.
+- `npm run build` → build Vite + verifica assenza segreti OK.
 - `npm run build:server` → emit ESM in `dist-server/` (stesso comando usato dal
   Dockerfile).
 - `npm test` → 49 file, 306 test frontend (jsdom); 1 benchmark è saltato di
@@ -1462,7 +1483,7 @@ per `user_present`. Comandi e topic sono **relativi** a `MQTT_BASE_TOPIC`, come 
 
 ### Broker del motore: `MQTT_SERVER_URL`
 
-Il browser parla con il broker in WebSocket (`MQTT_HOST`/`MQTT_PORT`, es. `ws://…:9001/mqtt`); il
+Il browser parla con il broker in WebSocket (`VITE_MQTT_HOST`/`VITE_MQTT_PORT`, es. `ws://…:9001/mqtt`); il
 motore invece ha bisogno del listener TCP. Va impostato **almeno uno** fra `MQTT_SERVER_URL`
 (`mqtt://…:1883`, ha la precedenza) e `MQTT_HOST` + `MQTT_SERVER_PORT`: senza nessuno dei due il
 server parte lo stesso ma resta in sola lettura e ogni comando fallisce con

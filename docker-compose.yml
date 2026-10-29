@@ -92,9 +92,9 @@ services:
       # Profilo dev: esporta MQTT_SERVER_URL=mqtt://mqtt-dev:1883.
       MQTT_SERVER_URL: ${MQTT_SERVER_URL:-mqtt://mqtt:1883}
       # Utenza del BACKEND (rule engine/automazioni), distinta da quella del
-      # pannello. I nomi sono MOSQUITTO_* di proposito: vite.config.ts espone al
-      # browser ogni variabile MQTT_*, quindi un segreto con quel prefisso
-      # finirebbe nel bundle. MQTT_USERNAME qui è solo l'env del container api.
+      # pannello. I nomi pubblici sono MOSQUITTO_* di proposito: Vite espone
+      # solo le VITE_* e blocca i nomi sensibili con quel prefisso. MQTT_* qui
+      # è solo l'env del container api e non entra nel bundle.
       MQTT_USERNAME: ${MOSQUITTO_BACKEND_USERNAME:-wallos_backend}
       MQTT_PASSWORD: ${MOSQUITTO_BACKEND_PASSWORD:-}
 

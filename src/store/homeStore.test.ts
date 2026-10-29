@@ -5,22 +5,20 @@ import type { BrokerSettings } from '@/types/mqtt';
 
 const STORAGE_KEY = 'domus-kiosk-store';
 
-const MQTT_KEYS = [
-  'MQTT_HOST',
-  'MQTT_PORT',
-  'MQTT_PROTOCOL',
-  'MQTT_PATH',
-  'MQTT_BASE_TOPIC',
-  'MQTT_USERNAME',
-  'MQTT_PASSWORD',
+const PUBLIC_ENV_KEYS = [
+  'VITE_MQTT_HOST',
+  'VITE_MQTT_PORT',
+  'VITE_MQTT_PROTOCOL',
+  'VITE_MQTT_PATH',
+  'VITE_MQTT_BASE_TOPIC',
 ] as const;
 
-type MqttKey = (typeof MQTT_KEYS)[number];
+type PublicEnvKey = (typeof PUBLIC_ENV_KEYS)[number];
 
 beforeEach(() => {
   resetBrowserStorage();
-  // Un `MQTT_*` già presente nella shell non deve influenzare i singoli casi.
-  for (const key of MQTT_KEYS) vi.stubEnv(key, '');
+  // Una `VITE_MQTT_*` già presente nella shell non deve influenzare i casi.
+  for (const key of PUBLIC_ENV_KEYS) vi.stubEnv(key, '');
 });
 
 afterEach(() => {
@@ -34,11 +32,11 @@ afterEach(() => {
  * idrata in modo sincrono all'import.
  */
 async function loadStore(
-  env: Partial<Record<MqttKey, string>> = {},
+  env: Partial<Record<PublicEnvKey, string>> = {},
   saved?: Partial<BrokerSettings>,
 ) {
   vi.resetModules();
-  for (const key of MQTT_KEYS) vi.stubEnv(key, '');
+  for (const key of PUBLIC_ENV_KEYS) vi.stubEnv(key, '');
   for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
 
   if (saved) {
@@ -53,8 +51,8 @@ describe('broker: ambiente e persist', () => {
   it('senza persist e senza ambiente usa i default di fabbrica', async () => {
     const store = await loadStore();
 
-    // In jsdom l'host del pannello è `localhost`: senza `MQTT_HOST` il broker
-    // si presume sulla stessa macchina che serve la dashboard.
+    // In jsdom l'host del pannello è `localhost`: senza `VITE_MQTT_HOST` il
+    // broker si presume sulla stessa macchina che serve la dashboard.
     expect(store.getState().broker).toMatchObject({
       host: 'localhost',
       port: 9001,
@@ -63,28 +61,38 @@ describe('broker: ambiente e persist', () => {
     });
   });
 
-  it("senza persist applica l'ambiente", async () => {
+  it("senza persist applica solo l'ambiente pubblico", async () => {
     const store = await loadStore({
-      MQTT_HOST: 'env.casa.lan',
-      MQTT_PORT: '1884',
-      MQTT_USERNAME: 'kiosk',
-      MQTT_PASSWORD: 'segreta',
-      MQTT_BASE_TOPIC: 'casa/piano1',
+      VITE_MQTT_HOST: 'env.casa.lan',
+      VITE_MQTT_PORT: '1884',
+      VITE_MQTT_BASE_TOPIC: 'casa/piano1',
     });
 
     expect(store.getState().broker).toMatchObject({
       host: 'env.casa.lan',
       port: 1884,
-      username: 'kiosk',
-      password: 'segreta',
+      username: '',
+      password: '',
       baseTopic: 'casa/piano1',
       demoMode: false,
     });
   });
 
+  it('ignora credenziali MQTT_* rimaste nella shell', async () => {
+    vi.resetModules();
+    for (const key of PUBLIC_ENV_KEYS) vi.stubEnv(key, '');
+    vi.stubEnv('MQTT_USERNAME', 'wallos_kiosk');
+    vi.stubEnv('MQTT_PASSWORD', 'segreta');
+
+    const { useHomeStore } = await import('@/store/homeStore');
+
+    expect(useHomeStore.getState().broker.username).toBe('');
+    expect(useHomeStore.getState().broker.password).toBe('');
+  });
+
   it('il broker salvato vince campo per campo sui default di ambiente', async () => {
     const store = await loadStore(
-      { MQTT_HOST: 'env.casa.lan', MQTT_PORT: '1884', MQTT_USERNAME: 'kiosk' },
+      { VITE_MQTT_HOST: 'env.casa.lan', VITE_MQTT_PORT: '1884' },
       { host: 'salvato.casa.lan', port: 8080 },
     );
 
@@ -93,15 +101,16 @@ describe('broker: ambiente e persist', () => {
       host: 'salvato.casa.lan',
       port: 8080,
       // non salvato: resta il valore dell'ambiente
-      username: 'kiosk',
       protocol: 'ws',
+      username: '',
+      password: '',
       demoMode: false,
     });
   });
 
   it('la modalità demo salvata vince sui default di ambiente', async () => {
     const store = await loadStore(
-      { MQTT_HOST: 'env.casa.lan', MQTT_PORT: '1884' },
+      { VITE_MQTT_HOST: 'env.casa.lan', VITE_MQTT_PORT: '1884' },
       { demoMode: true },
     );
 
@@ -153,12 +162,12 @@ describe('broker: ambiente e persist', () => {
   });
 
   it('quello che le Impostazioni salvano è quello che il kiosk rilegge', async () => {
-    const store = await loadStore({ MQTT_HOST: 'env.casa.lan' });
+    const store = await loadStore({ VITE_MQTT_HOST: 'env.casa.lan' });
 
     store.getState().updateBroker({ host: 'salvato.casa.lan', port: 9002, password: 'p4ss' });
 
     // Secondo avvio: stesso persist, moduli ricreati da capo.
-    const reloaded = await loadStore({ MQTT_HOST: 'env.casa.lan' });
+    const reloaded = await loadStore({ VITE_MQTT_HOST: 'env.casa.lan' });
 
     expect(reloaded.getState().broker).toMatchObject({
       host: 'salvato.casa.lan',

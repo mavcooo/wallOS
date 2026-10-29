@@ -809,7 +809,7 @@ export function useMqtt(
           logRaw(
             'system',
             'client',
-            'Autenticazione broker rifiutata: verifica MQTT_USERNAME/MQTT_PASSWORD (utenza kiosk) e le ACL',
+            'Autenticazione broker rifiutata: verifica utente/password in Impostazioni → broker (utenza kiosk) e le ACL',
           );
         }
         // mqtt.js emette `close` subito dopo: il retry è gestito lì.

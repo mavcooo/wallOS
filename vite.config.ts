@@ -10,6 +10,20 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   const authTarget = env.AUTH_PROXY_TARGET?.trim() || 'http://127.0.0.1:8787';
 
+  // Unica superficie pubblica del bundle. Le variabili `MQTT_*` non sono più
+  // esposte: le credenziali del broker si inseriscono a runtime sul pannello e
+  // non devono mai finire negli asset statici.
+  const publicEnvPrefixes = ['VITE_'];
+  const publicEnv = loadEnv(mode, process.cwd(), publicEnvPrefixes);
+  const sensitiveName = /(PASSWORD|PASSWD|SECRET|TOKEN|KEY|CREDENTIALS?)/i;
+  const leaked = Object.keys(publicEnv).filter((key) => sensitiveName.test(key));
+  if (leaked.length > 0) {
+    throw new Error(
+      `Variabili pubbliche con nome sensibile: ${leaked.join(', ')}. ` +
+        'Vite le includerebbe nel bundle: rinominale o rimuovile dal .env.',
+    );
+  }
+
   return {
     plugins: [
       react(),
@@ -78,9 +92,10 @@ export default defineConfig(({ mode }) => {
         devOptions: { enabled: false },
       }),
     ],
-    // `MQTT_*` (vedi .env.example) deve arrivare all'app: Vite espone di default
-    // solo le variabili con prefisso `VITE_`.
-    envPrefix: ['VITE_', 'MQTT_'],
+    // Solo configurazione pubblica: host/porta/path del broker in `VITE_MQTT_*`.
+    // Nessun segreto può avere questo prefisso (controllo sopra) e `MQTT_*`
+    // resta confinato al processo Node del server.
+    envPrefix: publicEnvPrefixes,
     resolve: {
       alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
     },
