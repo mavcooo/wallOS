@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
-import { timestampMs, type AuthDb } from '../db.js';
+import type { AuthDb } from '../db.js';
 import { HttpError, asRecord, readDigits, readSecret, readString } from '../http.js';
 import {
   REFRESH_COOKIE,
@@ -228,35 +228,44 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     const token = readCookie(request, REFRESH_COOKIE);
     if (!token) throw new HttpError(401, 'NO_REFRESH', 'Refresh token assente');
 
-    const row = await db.findRefreshTokenByHash(hashToken(token));
-    if (!row) throw new HttpError(401, 'INVALID_REFRESH', 'Refresh token non valido');
+    // Il successore viene generato qui ma scritto solo dalla transazione: se il
+    // vecchio token non viene consumato non resta nessuna riga orfana.
+    const nextToken = randomToken();
+    const nextId = randomId();
 
-    if (timestampMs(row.expires_at) <= Date.now()) {
-      await db.revokeRefreshToken(row.id);
+    // Consumo + revoca + insert del successore sono atomici. Due refresh
+    // concorrenti con lo stesso cookie non possono creare due catene: uno
+    // vince, l'altro riceve 401 e (entro la finestra di grazia) non brucia il
+    // successore del vincitore.
+    const rotation = await db.rotateRefreshTokenTransaction({
+      oldTokenHash: hashToken(token),
+      newTokenId: nextId,
+      newTokenHash: hashToken(nextToken),
+      userAgent: userAgentOf(request),
+      ttlSecByKind: {
+        user: config.refreshTtlSec,
+        kiosk: config.kioskRefreshTtlSec,
+      },
+    });
+
+    if (rotation.status === 'not_found') {
+      throw new HttpError(401, 'INVALID_REFRESH', 'Refresh token non valido');
+    }
+    if (rotation.status === 'expired') {
       throw new HttpError(401, 'EXPIRED_REFRESH', 'Sessione scaduta');
     }
-
-    // Un token già ruotato che riappare indica un furto: si brucia la famiglia.
-    if (row.revoked_at !== null) {
-      await db.revokeRefreshFamily(row.family_id);
+    if (rotation.status === 'reused') {
+      // Oltre la finestra di grazia la famiglia è già stata revocata dentro la
+      // transazione; qui si risponde soltanto con il codice pubblico.
       throw new HttpError(401, 'REFRESH_REUSED', 'Sessione revocata');
     }
 
+    const row = rotation.consumed;
     const user = await db.findUserById(row.user_id);
     if (!user || !user.active) {
       await db.revokeRefreshFamily(row.family_id);
       throw new HttpError(401, 'ACCOUNT_UNAVAILABLE', 'Profilo non disponibile');
     }
-
-    const next = await createRefreshToken(
-      db,
-      config,
-      user,
-      row.kind,
-      row.family_id,
-      userAgentOf(request),
-    );
-    await db.revokeRefreshToken(row.id, next.id);
 
     const accessToken = signAccessToken(
       {
@@ -272,8 +281,8 @@ export function registerAuthRoutes(app: FastifyInstance, deps: AuthRouteDeps): v
     setSessionCookies(reply, {
       accessToken,
       accessTtlSec: config.accessTtlSec,
-      refreshToken: next.token,
-      refreshTtlSec: next.ttlSec,
+      refreshToken: nextToken,
+      refreshTtlSec: rotation.ttlSec,
       secure: config.cookieSecure,
     });
 

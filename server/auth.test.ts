@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { Database, type AuthDb } from './db.js';
-import { hashSecret } from './security.js';
+import { hashSecret, hashToken } from './security.js';
 import type { AuthConfig, SessionResponse } from './types.js';
 
 const PASSWORD = 'admin-password-123';
@@ -321,7 +321,7 @@ describe('sessione kiosk', () => {
 
 describe('rotazione refresh token', () => {
   it('ruota il token e revoca l’intera famiglia al riuso', async () => {
-    const { app } = await setup();
+    const { app, db } = await setup();
     const { cookies } = await login(app);
 
     const firstRefresh = await app.inject({
@@ -332,6 +332,14 @@ describe('rotazione refresh token', () => {
     expect(firstRefresh.statusCode).toBe(200);
     const rotated = { ...cookies, ...cookiesOf(firstRefresh) };
     expect(rotated.domus_refresh).not.toBe(cookies.domus_refresh);
+
+    // Due refresh simultanei sono una collisione entro la finestra di grazia;
+    // qui simuliamo il riuso successivo, che deve bruciare la famiglia.
+    await db.client.query(
+      `UPDATE refresh_tokens SET revoked_at = now() - interval '1 minute'
+       WHERE token_hash = $1`,
+      [hashToken(cookies.domus_refresh ?? '')],
+    );
 
     // Riuso del vecchio refresh: furto rilevato.
     const reuse = await app.inject({

@@ -22,6 +22,7 @@ import type {
   RefreshTokenRow,
   RoomRow,
   ScenarioRow,
+  SessionKind,
   UserRole,
   UserRow,
 } from './types.js';
@@ -93,6 +94,48 @@ export interface NewRefreshToken {
   expiresAt: number;
   userAgent: string | null;
 }
+
+/**
+ * Input della rotazione atomica di un refresh token.
+ *
+ * `user_id`, `family_id` e `kind` non si passano da fuori: vengono letti dal
+ * token consumato, così una richiesta non può spostare la catena su un'altra
+ * famiglia o cambiare tipo di sessione.
+ */
+export interface RotateRefreshTokenInput {
+  oldTokenHash: string;
+  newTokenId: string;
+  newTokenHash: string;
+  userAgent: string | null;
+  /** TTL del successore, scelto in base alla `kind` del token consumato. */
+  ttlSecByKind: Record<SessionKind, number>;
+  /**
+   * Collisione concorrente: due richieste partite insieme con lo stesso token.
+   * Entro questa finestra il perdente riceve 401 ma la famiglia non viene
+   * bruciata, così il successore del vincitore resta valido. Oltre la finestra
+   * lo stesso token è un replay e revoca tutta la catena.
+   */
+  concurrencyGraceMs?: number;
+  /** Orologio iniettabile nei test; default `Date.now()`. */
+  now?: number;
+}
+
+/** Esito della rotazione: il chiamante decide codici HTTP e cookie. */
+export type RefreshRotationResult =
+  | {
+      status: 'rotated';
+      /** Riga consumata, con `revoked_at` e `replaced_by` valorizzati. */
+      consumed: RefreshTokenRow;
+      newTokenId: string;
+      ttlSec: number;
+      expiresAt: number;
+    }
+  | { status: 'not_found' }
+  | { status: 'expired'; familyId: string }
+  | { status: 'reused'; familyId: string; withinGrace: boolean };
+
+/** Oltre questo intervallo un token revocato è un replay, non una collisione. */
+export const REFRESH_CONCURRENCY_GRACE_MS = 10_000;
 
 export interface NewRoom {
   id: string;
@@ -789,6 +832,13 @@ export class Database {
   readonly client: SqlClient;
   /** Pool `pg` del processo; `null` quando è iniettato un client esterno. */
   readonly pool: Pool | null;
+  /**
+   * Coda delle transazioni quando il database è un single-connection (PGlite
+   * nei test, adattatori mono-connessione). Due `BEGIN` sulla stessa sessione
+   * finirebbero nella stessa transazione: qui vanno serializzati. Con il pool
+   * `pg` ogni transazione ha già un client dedicato e non passa da questa coda.
+   */
+  private singleTransactionGate: Promise<void> = Promise.resolve();
 
   constructor(options: DatabaseOptions) {
     if (options.client) {
@@ -854,23 +904,45 @@ export class Database {
    * pool in stato "idle in transaction" continuerebbe a trattenere i lock.
    */
   async withTransaction<T>(run: (client: SqlClient) => Promise<T>): Promise<T> {
-    let client = this.client;
-    let release: (() => void) | null = null;
-
-    if (this.pool) {
-      const pooled = await this.pool.connect();
-      client = {
-        async query<R>(sql: string, params?: readonly unknown[]) {
-          const result = await pooled.query(sql, params ? [...params] : undefined);
-          return { rows: result.rows as R[], rowCount: result.rowCount ?? 0 };
-        },
-        async exec(sql: string) {
-          await pooled.query(sql);
-        },
-      };
-      release = () => pooled.release();
+    if (!this.pool) {
+      // Una sola connessione: attende la transazione precedente prima di
+      // aprire la propria. La coda non si rompe se una transazione fallisce.
+      const previous = this.singleTransactionGate;
+      let release!: () => void;
+      this.singleTransactionGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await this.runTransaction(this.client, run);
+      } finally {
+        release();
+      }
     }
 
+    const pooled = await this.pool.connect();
+    const client: SqlClient = {
+      async query<R>(sql: string, params?: readonly unknown[]) {
+        const result = await pooled.query(sql, params ? [...params] : undefined);
+        return { rows: result.rows as R[], rowCount: result.rowCount ?? 0 };
+      },
+      async exec(sql: string) {
+        await pooled.query(sql);
+      },
+    };
+
+    try {
+      return await this.runTransaction(client, run);
+    } finally {
+      pooled.release();
+    }
+  }
+
+  /** Ciclo BEGIN/COMMIT/ROLLBACK su un client già dedicato alla transazione. */
+  private async runTransaction<T>(
+    client: SqlClient,
+    run: (client: SqlClient) => Promise<T>,
+  ): Promise<T> {
     await client.exec('BEGIN');
     try {
       const result = await run(client);
@@ -883,8 +955,6 @@ export class Database {
         // Connessione già caduta: il pool la scarta da sé.
       }
       throw error;
-    } finally {
-      release?.();
     }
   }
 
@@ -1033,21 +1103,106 @@ export class Database {
     );
   }
 
+  /**
+   * Consuma il refresh token e inserisce il successore in un'unica transazione.
+   *
+   * Il `SELECT ... FOR UPDATE` serializza i richiedenti sullo stesso token: il
+   * primo acquista il lock, revoca e inserisce; il secondo attende il COMMIT e
+   * rilegge la riga aggiornata, quindi non può generare una seconda catena.
+   * `UPDATE ... WHERE revoked_at IS NULL` + `rowCount` è la seconda barriera,
+   * nel caso il lock venga rilasciato o l'adapter non lo supporti.
+   *
+   * Un token già revocato da pochi istanti (collisione fra due refresh dello
+   * stesso client) restituisce `reused` **senza** revocare la famiglia: il
+   * successore del richiedente vincente deve restare valido. Oltre la finestra
+   * di grazia lo stesso token è un replay e la famiglia viene revocata.
+   */
+  async rotateRefreshTokenTransaction(
+    input: RotateRefreshTokenInput,
+  ): Promise<RefreshRotationResult> {
+    const graceMs = input.concurrencyGraceMs ?? REFRESH_CONCURRENCY_GRACE_MS;
+    const now = input.now ?? Date.now();
+
+    return this.withTransaction(async (client) => {
+      const { rows } = await client.query<RefreshTokenRow>(
+        'SELECT * FROM refresh_tokens WHERE token_hash = $1 FOR UPDATE',
+        [input.oldTokenHash],
+      );
+      const current = rows[0];
+      if (!current) return { status: 'not_found' } as const;
+
+      if (current.revoked_at !== null) {
+        const revokedAt = timestampMs(current.revoked_at);
+        // `revoked_at` arriva dall'orologio del database: il confronto tollera
+        // un piccolo disallineamento con il processo Node.
+        const withinGrace =
+          current.replaced_by !== null && revokedAt >= now - graceMs;
+        if (!withinGrace) {
+          await client.query(
+            `UPDATE refresh_tokens SET revoked_at = now()
+             WHERE family_id = $1::uuid AND revoked_at IS NULL`,
+            [current.family_id],
+          );
+        }
+        return { status: 'reused', familyId: current.family_id, withinGrace } as const;
+      }
+
+      if (timestampMs(current.expires_at) <= now) {
+        await client.query(
+          `UPDATE refresh_tokens SET revoked_at = now()
+           WHERE id = $1::uuid AND revoked_at IS NULL`,
+          [current.id],
+        );
+        return { status: 'expired', familyId: current.family_id } as const;
+      }
+
+      const consumed = await client.query<RefreshTokenRow>(
+        `UPDATE refresh_tokens
+         SET revoked_at = now(), replaced_by = $2::uuid
+         WHERE id = $1::uuid AND revoked_at IS NULL
+         RETURNING *`,
+        [current.id, input.newTokenId],
+      );
+      if (consumed.rowCount !== 1) {
+        // Con `FOR UPDATE` non dovrebbe accadere: se succede, il token è stato
+        // consumato altrove e non si deve creare un secondo successore.
+        return { status: 'reused', familyId: current.family_id, withinGrace: true } as const;
+      }
+
+      const ttlSec =
+        current.kind === 'kiosk' ? input.ttlSecByKind.kiosk : input.ttlSecByKind.user;
+      const expiresAt = Date.now() + ttlSec * 1000;
+      await client.query(
+        `INSERT INTO refresh_tokens (
+           id, user_id, family_id, token_hash, kind, expires_at, user_agent
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7)`,
+        [
+          input.newTokenId,
+          current.user_id,
+          current.family_id,
+          input.newTokenHash,
+          current.kind,
+          new Date(expiresAt),
+          input.userAgent,
+        ],
+      );
+
+      return {
+        status: 'rotated',
+        consumed: consumed.rows[0] ?? current,
+        newTokenId: input.newTokenId,
+        ttlSec,
+        expiresAt,
+      } as const;
+    });
+  }
+
   async findRefreshTokenByHash(tokenHash: string): Promise<RefreshTokenRow | undefined> {
     const { rows } = await this.client.query<RefreshTokenRow>(
       'SELECT * FROM refresh_tokens WHERE token_hash = $1',
       [tokenHash],
     );
     return rows[0];
-  }
-
-  async revokeRefreshToken(id: string, replacedBy: string | null = null): Promise<void> {
-    await this.client.query(
-      `UPDATE refresh_tokens
-       SET revoked_at = now(), replaced_by = $2::uuid
-       WHERE id = $1::uuid AND revoked_at IS NULL`,
-      [id, replacedBy],
-    );
   }
 
   async revokeRefreshFamily(familyId: string): Promise<void> {
