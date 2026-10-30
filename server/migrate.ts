@@ -45,6 +45,38 @@ const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 /** Intervallo fra due tentativi di lock: sotto il secondo, sopra il polling stretto. */
 const LOCK_RETRY_MS = 200;
 
+/**
+ * Attesa massima per un lock su tabella dentro la transazione di migrazione.
+ *
+ * Un `ALTER TABLE` che deve aspettare un lettore o un altro DDL in corso non
+ * deve bloccare il bootstrap a tempo indefinito: dopo questo limite PostgreSQL
+ * annulla lo statement con `55P03` e la transazione va in ROLLBACK. Cinque
+ * secondi bastano su una LAN con un solo pannello; un DDL legittimo che deve
+ * aspettare oltre significa che c'è una sessione da chiudere, non da attendere.
+ */
+export const DEFAULT_DDL_LOCK_TIMEOUT_MS = 5_000;
+
+/**
+ * Durata massima di una singola istruzione dentro la transazione di migrazione.
+ * Oltre, `57014` (`canceling statement due to statement timeout`): la
+ * migrazione non entra nel ledger e l'errore risale subito al bootstrap.
+ */
+export const DEFAULT_DDL_STATEMENT_TIMEOUT_MS = 30_000;
+
+/** Policy DDL della transazione, in millisecondi. */
+export interface DdlTimeoutOptions {
+  /** Attesa massima per un lock su tabella (default 5 s). */
+  ddlLockTimeoutMs?: number;
+  /** Durata massima di una singola istruzione DDL (default 30 s). */
+  ddlStatementTimeoutMs?: number;
+}
+
+/** Valori effettivamente applicati con `SET LOCAL`. */
+export interface DdlTimeouts {
+  lockTimeoutMs: number;
+  statementTimeoutMs: number;
+}
+
 export type MigrationErrorCode =
   | 'LOCK_TIMEOUT'
   | 'SQL_ERROR'
@@ -80,7 +112,7 @@ export interface MigrationConnection {
   release?(): void;
 }
 
-export interface MigrateOptions {
+export interface MigrateOptions extends DdlTimeoutOptions {
   /** Connessione già acquisita: se la passi, il chiamante la possiede e la rilascia. */
   connection?: MigrationConnection;
   /** Directory delle migrazioni (default: `MIGRATION_DIR` o `server/migrations`). */
@@ -293,18 +325,71 @@ async function acquireMigrationLock(
 }
 
 /**
+ * Un valore non utilizzabile non deve mai *disattivare* la protezione: `0`,
+ * negativo o `NaN` tornano al default, non a "nessun timeout".
+ */
+function ddlTimeoutMs(value: number | undefined, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback;
+  return Math.trunc(value);
+}
+
+/**
+ * Applica `lock_timeout` e `statement_timeout` **alla sola transazione** in
+ * corso (`SET LOCAL`): al COMMIT/ROLLBACK tornano i valori di sessione, quindi
+ * la policy non si propaga alle query dell'applicazione che condividono la
+ * stessa connessione del pool.
+ *
+ * I millisecondi sono numeri interi validati da `ddlTimeoutMs`: il testo SQL
+ * contiene solo cifre, nessun frammento proveniente dall'esterno.
+ */
+async function applyDdlTimeouts(
+  connection: MigrationConnection,
+  options: DdlTimeoutOptions,
+): Promise<DdlTimeouts> {
+  const timeouts: DdlTimeouts = {
+    lockTimeoutMs: ddlTimeoutMs(options.ddlLockTimeoutMs, DEFAULT_DDL_LOCK_TIMEOUT_MS),
+    statementTimeoutMs: ddlTimeoutMs(
+      options.ddlStatementTimeoutMs,
+      DEFAULT_DDL_STATEMENT_TIMEOUT_MS,
+    ),
+  };
+
+  try {
+    await connection.exec(`SET LOCAL lock_timeout = '${timeouts.lockTimeoutMs}ms'`);
+    await connection.exec(`SET LOCAL statement_timeout = '${timeouts.statementTimeoutMs}ms'`);
+  } catch (error) {
+    throw new MigrationError(
+      'SQL_ERROR',
+      `impossibile applicare la policy DDL (lock_timeout ${timeouts.lockTimeoutMs} ms, ` +
+        `statement_timeout ${timeouts.statementTimeoutMs} ms): ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+
+  return timeouts;
+}
+
+/**
  * Transazione attorno a un ciclo di migrazione: un fallimento a metà non deve
  * lasciare DDL applicato senza la riga nel ledger. Il ROLLBACK è esplicito
  * perché una sessione che torna al pool "idle in transaction" continuerebbe a
  * trattenere i lock.
+ *
+ * I timeout DDL vengono impostati subito dopo il `BEGIN`, prima di qualunque
+ * statement: è l'unico punto in cui `SET LOCAL` vale per tutti i file applicati
+ * nella stessa transazione (l'advisory lock è di transazione, quindi il ciclo
+ * non si può spezzare in più transazioni senza perdere la mutua esclusione).
  */
 async function withTransaction<T>(
   connection: MigrationConnection,
-  run: () => Promise<T>,
+  run: (timeouts: DdlTimeouts) => Promise<T>,
+  options: DdlTimeoutOptions = {},
 ): Promise<T> {
   await connection.exec('BEGIN');
   try {
-    const result = await run();
+    const timeouts = await applyDdlTimeouts(connection, options);
+    const result = await run(timeouts);
     await connection.exec('COMMIT');
     return result;
   } catch (error) {
@@ -317,17 +402,40 @@ async function withTransaction<T>(
   }
 }
 
+/** SQLSTATE che meritano il contesto della policy DDL nel messaggio. */
+const TIMEOUT_HINTS: Record<string, string> = {
+  '55P03': 'lock non acquisito entro lock_timeout',
+  '57014': 'statement annullata da statement_timeout',
+};
+
+/**
+ * Etichetta operativa per gli errori di timeout: chi legge il log deve sapere
+ * quale limite è scattato e con quale valore, senza doverlo dedurre dal codice
+ * PostgreSQL.
+ */
+function timeoutHint(error: unknown, timeouts: DdlTimeouts): string {
+  const code = (error as { code?: unknown } | null)?.code;
+  const hint = typeof code === 'string' ? TIMEOUT_HINTS[code] : undefined;
+  if (!hint) return '';
+  return (
+    ` — ${hint} (lock_timeout ${timeouts.lockTimeoutMs} ms, ` +
+    `statement_timeout ${timeouts.statementTimeoutMs} ms)`
+  );
+}
+
 async function runMigrationSql(
   connection: MigrationConnection,
   sql: string,
   file: string,
+  timeouts: DdlTimeouts,
 ): Promise<void> {
   try {
     await connection.exec(sql);
   } catch (error) {
     throw new MigrationError(
       'SQL_ERROR',
-      `${file}: ${error instanceof Error ? error.message : String(error)}`,
+      `${file}: ${error instanceof Error ? error.message : String(error)}` +
+        timeoutHint(error, timeouts),
       { cause: error },
     );
   }
@@ -345,40 +453,44 @@ async function applyMigrations(
   const log = options.log ?? console.log;
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
 
-  return withTransaction(connection, async () => {
-    // Il lock viene prima di qualunque lettura: è ciò che rende la decisione
-    // "questa migrazione è già stata applicata" affidabile fra processi.
-    await acquireMigrationLock(connection, lockTimeoutMs, log);
-    await connection.exec(LEDGER_DDL);
+  return withTransaction(
+    connection,
+    async (timeouts) => {
+      // Il lock viene prima di qualunque lettura: è ciò che rende la decisione
+      // "questa migrazione è già stata applicata" affidabile fra processi.
+      await acquireMigrationLock(connection, lockTimeoutMs, log);
+      await connection.exec(LEDGER_DDL);
 
-    const { rows } = await connection.query<{ version: string }>(
-      `SELECT version FROM ${MIGRATIONS_LEDGER}`,
-    );
-    const appliedVersions = new Set(rows.map((row) => row.version));
-    const pending = listMigrationFiles(migrationDir).filter((file) => !appliedVersions.has(file));
+      const { rows } = await connection.query<{ version: string }>(
+        `SELECT version FROM ${MIGRATIONS_LEDGER}`,
+      );
+      const appliedVersions = new Set(rows.map((row) => row.version));
+      const pending = listMigrationFiles(migrationDir).filter((file) => !appliedVersions.has(file));
 
-    if (pending.length === 0) {
-      log('[migrate] database già aggiornato: nessuna migrazione pendente');
-      return { applied: [] };
-    }
-
-    for (const file of pending) {
-      const sql = extractUpSection(readMigrationFile(migrationDir, file));
-      if (!hasSqlStatements(sql)) {
-        throw new MigrationError(
-          'EMPTY_UP_SECTION',
-          `la migrazione ${file} non contiene statement nella sezione UP`,
-        );
+      if (pending.length === 0) {
+        log('[migrate] database già aggiornato: nessuna migrazione pendente');
+        return { applied: [] };
       }
-      log(`[migrate] applico ${file}`);
-      await runMigrationSql(connection, sql, file);
-      // Ledger e DDL nella stessa transazione: registrato solo ciò che è stato
-      // davvero applicato, senza finestre in cui il database è avanti al ledger.
-      await connection.query(`INSERT INTO ${MIGRATIONS_LEDGER} (version) VALUES ($1)`, [file]);
-    }
 
-    return { applied: pending };
-  });
+      for (const file of pending) {
+        const sql = extractUpSection(readMigrationFile(migrationDir, file));
+        if (!hasSqlStatements(sql)) {
+          throw new MigrationError(
+            'EMPTY_UP_SECTION',
+            `la migrazione ${file} non contiene statement nella sezione UP`,
+          );
+        }
+        log(`[migrate] applico ${file}`);
+        await runMigrationSql(connection, sql, file, timeouts);
+        // Ledger e DDL nella stessa transazione: registrato solo ciò che è stato
+        // davvero applicato, senza finestre in cui il database è avanti al ledger.
+        await connection.query(`INSERT INTO ${MIGRATIONS_LEDGER} (version) VALUES ($1)`, [file]);
+      }
+
+      return { applied: pending };
+    },
+    options,
+  );
 }
 
 /**
@@ -422,46 +534,50 @@ export async function migrateDown(options: MigrateOptions = {}): Promise<Migrate
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
 
   try {
-    return await withTransaction(connection, async () => {
-      await acquireMigrationLock(connection, lockTimeoutMs, log);
-      await connection.exec(LEDGER_DDL);
+    return await withTransaction(
+      connection,
+      async (timeouts) => {
+        await acquireMigrationLock(connection, lockTimeoutMs, log);
+        await connection.exec(LEDGER_DDL);
 
-      const { rows } = await connection.query<{ version: string }>(
-        `SELECT version FROM ${MIGRATIONS_LEDGER} ORDER BY id DESC LIMIT 1`,
-      );
-      const version = rows[0]?.version;
-      if (!version) {
-        throw new MigrationError(
-          'NO_APPLIED_MIGRATIONS',
-          'nessuna migrazione applicata: non c’è nulla da annullare',
+        const { rows } = await connection.query<{ version: string }>(
+          `SELECT version FROM ${MIGRATIONS_LEDGER} ORDER BY id DESC LIMIT 1`,
         );
-      }
+        const version = rows[0]?.version;
+        if (!version) {
+          throw new MigrationError(
+            'NO_APPLIED_MIGRATIONS',
+            'nessuna migrazione applicata: non c’è nulla da annullare',
+          );
+        }
 
-      // La versione arriva dal database: il nome deve restare dentro la
-      // cartella delle migrazioni, non un percorso arbitrario.
-      const filePath = path.resolve(migrationDir, version);
-      if (path.basename(version) !== version || !fs.existsSync(filePath)) {
-        throw new MigrationError(
-          'MISSING_MIGRATION_FILE',
-          `il file della migrazione «${version}» non esiste in ${migrationDir}: ` +
-            'ripristinalo prima di annullarla',
-        );
-      }
+        // La versione arriva dal database: il nome deve restare dentro la
+        // cartella delle migrazioni, non un percorso arbitrario.
+        const filePath = path.resolve(migrationDir, version);
+        if (path.basename(version) !== version || !fs.existsSync(filePath)) {
+          throw new MigrationError(
+            'MISSING_MIGRATION_FILE',
+            `il file della migrazione «${version}» non esiste in ${migrationDir}: ` +
+              'ripristinalo prima di annullarla',
+          );
+        }
 
-      const down = extractDownSection(fs.readFileSync(filePath, 'utf8'));
-      if (down === null || !hasSqlStatements(down)) {
-        throw new MigrationError(
-          'NO_DOWN_SECTION',
-          `la migrazione «${version}» non ha una sezione DOWN eseguibile: ` +
-            'il rollback non è supportato, scrivila nel file prima di riprovare',
-        );
-      }
+        const down = extractDownSection(fs.readFileSync(filePath, 'utf8'));
+        if (down === null || !hasSqlStatements(down)) {
+          throw new MigrationError(
+            'NO_DOWN_SECTION',
+            `la migrazione «${version}» non ha una sezione DOWN eseguibile: ` +
+              'il rollback non è supportato, scrivila nel file prima di riprovare',
+          );
+        }
 
-      log(`[migrate] annullo ${version}`);
-      await runMigrationSql(connection, down, version);
-      await connection.query(`DELETE FROM ${MIGRATIONS_LEDGER} WHERE version = $1`, [version]);
-      return { rolledBack: version };
-    });
+        log(`[migrate] annullo ${version}`);
+        await runMigrationSql(connection, down, version, timeouts);
+        await connection.query(`DELETE FROM ${MIGRATIONS_LEDGER} WHERE version = $1`, [version]);
+        return { rolledBack: version };
+      },
+      options,
+    );
   } finally {
     if (ownsConnection) connection.release?.();
   }

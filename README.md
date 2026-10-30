@@ -1519,6 +1519,14 @@ serializzano invece di contendersi lo schema, e chi arriva secondo trova il ledg
 (se il lock resta occupato oltre 30 s il processo fallisce con un errore `LOCK_TIMEOUT`, senza restare
 appeso in fase di bootstrap).
 
+Subito dopo il `BEGIN` la transazione imposta `SET LOCAL lock_timeout = '5s'` e
+`statement_timeout = '30s'`: un `ALTER TABLE` che non riesce a prendere il lock su una tabella (o
+un'istruzione che supera i 30 s) fa fallire il bootstrap con `55P03`/`57014` e un messaggio che
+riporta il file e il limite scattato, invece di tenere il servizio appeso a tempo indefinito. La
+policy vale **solo** per quella transazione (non si propaga alle query dell'applicazione che
+condividono la connessione) ed è sovrascrivibile per chiamata con `ddlLockTimeoutMs` e
+`ddlStatementTimeoutMs`.
+
 `migrateDown` esegue davvero la sezione `DOWN` dell'ultima migrazione **registrata nel ledger** e
 cancella la sua riga, sempre dentro la stessa transazione e lo stesso lock. Se il ledger è vuoto, se
 il file non esiste più o se la sezione `DOWN` manca (o contiene solo commenti, come nel template di

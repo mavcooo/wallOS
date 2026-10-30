@@ -351,6 +351,8 @@ function createFakeCluster(files: Record<string, { up: string; down: string }>) 
           return;
         }
         if (body.includes('CREATE TABLE IF NOT EXISTS schema_migrations')) return;
+        // Policy DDL della transazione (`SET LOCAL lock_timeout/statement_timeout`).
+        if (body.startsWith('SET LOCAL ')) return;
         if (!bodies.has(body)) {
           throw new Error(`statement non previsto dal finto cluster: ${body}`);
         }

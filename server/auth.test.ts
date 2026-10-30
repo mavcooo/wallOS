@@ -547,7 +547,7 @@ describe('health con stato del database', () => {
     const { app, db } = await setup();
     // `Database.health()` incapsula la sonda sul pool: qui si simula l'esito
     // di rete già classificato dal driver (la sonda reale è coperta da
-    // `dbResilience.test.ts`).
+    // `__tests__/db-resilience.test.ts`).
     vi.spyOn(db, 'health').mockResolvedValue({
       healthy: false,
       latencyMs: 3,
