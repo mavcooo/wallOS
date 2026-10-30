@@ -350,6 +350,13 @@ export interface AutomationRow {
   execution_count: number;
   created_at: Date | string;
   updated_at: Date | string;
+  /**
+   * Tempo minimo (ms) fra due esecuzioni consecutive della regola. La colonna è
+   * opzionale: un'installazione che non ce l'ha usa `DEFAULT_AUTOMATION_THROTTLE_MS`.
+   * Il motore la applica insieme al lock per chiave, così un burst di messaggi
+   * MQTT non comanda due volte lo stesso relè.
+   */
+  throttle_ms?: number | null;
 }
 
 /** Riga di `automations` più l'esito dell'ultima esecuzione registrata. */
@@ -432,6 +439,13 @@ export interface ResolvedAutomation {
   /** Altri gruppi: AND dentro il gruppo, OR fra i gruppi (e con `conditions`). */
   conditionGroups: AutomationCondition[][];
   actions: AutomationAction[];
+  /**
+   * Finestra di deduplicazione fra due esecuzioni della stessa regola, in ms.
+   * `0` disabilita il cooldown (solo per regole che devono reagire a ogni
+   * transizione); il valore arriva da `automations.throttle_ms` e viene
+   * limitato da `resolveAutomation`.
+   */
+  throttleMs: number;
   /** Motivo dello scarto, per log e diagnostica. */
   invalidReason: string | null;
 }

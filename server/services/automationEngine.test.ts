@@ -519,7 +519,17 @@ describe('motore · trigger MQTT', () => {
 
     expect(mqtt.published).toHaveLength(1);
 
-    // Il sensore torna a riposo, poi rileva di nuovo: nuova transizione.
+    // Il sensore torna a riposo, poi rileva di nuovo: nuova transizione. La
+    // finestra di deduplicazione (150 ms) deve essere trascorsa, altrimenti il
+    // secondo comando viene soppresso come farebbe un burst reale.
+    await engine.handleMessage(MOTION_TOPIC, '{"occupancy":false}');
+    await engine.handleMessage(MOTION_TOPIC, '{"occupancy":true}');
+    expect(mqtt.published).toHaveLength(1);
+
+    await new Promise((resolve) => setTimeout(resolve, 160));
+    await engine.handleMessage(MOTION_TOPIC, '{"occupancy":true}');
+    expect(mqtt.published).toHaveLength(1);
+
     await engine.handleMessage(MOTION_TOPIC, '{"occupancy":false}');
     await engine.handleMessage(MOTION_TOPIC, '{"occupancy":true}');
     expect(mqtt.published).toHaveLength(2);

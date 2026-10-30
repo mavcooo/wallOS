@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from 'fastify';
 
 import type { Database, NewAutomationLog } from '../db.js';
 import { createMqttLink, type MqttLink } from '../mqttClient.js';
+import { KeyedAsyncLock } from '../utils/keyedAsyncLock.js';
 import { CronError, localMinuteOfDay, matchesCron, minuteStamp, parseCron } from './cron.js';
 import type { ParsedCron } from './cron.js';
 import { sunEventLocalMinutes } from './sun.js';
@@ -60,6 +61,14 @@ import type {
  *
  * L'errore di una regola non interrompe le altre: ogni valutazione è isolata e
  * l'eccezione finisce nel log della regola.
+ *
+ * **Concorrenza.** Ogni valutazione è asincrona e un sensore pubblica a 1–2 Hz:
+ * due messaggi ravvicinati possono superare entrambi il controllo dello stato
+ * prima che la prima azione comandi il relè (TOCTOU). Le esecuzioni della
+ * stessa regola passano quindi per un `KeyedAsyncLock`, e la seconda
+ * ricontrolla il timestamp di ultima esecuzione **dopo** aver ottenuto il lock:
+ * la finestra di deduplicazione è `throttle_ms` (default 150 ms). Regole
+ * diverse restano parallele.
  */
 
 /** Cadenza del tick dei trigger temporali: 60 s, come il criterio di latenza. */
@@ -77,6 +86,32 @@ const LOG_CLEANUP_INTERVAL_MS = 60 * 60_000;
 
 /** Sfasamento massimo delle regole solari rispetto all'effemeride. */
 const MAX_SUN_OFFSET_MINUTES = 12 * 60;
+
+// ── Concorrenza e deduplicazione ────────────────────────────────────────────
+
+/**
+ * Finestra di deduplicazione predefinita fra due esecuzioni della stessa
+ * regola: copre un burst di sensori a 1–2 Hz senza sopprimere una vera
+ * sequenza uomo-azione (spegnimento e riaccensione a distanza di un secondo).
+ */
+export const DEFAULT_AUTOMATION_THROTTLE_MS = 150;
+
+/** Tetto di `throttle_ms`: oltre, un comando di sicurezza arriverebbe tardi. */
+export const MAX_AUTOMATION_THROTTLE_MS = 10 * 60_000;
+
+/** Attesa massima per il lock di una regola prima di dichiarare il timeout. */
+export const AUTOMATION_LOCK_TIMEOUT_MS = 500;
+
+/**
+ * Chiave del lock: la regola. Le esecuzioni della stessa regola sono
+ * serializzate anche quando il trigger arriva da dispositivi diversi (il
+ * cooldown è per regola e le azioni comandano gli stessi attuatori); regole
+ * diverse restano invece parallele. Il prefisso tiene le chiavi del motore
+ * distinte da eventuali altri usi dello stesso lock.
+ */
+export function automationLockKey(ruleId: string): string {
+  return `automation:${ruleId}`;
+}
 
 // ── Topic MQTT ──────────────────────────────────────────────────────────────
 
@@ -318,6 +353,18 @@ function parseCondition(value: unknown): AutomationCondition | null {
   return null;
 }
 
+/**
+ * `throttle_ms` opzionale: assente o malformato → default del motore; `0`
+ * disabilita la deduplicazione per quella regola; i valori eccessivi vengono
+ * limitati al tetto.
+ */
+function parseThrottleMs(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_AUTOMATION_THROTTLE_MS;
+  const throttleMs = Math.trunc(value);
+  if (throttleMs <= 0) return throttleMs === 0 ? 0 : DEFAULT_AUTOMATION_THROTTLE_MS;
+  return Math.min(throttleMs, MAX_AUTOMATION_THROTTLE_MS);
+}
+
 /** `delayMs` assente vale 0; `null` = valore fuori intervallo. */
 function parseDelayMs(value: unknown): number | null {
   if (value === undefined || value === null) return 0;
@@ -446,6 +493,7 @@ export function resolveAutomation(
     id: row.id,
     name: row.name,
     isActive: row.is_active,
+    throttleMs: parseThrottleMs(row.throttle_ms),
   };
 
   const triggerType = TRIGGER_TYPES.find((type) => type === row.trigger_type);
@@ -660,6 +708,8 @@ export interface AutomationEngineDeps {
   intervalMs?: number;
   /** Orologio iniettabile per i test. */
   now?: () => Date;
+  /** Lock condiviso (test e diagnostica); assente → uno nuovo per il motore. */
+  lock?: KeyedAsyncLock;
 }
 
 export interface AutomationEngine {
@@ -705,6 +755,10 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
   const lastCronFired = new Map<string, string>();
   const lastSunFired = new Map<string, string>();
   const running = new Set<string>();
+  /** Serializza le esecuzioni della stessa regola sullo stesso dispositivo. */
+  const engineLock = deps.lock ?? new KeyedAsyncLock();
+  /** Timestamp (epoch ms) dell'ultima esecuzione automatica, per il cooldown. */
+  const lastExecutionTimestamps = new Map<string, number>();
   /** Anagrafica dei comandi: un dispositivo può essere comandato da un'azione. */
   const targets = new Map<string, CommandTarget>();
   /** Topic di comando dichiarati, dal più specifico: `cmnd/luce/Dimmer` → `cmnd/luce`. */
@@ -916,6 +970,7 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
     triggerSource: string,
     at: Date,
     bypassConditions: boolean,
+    onExecuted?: () => void,
   ): Promise<AutomationRunResult> {
     const receivedMs = Date.now();
     const skipResult = (error: string): AutomationRunResult => ({
@@ -947,6 +1002,10 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
       let error: string | null = null;
 
       if (conditionsMet) {
+        // Il timestamp si aggiorna **prima** di comandare i dispositivi: se
+        // un'azione fallisce la regola resta comunque "eseguita" e non
+        // ritenta in raffica sullo stesso relè.
+        onExecuted?.();
         for (const action of rule.actions) {
           if ((action.delayMs ?? 0) > 0) await sleep(action.delayMs ?? 0);
           const outcome =
@@ -1030,6 +1089,68 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
     }
   }
 
+  /** `true` se la regola ha eseguito troppo di recente per questo trigger. */
+  function isThrottled(rule: ResolvedAutomation, throttleMs: number): boolean {
+    if (throttleMs <= 0) return false;
+    const last = lastExecutionTimestamps.get(rule.id) ?? 0;
+    // Orologio reale, non quello delle condizioni: un orologio iniettato nei
+    // test non deve congelare la finestra di deduplicazione.
+    return Date.now() - last < throttleMs;
+  }
+
+  /**
+   * Esecuzione serializzata di una regola: lock per chiave, ricontrollo del
+   * cooldown **dopo** l'acquisizione (TOCTOU) ed esecuzione.
+   *
+   * Restituisce `null` quando il trigger è stato soppresso dalla finestra di
+   * deduplicazione: il chiamante non deve registrarlo come esecuzione. Un
+   * timeout di acquisizione o un errore inatteso diventano un risultato con
+   * `error`, così il messaggio MQTT non resta senza risposta.
+   */
+  async function runExclusive(
+    rule: ResolvedAutomation,
+    triggerSource: string,
+    at: Date,
+    bypassConditions: boolean,
+    lockKey: string,
+    throttleMs: number,
+  ): Promise<AutomationRunResult | null> {
+    if (isThrottled(rule, throttleMs)) return null;
+
+    const receivedMs = Date.now();
+    let release: (() => void) | null = null;
+
+    try {
+      release = await engineLock.acquire(lockKey, AUTOMATION_LOCK_TIMEOUT_MS);
+
+      // Ricontrollo post-acquisizione: chi era in coda ha letto il timestamp
+      // prima che il detentore precedente lo aggiornasse. È qui che si chiude
+      // la finestra TOCTOU.
+      if (isThrottled(rule, throttleMs)) return null;
+
+      return await runRule(rule, triggerSource, at, bypassConditions, () => {
+        lastExecutionTimestamps.set(rule.id, Date.now());
+      });
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      log?.warn(`automazioni: ${rule.name} (${rule.id}) non eseguita · ${message}`);
+      return {
+        automationId: rule.id,
+        automationName: rule.name,
+        triggerSource,
+        conditionsMet: false,
+        actions: [],
+        executionTimeMs: Date.now() - receivedMs,
+        error: message,
+        log: undefined,
+      };
+    } finally {
+      // Rilascio su ogni ramo di uscita: inclusi cooldown, timeout e azione
+      // fallita. `release()` è idempotente.
+      release?.();
+    }
+  }
+
   async function cleanupLogsOncePerHour(at: Date): Promise<void> {
     if (at.getTime() - lastCleanupAt < LOG_CLEANUP_INTERVAL_MS) return;
     lastCleanupAt = at.getTime();
@@ -1099,6 +1220,12 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
         }
       }
 
+      // Le regole sparite non devono lasciare il proprio timestamp nella mappa
+      // del cooldown: la cache è la fonte di verità.
+      for (const ruleId of [...lastExecutionTimestamps.keys()]) {
+        if (!cache.has(ruleId)) lastExecutionTimestamps.delete(ruleId);
+      }
+
       const wanted = new Set<string>();
       for (const rule of rules) {
         if (rule.triggerType === 'mqtt_state' && rule.trigger) {
@@ -1133,7 +1260,7 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
     },
 
     async tick(at = clock()) {
-      const runs: Promise<AutomationRunResult>[] = [];
+      const runs: Promise<AutomationRunResult | null>[] = [];
 
       for (const rule of cache.values()) {
         try {
@@ -1144,7 +1271,16 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
             const stamp = minuteStamp(at);
             if (lastCronFired.get(rule.id) === stamp) continue;
             lastCronFired.set(rule.id, stamp);
-            runs.push(runRule(rule, `cron:${cron.expression}`, at, false));
+            runs.push(
+              runExclusive(
+                rule,
+                `cron:${cron.expression}`,
+                at,
+                false,
+                automationLockKey(rule.id),
+                rule.throttleMs,
+              ),
+            );
             continue;
           }
 
@@ -1162,7 +1298,16 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
             const stamp = `${dateKey(at)}:${trigger.event}`;
             if (lastSunFired.get(rule.id) === stamp) continue;
             lastSunFired.set(rule.id, stamp);
-            runs.push(runRule(rule, `sun:${trigger.event}`, at, false));
+            runs.push(
+              runExclusive(
+                rule,
+                `sun:${trigger.event}`,
+                at,
+                false,
+                automationLockKey(rule.id),
+                rule.throttleMs,
+              ),
+            );
           }
         } catch (error) {
           // Isolamento: un trigger malformato non ferma gli altri.
@@ -1175,7 +1320,8 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
       }
 
       void cleanupLogsOncePerHour(at);
-      return Promise.all(runs);
+      const settled = await Promise.all(runs);
+      return settled.filter((result): result is AutomationRunResult => result !== null);
     },
 
     async handleMessage(topic, payload) {
@@ -1185,7 +1331,7 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
       }
 
       const at = clock();
-      const runs: Promise<AutomationRunResult>[] = [];
+      const runs: Promise<AutomationRunResult | null>[] = [];
 
       for (const rule of cache.values()) {
         if (!rule.isActive || rule.triggerType !== 'mqtt_state' || !rule.trigger) continue;
@@ -1204,10 +1350,20 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
         if (lastTriggerValues.get(rule.id) === signature) continue;
         lastTriggerValues.set(rule.id, signature);
 
-        runs.push(runRule(rule, `mqtt:${topic}`, at, false));
+        runs.push(
+          runExclusive(
+            rule,
+            `mqtt:${topic}`,
+            at,
+            false,
+            automationLockKey(rule.id),
+            rule.throttleMs,
+          ),
+        );
       }
 
-      return Promise.all(runs);
+      const settled = await Promise.all(runs);
+      return settled.filter((result): result is AutomationRunResult => result !== null);
     },
 
     async runTest(id) {
@@ -1220,7 +1376,22 @@ export function createAutomationEngine(deps: AutomationEngineDeps): AutomationEn
         throw Object.assign(new Error('Automazione non trovata'), { code: 'NOT_FOUND' });
       }
 
-      return runRule(rule, 'test', clock(), true);
+      // Anche il test manuale passa dal lock: non deve sovrapporsi a
+      // un'esecuzione reale sullo stesso relè. Non consuma il cooldown, che
+      // riguarda solo i trigger automatici.
+      let release: (() => void) | null = null;
+      try {
+        release = await engineLock.acquire(automationLockKey(rule.id), AUTOMATION_LOCK_TIMEOUT_MS);
+        return await runRule(rule, 'test', clock(), true);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : String(cause);
+        log?.warn(`automazioni: test di ${rule.name} (${rule.id}) non eseguito · ${message}`);
+        throw cause instanceof Error
+          ? cause
+          : Object.assign(new Error(message), { code: 'LOCK_TIMEOUT' });
+      } finally {
+        release?.();
+      }
     },
 
     rules() {
