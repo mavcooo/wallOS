@@ -12,6 +12,7 @@ import {
   type CameraStreamStatus,
   type CameraTransport,
 } from '@/lib/cameraStream';
+import { useHomeStore } from '@/store/homeStore';
 import type { CameraProtocol } from '@/types/device';
 
 const SNAPSHOT_INTERVAL_MS = 1_500;
@@ -21,7 +22,15 @@ export interface UseCameraStreamOptions {
   streamUrl: string;
   snapshotUrl?: string | undefined;
   protocol: CameraProtocol;
-  /** Dimmer kiosk attivo: il flusso viene chiuso, non solo messo in pausa. */
+  /**
+   * `false` = player smontato e risorse rilasciate (screensaver kiosk attivo).
+   * Omesso, il gate è lo stato del dimmer (`ui.screenDimmed` in HomeStore).
+   */
+  enabled?: boolean;
+  /**
+   * Sospensione decisa dal contenitore per un motivo diverso dal dimmer (es.
+   * modale a schermo intero aperta sopra la card): stessa pulizia di `enabled`.
+   */
   suspended?: boolean;
   /** Frequenza del fallback JPEG (default 1.5 s, cioè meno di 1 fps). */
   snapshotIntervalMs?: number;
@@ -71,11 +80,30 @@ export function useCameraStream({
   streamUrl,
   snapshotUrl,
   protocol,
+  enabled,
   suspended = false,
   snapshotIntervalMs = SNAPSHOT_INTERVAL_MS,
 }: UseCameraStreamOptions): UseCameraStreamResult {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
+  const peerRef = useRef<RTCPeerConnection | null>(null);
+  /**
+   * MediaStream remoto della sessione WHEP. Vive in un ref perché allo unmount
+   * React azzera `videoRef` **prima** delle cleanup degli effetti: senza
+   * questo riferimento le tracce resterebbero vive fino alla GC.
+   */
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  /** Ultimo nodo `<video>` montato: vedi l'effetto più sotto. */
+  const videoNodeRef = useRef<HTMLVideoElement | null>(null);
+  /**
+   * Lo standby del pannello vive in HomeStore (`ui.screenDimmed`), dove lo
+   * scrive `useKioskDimmer`. Qui si legge quello stato e non si istanzia un
+   * secondo `useKioskDimmer`: una istanza per ogni telecamera aggiungerebbe un
+   * timer di inattività e sei listener `window` a testa, e ciascuna potrebbe a
+   * sua volta mandare in standby l'intero pannello.
+   */
+  const screenDimmed = useHomeStore((state) => state.ui.screenDimmed);
   const [visible, setVisible] = useState(false);
   const [pageVisible, setPageVisible] = useState(
     () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
@@ -87,6 +115,82 @@ export function useCameraStream({
   const [retryToken, setRetryToken] = useState(0);
   const attemptRef = useRef(0);
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  /**
+   * Distruzione profonda del player: chiude la peer connection, distrugge
+   * l'istanza Hls, ferma ogni `MediaStreamTrack` (send/receive e sorgente del
+   * `<video>`) e svuota l'elemento video forzandone il reload, che è ciò che
+   * libera i buffer del decoder hardware. Idempotente: si può chiamare su ogni
+   * ramo di uscita senza sapere quale trasporto fosse attivo.
+   */
+  const teardownStream = useCallback(() => {
+    const peer = peerRef.current;
+    peerRef.current = null;
+    if (peer) {
+      // Ogni passo è isolato: un `getSenders` assente o che lancia non deve
+      // impedire `close()`, che è la parte che libera davvero la connessione.
+      try {
+        for (const sender of peer.getSenders?.() ?? []) sender.track?.stop();
+        for (const receiver of peer.getReceivers?.() ?? []) receiver.track?.stop();
+      } catch (err) {
+        console.warn('[useCameraStream] stop delle tracce WebRTC fallito:', err);
+      }
+      try {
+        peer.close();
+      } catch (err) {
+        console.warn('[useCameraStream] chiusura della RTCPeerConnection fallita:', err);
+      }
+    }
+
+    const hls = hlsRef.current;
+    hlsRef.current = null;
+    if (hls) {
+      try {
+        hls.detachMedia();
+      } catch (err) {
+        console.warn('[useCameraStream] detach di Hls fallito:', err);
+      }
+      try {
+        hls.destroy();
+      } catch (err) {
+        console.warn('[useCameraStream] distruzione di Hls fallita:', err);
+      }
+    }
+
+    const remote = remoteStreamRef.current;
+    remoteStreamRef.current = null;
+    if (remote) {
+      try {
+        for (const track of remote.getTracks()) track.stop();
+      } catch (err) {
+        console.warn('[useCameraStream] stop delle tracce remote fallito:', err);
+      }
+    }
+
+    // Allo unmount React azzera `videoRef` prima delle cleanup: il nodo resta
+    // comunque raggiungibile da `videoNodeRef` e viene svuotato lo stesso.
+    const video = videoRef.current ?? videoNodeRef.current;
+    if (!video) return;
+    try {
+      video.pause();
+      const source = video.srcObject;
+      if (typeof MediaStream !== 'undefined' && source instanceof MediaStream) {
+        for (const track of source.getTracks()) track.stop();
+      }
+      video.srcObject = null;
+      video.removeAttribute('src');
+      video.load();
+    } catch (err) {
+      console.warn('[useCameraStream] reset del video element fallito:', err);
+    }
+  }, []);
+
+  // Memorizza il nodo `<video>`: i ref di React vengono azzerati prima delle
+  // cleanup degli effetti, quindi la distruzione profonda non può fidarsi solo
+  // di `videoRef.current`.
+  useEffect(() => {
+    if (videoRef.current) videoNodeRef.current = videoRef.current;
+  });
 
   // Il flusso non viene nemmeno montato finché il widget non è visibile.
   useEffect(() => {
@@ -123,8 +227,8 @@ export function useCameraStream({
   // Uscendo dal viewport o entrando in standby non conserviamo l'indice di
   // fallback: al risveglio si ritenta la priorità più alta.
   useEffect(() => {
-    if (!visible || suspended) attemptRef.current = 0;
-  }, [visible, suspended]);
+    if (!visible || suspended || screenDimmed) attemptRef.current = 0;
+  }, [visible, suspended, screenDimmed]);
 
   const retry = useCallback(() => {
     attemptRef.current = 0;
@@ -145,7 +249,9 @@ export function useCameraStream({
     setRetryToken((value) => value + 1);
   }, []);
 
-  const active = Boolean(streamUrl) && visible && pageVisible && !suspended;
+  /** Gate del dimmer: l'opzione esplicita vince, altrimenti vale lo stato kiosk. */
+  const streamEnabled = enabled ?? !screenDimmed;
+  const active = Boolean(streamUrl) && streamEnabled && visible && pageVisible && !suspended;
 
   useEffect(() => {
     let disposed = false;
@@ -188,7 +294,9 @@ export function useCameraStream({
 
       const endpoint = normalizeStreamUrl(sourceUrl);
       const peer = new RTCPeerConnection();
+      peerRef.current = peer;
       const remote = new MediaStream();
+      remoteStreamRef.current = remote;
       const video = videoRef.current;
       const controller = new AbortController();
       let sessionUrl: string | null = null;
@@ -202,11 +310,8 @@ export function useCameraStream({
         if (disconnectTimer !== null) window.clearTimeout(disconnectTimer);
         peer.removeEventListener('track', onTrack);
         peer.removeEventListener('connectionstatechange', onState);
-        peer.close();
-        if (video) {
-          video.srcObject = null;
-          video.removeAttribute('src');
-        }
+        // Peer, tracce e buffer del <video> li libera `teardownStream`.
+        teardownStream();
         if (sessionUrl) {
           void fetch(sessionUrl, { method: 'DELETE', keepalive: true }).catch(() => {});
         }
@@ -306,7 +411,6 @@ export function useCameraStream({
       const video = videoRef.current;
       if (!video) throw new Error('Elemento video non disponibile');
       const source = normalizeStreamUrl(sourceUrl);
-      let hls: Hls | null = null;
       let cleaned = false;
       let settled = false;
 
@@ -314,10 +418,7 @@ export function useCameraStream({
         if (cleaned) return;
         cleaned = true;
         video.removeEventListener('error', onVideoError);
-        hls?.destroy();
-        hls = null;
-        video.removeAttribute('src');
-        video.load();
+        teardownStream();
       };
       registerCleanup(cleanup);
 
@@ -345,7 +446,7 @@ export function useCameraStream({
           maxBufferLength: 12,
           enableWorker: true,
         });
-        hls = player;
+        hlsRef.current = player;
         player.loadSource(source);
         player.attachMedia(video);
         player.on(HlsPlayer.Events.ERROR, (_event, data) => {
@@ -464,7 +565,10 @@ export function useCameraStream({
 
     const run = async () => {
       if (!active) {
-        setStatus(suspended ? 'suspended' : 'idle');
+        // Nessun trasporto deve sopravvivere a questo ramo, nemmeno se è nato
+        // dopo la cleanup dell'effetto precedente.
+        teardownStream();
+        setStatus(suspended || !streamEnabled ? 'suspended' : 'idle');
         setTransport(null);
         setImageUrl(null);
         return;
@@ -504,6 +608,7 @@ export function useCameraStream({
     };
   }, [
     active,
+    streamEnabled,
     suspended,
     streamUrl,
     snapshotUrl,
@@ -511,16 +616,19 @@ export function useCameraStream({
     snapshotIntervalMs,
     retryToken,
     handleImageError,
+    teardownStream,
   ]);
 
   // Cambio di visibilità/dimmer: la cleanup dell'effetto chiude subito peer,
-  // HLS e timer. Qui aggiorniamo solo lo stato mostrato dalla card.
+  // HLS e timer. Allo unmount la distruzione è profonda anche per i trasporti
+  // che non hanno registrato una cleanup (import di hls.js ancora in volo).
   useEffect(
     () => () => {
       cleanupRef.current?.();
       cleanupRef.current = null;
+      teardownStream();
     },
-    [],
+    [teardownStream],
   );
 
   return {

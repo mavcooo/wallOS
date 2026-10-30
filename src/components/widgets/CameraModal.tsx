@@ -1,6 +1,7 @@
 import {
   Camera,
   Loader2,
+  Pause,
   PictureInPicture2,
   RefreshCw,
   Volume2,
@@ -44,7 +45,7 @@ function CameraModalContent({
     streamUrl: stream.url,
     snapshotUrl: stream.snapshotUrl,
     protocol: stream.protocol,
-    suspended: dimmed,
+    enabled: !dimmed,
   });
   const [muted, setMuted] = useState(true);
   const [pipActive, setPipActive] = useState(false);
@@ -149,7 +150,9 @@ function CameraModalContent({
         ? t('camera.offline')
         : camera.status === 'reconnecting'
           ? t('camera.reconnecting')
-          : t('camera.connecting');
+          : camera.status === 'suspended'
+            ? t('camera.suspended')
+            : t('camera.connecting');
 
   return (
     <DialogContent
@@ -184,7 +187,7 @@ function CameraModalContent({
               onError={camera.handleImageError}
               draggable={false}
             />
-          ) : camera.transport === null ? (
+          ) : camera.transport === null && camera.status !== 'suspended' ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <Camera className="size-10 text-fg-subtle" aria-hidden />
             </div>
@@ -193,6 +196,14 @@ function CameraModalContent({
           {camera.status === 'connecting' || camera.status === 'reconnecting' ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30">
               <Loader2 className="size-8 animate-spin text-white/85" aria-hidden />
+            </div>
+          ) : camera.status === 'suspended' ? (
+            // Standby kiosk: pausa, non un caricamento in corso.
+            <div
+              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+              data-testid="camera-modal-paused"
+            >
+              <Pause className="size-8 text-white/85" aria-hidden />
             </div>
           ) : null}
 

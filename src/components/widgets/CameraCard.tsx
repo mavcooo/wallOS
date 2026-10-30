@@ -1,4 +1,4 @@
-import { Camera, Expand, Loader2, RefreshCw, Star, WifiOff } from 'lucide-react';
+import { Camera, Expand, Loader2, Pause, RefreshCw, Star, WifiOff } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -55,7 +55,11 @@ function StatusBadge({
       ? t('camera.offline')
       : status === 'reconnecting'
         ? t('camera.reconnecting')
-        : t('camera.connecting');
+        : // Standby kiosk: non è una connessione in corso, il flusso è spento
+          // di proposito. Dire "Connessione…" farebbe sembrare lenta la rete.
+          status === 'suspended'
+          ? t('camera.suspended')
+          : t('camera.connecting');
 
   return (
     <span
@@ -97,7 +101,10 @@ export const CameraCard = memo(function CameraCard({
     streamUrl: stream.url,
     snapshotUrl: stream.snapshotUrl,
     protocol: stream.protocol,
-    suspended: dimmed || open,
+    // Dimmer kiosk: il flusso deve essere deallocato, non solo nascosto.
+    enabled: !dimmed,
+    // Modale aperta sopra la card: la card non deve decodificare in parallelo.
+    suspended: open,
   });
 
   const offline =
@@ -136,7 +143,7 @@ export const CameraCard = memo(function CameraCard({
               onError={camera.handleImageError}
               draggable={false}
             />
-          ) : camera.transport === null ? (
+          ) : camera.transport === null && camera.status !== 'suspended' ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-panel-2">
               <Camera className="size-8 text-fg-subtle" aria-hidden />
             </div>
@@ -152,6 +159,14 @@ export const CameraCard = memo(function CameraCard({
           {camera.status === 'connecting' || camera.status === 'reconnecting' ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/35">
               <Loader2 className="size-6 animate-spin text-white/85" aria-hidden />
+            </div>
+          ) : camera.status === 'suspended' ? (
+            // Standby: non c'è nulla in caricamento, quindi nessuno spinner.
+            <div
+              className="pointer-events-none absolute inset-0 flex items-center justify-center"
+              data-testid="camera-paused"
+            >
+              <Pause className="size-6 text-white/85" aria-hidden />
             </div>
           ) : null}
 

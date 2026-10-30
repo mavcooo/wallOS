@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,6 +30,7 @@ const device = deviceOf('camera-outdoor-gate', 'camera');
 
 beforeEach(() => {
   localStorage.clear();
+  camera.status = 'live';
   useHomeStore.setState((state) => ({ ui: { ...state.ui, screenDimmed: false } }));
 });
 
@@ -40,6 +41,33 @@ describe('CameraCard', () => {
     expect(screen.getByText(device.name)).toBeInTheDocument();
     expect(screen.getByText('LIVE')).toBeInTheDocument();
     expect(screen.getByText('Esterno · WebRTC')).toBeInTheDocument();
+  });
+
+  it('mostra lo stato di pausa, non “Connessione…”, con il flusso sospeso', async () => {
+    camera.status = 'suspended';
+    render(<CameraCard device={device} roomName="Esterno" />);
+
+    expect(screen.getByText('In pausa')).toBeInTheDocument();
+    expect(screen.queryByText('Connessione…')).not.toBeInTheDocument();
+    // Icona di pausa al posto dello spinner di caricamento.
+    expect(screen.getByTestId('camera-paused')).toBeInTheDocument();
+
+    await userEvent.click(
+      screen.getByRole('button', { name: `Apri la telecamera ${device.name}` }),
+    );
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('In pausa')).toBeInTheDocument();
+    expect(within(dialog).getByTestId('camera-modal-paused')).toBeInTheDocument();
+    expect(screen.queryByText('Connessione…')).not.toBeInTheDocument();
+  });
+
+  it('mostra lo spinner, non l’icona di pausa, mentre connette', () => {
+    camera.status = 'connecting';
+    render(<CameraCard device={device} roomName="Esterno" />);
+
+    expect(screen.getByText('Connessione…')).toBeInTheDocument();
+    expect(screen.queryByTestId('camera-paused')).not.toBeInTheDocument();
   });
 
   it('apre la modale fullscreen e la chiude dal controllo touch', async () => {
