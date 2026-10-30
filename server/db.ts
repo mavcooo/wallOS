@@ -373,6 +373,8 @@ export interface AutomationFields {
   /** Altri gruppi di condizioni (OR fra i gruppi). */
   conditionGroups: unknown;
   actions: unknown;
+  /** Cooldown fra due esecuzioni della stessa regola, in ms (`0` = nessuno). */
+  throttleMs: number;
 }
 
 /** Esito di una valutazione, pronto per `automation_logs`. */
@@ -1982,8 +1984,8 @@ export class Database {
     const { rows } = await this.client.query<AutomationRow>(
       `INSERT INTO automations (
          name, description, is_active, trigger_type, trigger_config, conditions,
-         condition_groups, actions
-       ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb)
+         condition_groups, actions, throttle_ms
+       ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::jsonb, $8::jsonb, $9)
        RETURNING *`,
       [
         rule.name,
@@ -1994,6 +1996,7 @@ export class Database {
         JSON.stringify(rule.conditions),
         JSON.stringify(rule.conditionGroups),
         JSON.stringify(rule.actions),
+        rule.throttleMs,
       ],
     );
     return rows[0];
@@ -2009,7 +2012,7 @@ export class Database {
          name = $2, description = $3, is_active = $4, trigger_type = $5,
          trigger_config = $6::jsonb, conditions = $7::jsonb,
          condition_groups = $8::jsonb, actions = $9::jsonb,
-         updated_at = now()
+         throttle_ms = $10, updated_at = now()
        WHERE id = $1::uuid
        RETURNING *`,
       [
@@ -2022,6 +2025,7 @@ export class Database {
         JSON.stringify(rule.conditions),
         JSON.stringify(rule.conditionGroups),
         JSON.stringify(rule.actions),
+        rule.throttleMs,
       ],
     );
     return rows[0];

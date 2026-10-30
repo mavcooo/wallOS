@@ -19,6 +19,8 @@ import {
 } from './migrate.js';
 
 const REAL_MIGRATION_DIR = fileURLToPath(new URL('./migrations', import.meta.url));
+/** Ultima migrazione reale: è quella che `migrateDown` annulla per prima. */
+const THROTTLE_MIGRATION = '20261030120000_automation-throttle.sql';
 const noop = (): void => {};
 
 const openEngines: PGlite[] = [];
@@ -70,6 +72,14 @@ async function tableNames(connection: MigrationConnection, table: string): Promi
     [table],
   );
   return rows.map((row) => row.table_name);
+}
+
+async function columnNames(connection: MigrationConnection, table: string): Promise<string[]> {
+  const { rows } = await connection.query<{ column_name: string }>(
+    'SELECT column_name FROM information_schema.columns WHERE table_name = $1',
+    [table],
+  );
+  return rows.map((row) => row.column_name);
 }
 
 async function ledgerVersions(connection: MigrationConnection): Promise<string[]> {
@@ -198,17 +208,18 @@ describe('migrateDown · rollback reale', () => {
 
     const rolled = await migrateDown({ connection, dir: REAL_MIGRATION_DIR, log: noop });
 
-    expect(rolled.rolledBack).toBe('009_security_system.sql');
-    expect(await tableNames(connection, 'security_events')).toEqual([]);
+    expect(rolled.rolledBack).toBe(THROTTLE_MIGRATION);
+    expect(await columnNames(connection, 'automations')).not.toContain('throttle_ms');
     // Le migrazioni precedenti restano applicate: si annulla solo l'ultima.
+    expect(await tableNames(connection, 'security_events')).toEqual(['security_events']);
     expect(await tableNames(connection, 'floors')).toEqual(['floors']);
     expect(await tableNames(connection, 'db_health_checks')).toEqual(['db_health_checks']);
-    expect(await ledgerVersions(connection)).not.toContain('009_security_system.sql');
+    expect(await ledgerVersions(connection)).not.toContain(THROTTLE_MIGRATION);
 
     // Riapplicare è possibile: il ledger è la fonte dell'ordine, non i file.
     const again = await migrateUp({ connection, dir: REAL_MIGRATION_DIR, log: noop });
-    expect(again.applied).toEqual(['009_security_system.sql']);
-    expect(await tableNames(connection, 'security_events')).toEqual(['security_events']);
+    expect(again.applied).toEqual([THROTTLE_MIGRATION]);
+    expect(await columnNames(connection, 'automations')).toContain('throttle_ms');
   });
 
   it('senza sezione DOWN solleva un errore esplicito e non tocca schema né ledger', async () => {

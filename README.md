@@ -1500,6 +1500,7 @@ applicati dal runner di `server/migrate.ts`:
 | `007_add_floorplan_schema.sql` | Planimetria: `floors` e posizionamento dei device sul disegno |
 | `008_add_db_health_checks.sql` | Storico dei controlli di salute del database (`db_health_checks`) |
 | `009_security_system.sql` | Impianto di sicurezza: zone, sensori armabili ed eventi con presa in carico |
+| `20261030120000_automation-throttle.sql` | Deduplicazione delle automazioni: `throttle_ms` (cooldown fra due esecuzioni della stessa regola) |
 
 Le migrazioni `001`–`009` appartengono alla fase legacy a prefisso sequenziale e restano
 immutabili; **ogni migrazione successiva** deve usare il formato

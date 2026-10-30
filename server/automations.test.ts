@@ -6,6 +6,10 @@ import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { Database } from './db.js';
 import type { MqttLink } from './mqttClient.js';
+import {
+  DEFAULT_AUTOMATION_THROTTLE_MS,
+  MAX_AUTOMATION_THROTTLE_MS,
+} from './services/automationEngine.js';
 import type { AuthConfig } from './types.js';
 
 const PASSWORD = 'admin-password-123';
@@ -128,6 +132,7 @@ type AutomationJson = {
   conditions: { type: string; start?: string }[];
   conditionGroups: { type: string }[][];
   actions: { type: string; topic?: string; payload?: string; scenarioId?: string; delayMs: number }[];
+  throttleMs: number;
   lastRun: { conditionsMet: boolean; executionTimeMs: number } | null;
 };
 
@@ -547,5 +552,99 @@ describe('automazioni · esecuzione di prova e log', () => {
       cookies,
     });
     expect((logs.json() as { logs: unknown[] }).logs).toHaveLength(2);
+  });
+});
+
+describe('automazioni · throttle_ms', () => {
+  it('applica il default del motore quando il client non invia throttleMs', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const created = await createRule(app, cookies);
+    expect(created.throttleMs).toBe(DEFAULT_AUTOMATION_THROTTLE_MS);
+
+    // Non è solo il DTO: la colonna è scritta, e la lista la rilegge.
+    const list = await app.inject({ method: 'GET', url: '/api/automations', cookies });
+    const listed = (list.json() as { automations: AutomationJson[] }).automations[0];
+    expect(listed?.throttleMs).toBe(DEFAULT_AUTOMATION_THROTTLE_MS);
+  });
+
+  it('salva 0 (nessuna deduplicazione) in creazione e lo mantiene in modifica', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const created = await createRule(app, cookies, { ...RULE_BODY, throttleMs: 0 });
+    expect(created.throttleMs).toBe(0);
+
+    const update = await app.inject({
+      method: 'PUT',
+      url: `/api/automations/${created.id}`,
+      cookies,
+      payload: { ...RULE_BODY, throttleMs: 2500 },
+    });
+    expect(update.statusCode).toBe(200);
+    expect((update.json() as { automation: AutomationJson }).automation.throttleMs).toBe(2500);
+
+    // Una regola che non lo invia più torna al default, non conserva il vecchio.
+    const reset = await app.inject({
+      method: 'PUT',
+      url: `/api/automations/${created.id}`,
+      cookies,
+      payload: RULE_BODY,
+    });
+    expect((reset.json() as { automation: AutomationJson }).automation.throttleMs).toBe(
+      DEFAULT_AUTOMATION_THROTTLE_MS,
+    );
+  });
+
+  it('accetta il tetto massimo esatto del motore', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const created = await createRule(app, cookies, {
+      ...RULE_BODY,
+      throttleMs: MAX_AUTOMATION_THROTTLE_MS,
+    });
+    expect(created.throttleMs).toBe(MAX_AUTOMATION_THROTTLE_MS);
+  });
+
+  it.each([
+    ['negativo', -1],
+    ['oltre il tetto', MAX_AUTOMATION_THROTTLE_MS + 1],
+    ['non intero', 12.5],
+  ])('rifiuta un throttleMs %s con 400 INVALID_BODY', async (_label, throttleMs) => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/automations',
+      cookies,
+      payload: { ...RULE_BODY, throttleMs },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = response.json() as { error: string; field?: string };
+    expect(body.error).toBe('INVALID_BODY');
+    // `details` viene spalmato nella risposta: il campo colpevole è in chiaro.
+    expect(body.field).toBe('throttleMs');
+
+    // La regola non è entrata nel database.
+    const list = await app.inject({ method: 'GET', url: '/api/automations', cookies });
+    expect((list.json() as { automations: unknown[] }).automations).toEqual([]);
+  });
+
+  it('rifiuta un throttleMs non numerico', async () => {
+    const { app } = await setup();
+    const cookies = await login(app);
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/automations',
+      cookies,
+      payload: { ...RULE_BODY, throttleMs: '150' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect((response.json() as { error: string }).error).toBe('INVALID_BODY');
   });
 });

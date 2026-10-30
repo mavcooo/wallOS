@@ -7,7 +7,9 @@ import { HttpError } from '../http.js';
 import { requireAuth, requireRole } from '../session.js';
 import { isValidCron } from '../services/cron.js';
 import {
+  DEFAULT_AUTOMATION_THROTTLE_MS,
   describeAutomation,
+  MAX_AUTOMATION_THROTTLE_MS,
   resolveAutomation,
   type AutomationRunResult,
 } from '../services/automationEngine.js';
@@ -164,6 +166,20 @@ const ruleBodySchema = z
     name: z.string().trim().min(1).max(128),
     description: z.string().trim().max(2000).nullish(),
     isActive: z.boolean().default(true),
+    /**
+     * Cooldown fra due esecuzioni della stessa regola: il valore che sopprime
+     * i burst di messaggi MQTT concorrenti. `0` lo disabilita, oltre il tetto
+     * del motore il comando arriverebbe quando non serve più.
+     */
+    throttleMs: z
+      .number()
+      .int('throttleMs deve essere un numero intero di millisecondi')
+      .min(0, 'throttleMs non può essere negativo')
+      .max(
+        MAX_AUTOMATION_THROTTLE_MS,
+        `throttleMs non può superare ${MAX_AUTOMATION_THROTTLE_MS} ms (10 minuti)`,
+      )
+      .default(DEFAULT_AUTOMATION_THROTTLE_MS),
     /** Primo gruppo di condizioni. */
     conditions: z.array(conditionSchema).max(MAX_CONDITIONS).default([]),
     /** Altri gruppi, in OR con il primo e fra loro. */
@@ -195,6 +211,8 @@ interface AutomationDto {
   conditions: AutomationCondition[];
   conditionGroups: AutomationCondition[][];
   actions: unknown;
+  /** Finestra di deduplicazione effettiva applicata dal motore, in ms. */
+  throttleMs: number;
   lastTriggeredAt: number | null;
   executionCount: number;
   createdAt: number;
@@ -222,6 +240,7 @@ function toDto(row: AutomationRow | AutomationWithLastLogRow, config: AuthConfig
     conditions: resolved.conditions,
     conditionGroups: resolved.conditionGroups,
     actions: resolved.actions,
+    throttleMs: resolved.throttleMs,
     lastTriggeredAt:
       row.last_triggered_at === null ? null : timestampMs(row.last_triggered_at) || null,
     executionCount: Number(row.execution_count),
@@ -325,6 +344,7 @@ export function registerAutomationRoutes(app: FastifyInstance, deps: AutomationD
         conditions: body.conditions,
         conditionGroups: body.conditionGroups,
         actions: body.actions,
+        throttleMs: body.throttleMs,
       });
       if (!created) throw new HttpError(500, 'INTERNAL_ERROR', 'Automazione non creata');
 
@@ -351,6 +371,7 @@ export function registerAutomationRoutes(app: FastifyInstance, deps: AutomationD
         conditions: body.conditions,
         conditionGroups: body.conditionGroups,
         actions: body.actions,
+        throttleMs: body.throttleMs,
       });
       if (!updated) throw new HttpError(404, 'AUTOMATION_NOT_FOUND', 'Automazione non trovata');
 

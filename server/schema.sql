@@ -162,10 +162,11 @@ CREATE TABLE IF NOT EXISTS climate_runtime_states (
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Motore di automazioni (vedi migrations/004_automations.sql e
--- migrations/005_automation_condition_groups.sql): Trigger → Conditions →
--- Actions. `trigger_config`, `conditions`, `condition_groups` e `actions` sono
--- JSONB, validati da Zod nelle route; il motore ne tiene una copia in memoria.
+-- Motore di automazioni (vedi migrations/004_automations.sql,
+-- migrations/005_automation_condition_groups.sql e
+-- migrations/20261030120000_automation-throttle.sql): Trigger → Conditions → Actions.
+-- `trigger_config`, `conditions`, `condition_groups` e `actions` sono JSONB,
+-- validati da Zod nelle route; il motore ne tiene una copia in memoria.
 CREATE TABLE IF NOT EXISTS automations (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name              VARCHAR(128) NOT NULL,
@@ -180,6 +181,11 @@ CREATE TABLE IF NOT EXISTS automations (
   condition_groups  JSONB NOT NULL DEFAULT '[]'::jsonb,
   -- Comandi MQTT e/o scenari, eseguiti in sequenza.
   actions           JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- Finestra minima fra due esecuzioni della stessa regola: sopprime i burst
+  -- di messaggi MQTT (0 = nessuna deduplicazione, max 600000 ms).
+  throttle_ms       INTEGER NOT NULL DEFAULT 150
+                      CONSTRAINT automations_throttle_ms_range
+                      CHECK (throttle_ms BETWEEN 0 AND 600000),
   last_triggered_at TIMESTAMPTZ,
   execution_count   INTEGER NOT NULL DEFAULT 0,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
